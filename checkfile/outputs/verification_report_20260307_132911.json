@@ -1,0 +1,740 @@
+{
+  "system_config": {
+    "system_name": "Korean Stock Trading System",
+    "version": "1.0.0",
+    "market": "KOSPI",
+    "architecture_type": "DUAL_PROCESS",
+    "api_provider": "KIS",
+    "target_latency_ms": 100.0,
+    "target_tps": 10,
+    "max_single_order_ratio": 0.05,
+    "max_daily_loss_ratio": 0.02,
+    "max_position_ratio": 0.2,
+    "price_deviation_limit": 0.03,
+    "slippage_bp": 5,
+    "backtest_start_date": "2015-01-01",
+    "backtest_end_date": "2024-12-31",
+    "include_delisted": true,
+    "max_drawdown_limit": 0.3
+  },
+  "summary": {
+    "overall_status": "WARNING",
+    "total_tests": 37,
+    "passed": 29,
+    "failed": 0,
+    "warnings": 3,
+    "skipped": 5,
+    "pass_rate": "78.4%",
+    "is_deployment_ready": false,
+    "start_time": "2026-03-07T13:29:11.003040",
+    "end_time": "2026-03-07T13:29:11.005040"
+  },
+  "phases": {
+    "PLANNING": {
+      "phase_name": "Phase 1: Planning",
+      "passed": 2,
+      "failed": 0,
+      "warnings": 2,
+      "skipped": 0,
+      "total": 4,
+      "pass_rate": "50.0%",
+      "is_phase_passed": true,
+      "results": [
+        {
+          "item_name": "OS compatibility",
+          "status": "PASSED",
+          "phase": "Phase 1: Planning",
+          "description": "Check if runtime environment supports broker/API stack.",
+          "criteria": "Windows 10+ 64-bit",
+          "actual_value": "Windows 10.0.22631 (64bit)",
+          "expected_value": "Windows 10+ (64-bit)",
+          "message": "Compatible runtime",
+          "timestamp": "2026-03-07T13:29:11.003040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "checkpoint": "pre_open",
+            "critical": true
+          }
+        },
+        {
+          "item_name": "Cost structure",
+          "status": "WARNING",
+          "phase": "Phase 1: Planning",
+          "description": "Validate break-even expectation with taxes/fees/slippage.",
+          "criteria": "BEP < 1.0%",
+          "actual_value": "BEP=0.537%",
+          "expected_value": "< 1.0%",
+          "message": "Round-trip with slippage=0.537%",
+          "timestamp": "2026-03-07T13:29:11.003040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "checkpoint": "signal_to_order",
+            "critical": false
+          }
+        },
+        {
+          "item_name": "Architecture suitability",
+          "status": "WARNING",
+          "phase": "Phase 1: Planning",
+          "description": "Check architecture choice against API/provider constraints.",
+          "criteria": "Suitability score >= 60",
+          "actual_value": "DUAL_PROCESS (90/100)",
+          "expected_value": "REST_64BIT",
+          "message": "Viable but not optimal",
+          "timestamp": "2026-03-07T13:29:11.003040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "checkpoint": "pre_open",
+            "critical": false
+          }
+        },
+        {
+          "item_name": "API rate-limit compliance",
+          "status": "PASSED",
+          "phase": "Phase 1: Planning",
+          "description": "Check target order/query frequency against provider limits.",
+          "criteria": "Target TPS <= provider TPS (20.00)",
+          "actual_value": "target_tps=10.0",
+          "expected_value": "<= 20.00",
+          "message": "utilization=50.0%",
+          "timestamp": "2026-03-07T13:29:11.003040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "checkpoint": "pre_open",
+            "critical": true,
+            "api_provider": "KIS"
+          }
+        }
+      ]
+    },
+    "DESIGN": {
+      "phase_name": "Phase 2: Design",
+      "passed": 0,
+      "failed": 0,
+      "warnings": 0,
+      "skipped": 4,
+      "total": 4,
+      "pass_rate": "0.0%",
+      "is_phase_passed": false,
+      "results": [
+        {
+          "item_name": "Process isolation",
+          "status": "SKIPPED",
+          "phase": "Phase 2: Design",
+          "description": "Validate watchdog detection and isolation behavior.",
+          "criteria": "watchdog_detect_time_ms < 1000.0",
+          "actual_value": "N/A",
+          "expected_value": "Input evidence required",
+          "message": "No watchdog measurement provided.",
+          "timestamp": "2026-03-07T13:29:11.003040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "checkpoint": "pre_open",
+            "critical": false
+          }
+        },
+        {
+          "item_name": "Message queue performance",
+          "status": "SKIPPED",
+          "phase": "Phase 2: Design",
+          "description": "Validate market-data messaging latency.",
+          "criteria": "lag_ms < 10.0 and dropped_messages == 0",
+          "actual_value": "N/A",
+          "expected_value": "Input evidence required",
+          "message": "No queue lag/drop measurements provided.",
+          "timestamp": "2026-03-07T13:29:11.003040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "checkpoint": "pre_open",
+            "critical": false
+          }
+        },
+        {
+          "item_name": "DB schema efficiency",
+          "status": "SKIPPED",
+          "phase": "Phase 2: Design",
+          "description": "Validate query performance for historical slices.",
+          "criteria": "query_response_ms < 200.0",
+          "actual_value": "N/A",
+          "expected_value": "Input evidence required",
+          "message": "No DB query benchmark provided.",
+          "timestamp": "2026-03-07T13:29:11.003040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "checkpoint": "pre_open",
+            "critical": false
+          }
+        },
+        {
+          "item_name": "Module separation",
+          "status": "SKIPPED",
+          "phase": "Phase 2: Design",
+          "description": "Validate architectural module decomposition.",
+          "criteria": "All required modules explicitly defined",
+          "actual_value": "N/A",
+          "expected_value": "Input evidence required",
+          "message": "No module-definition evidence provided.",
+          "timestamp": "2026-03-07T13:29:11.003040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "checkpoint": "pre_open",
+            "critical": false
+          }
+        }
+      ]
+    },
+    "DATA": {
+      "phase_name": "Phase 3: Data",
+      "passed": 3,
+      "failed": 0,
+      "warnings": 0,
+      "skipped": 1,
+      "total": 4,
+      "pass_rate": "75.0%",
+      "is_phase_passed": false,
+      "results": [
+        {
+          "item_name": "Survivorship bias",
+          "status": "SKIPPED",
+          "phase": "Phase 3: Data",
+          "description": "Weighted survivorship-bias check with critical/normal/period gates.",
+          "criteria": "universe_size >= 500 and scope=FULL_UNIVERSE",
+          "actual_value": "N/A",
+          "expected_value": "Input evidence required",
+          "message": "Evidence scope insufficient: universe_size=16 (<500)",
+          "timestamp": "2026-03-07T13:29:11.004040",
+          "execution_time_ms": 0.9996891021728516,
+          "metadata": {
+            "checkpoint": "signal_to_order",
+            "critical": true,
+            "universe_size": 16,
+            "min_universe_size_required": 500,
+            "input_scope": "CANDIDATE_SAMPLE",
+            "required_input_scope": "FULL_UNIVERSE"
+          }
+        },
+        {
+          "item_name": "Look-ahead bias",
+          "status": "PASSED",
+          "phase": "Phase 3: Data",
+          "description": "Verify signal time never precedes data availability time.",
+          "criteria": "violations == 0",
+          "actual_value": "violations=0/2 (0.00%)",
+          "expected_value": "0 violations",
+          "message": "No look-ahead detected",
+          "timestamp": "2026-03-07T13:29:11.004040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "checkpoint": "signal_to_order",
+            "critical": true
+          }
+        },
+        {
+          "item_name": "Data integrity",
+          "status": "PASSED",
+          "phase": "Phase 3: Data",
+          "description": "Validate OHLCV consistency rules.",
+          "criteria": "100% records valid",
+          "actual_value": "valid_rate=100.00% invalid=0",
+          "expected_value": "invalid=0",
+          "message": "OHLCV integrity clean",
+          "timestamp": "2026-03-07T13:29:11.004040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "error_types": {},
+            "checkpoint": "signal_to_order",
+            "critical": true
+          }
+        },
+        {
+          "item_name": "Adjusted price handling",
+          "status": "PASSED",
+          "phase": "Phase 3: Data",
+          "description": "Validate adjustment pipeline for splits/dividends/corporate actions.",
+          "criteria": "all required adjustment checks are true",
+          "actual_value": "4/4 passed",
+          "expected_value": "all passed",
+          "message": "Adjustment handling complete",
+          "timestamp": "2026-03-07T13:29:11.004040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "checklist": {
+              "split_adjusted": true,
+              "dividend_adjusted": true,
+              "corporate_action_adjusted": true,
+              "raw_price_preserved": true
+            },
+            "checkpoint": "signal_to_order",
+            "critical": false
+          }
+        }
+      ]
+    },
+    "STRATEGY": {
+      "phase_name": "Phase 4: Strategy",
+      "passed": 4,
+      "failed": 0,
+      "warnings": 1,
+      "skipped": 0,
+      "total": 5,
+      "pass_rate": "80.0%",
+      "is_phase_passed": true,
+      "results": [
+        {
+          "item_name": "Overfitting",
+          "status": "PASSED",
+          "phase": "Phase 4: Strategy",
+          "description": "Compare in-sample and out-of-sample robustness.",
+          "criteria": "Sharpe delta <= 35% and OOS Sharpe >= 1.0",
+          "actual_value": "IS=1.800, OOS=1.400, delta=22.22%",
+          "expected_value": "delta <= 35%, OOS >= 1.0",
+          "message": "Caution: overfitting suspicion",
+          "timestamp": "2026-03-07T13:29:11.004040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "checkpoint": "signal_to_order",
+            "critical": false,
+            "overfit_severity": "CAUTION"
+          }
+        },
+        {
+          "item_name": "Randomness test",
+          "status": "PASSED",
+          "phase": "Phase 4: Strategy",
+          "description": "Check whether strategy outperforms random baseline.",
+          "criteria": "z_score > 1.96",
+          "actual_value": "strategy=0.1500, z=8.854",
+          "expected_value": "> 1.96",
+          "message": "Statistically significant edge",
+          "timestamp": "2026-03-07T13:29:11.004040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "checkpoint": "signal_to_order",
+            "critical": false
+          }
+        },
+        {
+          "item_name": "Max drawdown",
+          "status": "WARNING",
+          "phase": "Phase 4: Strategy",
+          "description": "Validate worst drawdown against configured risk limit.",
+          "criteria": "|MDD| <= 30.0%",
+          "actual_value": "observed_mdd=-25.00%",
+          "expected_value": "<= 30.00%",
+          "message": "Drawdown within limit",
+          "timestamp": "2026-03-07T13:29:11.004040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "checkpoint": "signal_to_order",
+            "critical": true
+          }
+        },
+        {
+          "item_name": "Slippage modeling",
+          "status": "PASSED",
+          "phase": "Phase 4: Strategy",
+          "description": "Check configured slippage against market minimum recommendation.",
+          "criteria": "slippage_bp >= 3",
+          "actual_value": "configured=5bp",
+          "expected_value": ">= 3bp",
+          "message": "Slippage assumption acceptable",
+          "timestamp": "2026-03-07T13:29:11.004040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "checkpoint": "signal_to_order",
+            "critical": false
+          }
+        },
+        {
+          "item_name": "Liquidity constraints",
+          "status": "PASSED",
+          "phase": "Phase 4: Strategy",
+          "description": "Validate order sizing relative to traded volume.",
+          "criteria": "max_order_volume_ratio <= 5%",
+          "actual_value": "3.00%",
+          "expected_value": "<= 5.00%",
+          "message": "Liquidity constraint respected",
+          "timestamp": "2026-03-07T13:29:11.004040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "checkpoint": "pre_order_send",
+            "critical": true
+          }
+        }
+      ]
+    },
+    "EXECUTION": {
+      "phase_name": "Phase 5: Execution",
+      "passed": 5,
+      "failed": 0,
+      "warnings": 0,
+      "skipped": 0,
+      "total": 5,
+      "pass_rate": "100.0%",
+      "is_phase_passed": true,
+      "results": [
+        {
+          "item_name": "Partial-fill handling",
+          "status": "PASSED",
+          "phase": "Phase 5: Execution",
+          "description": "Validate partial fill state/accounting synchronization.",
+          "criteria": "actual filled qty/status must match expected",
+          "actual_value": "status=OrderStatus.PARTIAL_FILLED, qty=30",
+          "expected_value": "status=OrderStatus.PARTIAL_FILLED, qty=30",
+          "message": "Partial fill handling correct",
+          "timestamp": "2026-03-07T13:29:11.004040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "checkpoint": "post_close",
+            "critical": true
+          }
+        },
+        {
+          "item_name": "Order rejection handling",
+          "status": "PASSED",
+          "phase": "Phase 5: Execution",
+          "description": "Validate broker rejection scenarios and state updates.",
+          "criteria": "required rejection codes are handled with expected final status",
+          "actual_value": "issues=0",
+          "expected_value": "issues=0",
+          "message": "Rejection handling complete",
+          "timestamp": "2026-03-07T13:29:11.004040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "issues": [],
+            "checkpoint": "pre_order_send",
+            "critical": true
+          }
+        },
+        {
+          "item_name": "Network disconnection handling",
+          "status": "PASSED",
+          "phase": "Phase 5: Execution",
+          "description": "Validate fail-safe behavior under network outage.",
+          "criteria": "reconnect <= 5000.0ms and all emergency actions true",
+          "actual_value": "reconnect=3500.0ms, checklist=4/4",
+          "expected_value": "within threshold and all true",
+          "message": "Outage handling acceptable",
+          "timestamp": "2026-03-07T13:29:11.004040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "checkpoint": "pre_order_send",
+            "critical": true
+          }
+        },
+        {
+          "item_name": "Order state machine",
+          "status": "PASSED",
+          "phase": "Phase 5: Execution",
+          "description": "Validate state-transition logs for order lifecycle.",
+          "criteria": "all observed transitions must be in allowed transition map",
+          "actual_value": "invalid_transitions=0",
+          "expected_value": "0",
+          "message": "State transitions valid",
+          "timestamp": "2026-03-07T13:29:11.004040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "invalid_transitions": [],
+            "checkpoint": "pre_order_send",
+            "critical": true
+          }
+        },
+        {
+          "item_name": "API error-code handling",
+          "status": "PASSED",
+          "phase": "Phase 5: Execution",
+          "description": "Validate mandatory broker error handling and retry strategy.",
+          "criteria": "all required codes handled + valid exponential-backoff config",
+          "actual_value": "missing=0, backoff_ok=True",
+          "expected_value": "missing=0, backoff_ok=True",
+          "message": "Error handling complete",
+          "timestamp": "2026-03-07T13:29:11.004040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "issues": [],
+            "checkpoint": "pre_order_send",
+            "critical": true
+          }
+        }
+      ]
+    },
+    "RISK": {
+      "phase_name": "Phase 6: Risk",
+      "passed": 5,
+      "failed": 0,
+      "warnings": 0,
+      "skipped": 0,
+      "total": 5,
+      "pass_rate": "100.0%",
+      "is_phase_passed": true,
+      "results": [
+        {
+          "item_name": "Order limits",
+          "status": "PASSED",
+          "phase": "Phase 6: Risk",
+          "description": "Validate single-order size limit enforcement.",
+          "criteria": "exceeded orders must be rejected; valid orders must pass",
+          "actual_value": "ratio=2.00%, rejected=False",
+          "expected_value": "limit=5.00%",
+          "message": "Order-limit handling correct",
+          "timestamp": "2026-03-07T13:29:11.004040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "checkpoint": "pre_order_send",
+            "critical": true
+          }
+        },
+        {
+          "item_name": "Kill switch",
+          "status": "PASSED",
+          "phase": "Phase 6: Risk",
+          "description": "Validate emergency shutdown behavior on loss-limit breach.",
+          "criteria": "on breach, all mandatory kill-switch actions are true",
+          "actual_value": "loss=2.50%, exceeded=True",
+          "expected_value": "threshold=2.00%",
+          "message": "Kill-switch behavior correct",
+          "timestamp": "2026-03-07T13:29:11.004040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "checkpoint": "pre_order_send",
+            "critical": true,
+            "mode": "REDUCE"
+          }
+        },
+        {
+          "item_name": "Duplicate-order prevention",
+          "status": "PASSED",
+          "phase": "Phase 6: Risk",
+          "description": "Validate duplicate-order throttle and deduplication logic.",
+          "criteria": "for N rapid identical attempts, at least N-1 must be blocked",
+          "actual_value": "blocked=9/9",
+          "expected_value": ">= 9",
+          "message": "Duplicate-order protection active",
+          "timestamp": "2026-03-07T13:29:11.004040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "checkpoint": "pre_order_send",
+            "critical": true
+          }
+        },
+        {
+          "item_name": "Price deviation guard",
+          "status": "PASSED",
+          "phase": "Phase 6: Risk",
+          "description": "Validate fat-finger protection against excessive price deviation.",
+          "criteria": "abs(order-current)/current > 0.0300 must be blocked",
+          "actual_value": "checks=2, mismatches=0",
+          "expected_value": "mismatches=0",
+          "message": "Price-deviation guard correct",
+          "timestamp": "2026-03-07T13:29:11.004040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "checkpoint": "pre_order_send",
+            "critical": true
+          }
+        },
+        {
+          "item_name": "Cost optimization",
+          "status": "PASSED",
+          "phase": "Phase 6: Risk",
+          "description": "Validate EV filtering under 2025 cost policy.",
+          "criteria": "negative-EV trades must not be executed",
+          "actual_value": "negative_ev_executed=0, cost_floor=0.002686",
+          "expected_value": "negative_ev_executed=0",
+          "message": "EV filtering behavior correct",
+          "timestamp": "2026-03-07T13:29:11.005040",
+          "execution_time_ms": 1.0001659393310547,
+          "metadata": {
+            "checkpoint": "signal_to_order",
+            "critical": false
+          }
+        }
+      ]
+    },
+    "TESTING": {
+      "phase_name": "Phase 7: Testing",
+      "passed": 5,
+      "failed": 0,
+      "warnings": 0,
+      "skipped": 0,
+      "total": 5,
+      "pass_rate": "100.0%",
+      "is_phase_passed": true,
+      "results": [
+        {
+          "item_name": "API connection stability",
+          "status": "PASSED",
+          "phase": "Phase 7: Testing",
+          "description": "Validate disconnect/reconnect behavior during market operation.",
+          "criteria": "if disconnects occur, each must have successful reconnect evidence",
+          "actual_value": "disconnects=1, reconnects=1, reconnect_success=True",
+          "expected_value": "disconnect=0 or reconnect>=disconnect and success",
+          "message": "Connection recovery validated",
+          "timestamp": "2026-03-07T13:29:11.005040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "duration_hours": 24.0,
+            "checkpoint": "pre_open",
+            "critical": true
+          }
+        },
+        {
+          "item_name": "Execution consistency",
+          "status": "PASSED",
+          "phase": "Phase 7: Testing",
+          "description": "Validate fill consistency between program DB and broker/HTS records.",
+          "criteria": "match rate must be 100% for compared trades",
+          "actual_value": "match_rate=100.0% (10 trades)",
+          "expected_value": "100%",
+          "message": "Execution records fully consistent",
+          "timestamp": "2026-03-07T13:29:11.005040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "checkpoint": "post_close",
+            "critical": true
+          }
+        },
+        {
+          "item_name": "Tax/fee calculation",
+          "status": "PASSED",
+          "phase": "Phase 7: Testing",
+          "description": "Validate settlement cost calculation against actual statement data.",
+          "criteria": "absolute error <= 1.0 KRW",
+          "actual_value": "actual=153.02, expected=153.02, diff=0.00",
+          "expected_value": "diff <= 1.00",
+          "message": "Cost calculation accurate",
+          "timestamp": "2026-03-07T13:29:11.005040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "checkpoint": "post_close",
+            "critical": true
+          }
+        },
+        {
+          "item_name": "Paper-trading awareness",
+          "status": "PASSED",
+          "phase": "Phase 7: Testing",
+          "description": "Confirm known limits of mock trading and intended usage scope.",
+          "criteria": "all limitation/guideline flags acknowledged",
+          "actual_value": "limits=2/2, guides=2/2",
+          "expected_value": "all true",
+          "message": "Awareness checklist complete",
+          "timestamp": "2026-03-07T13:29:11.005040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "checkpoint": "post_close",
+            "critical": false
+          }
+        },
+        {
+          "item_name": "Canary readiness",
+          "status": "PASSED",
+          "phase": "Phase 7: Testing",
+          "description": "Validate minimal-size deployment readiness checklist.",
+          "criteria": "all canary checklist items are true",
+          "actual_value": "3/3",
+          "expected_value": "all passed",
+          "message": "Canary checklist complete",
+          "timestamp": "2026-03-07T13:29:11.005040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "checkpoint": "pre_open",
+            "critical": false
+          }
+        }
+      ]
+    },
+    "OPERATIONS": {
+      "phase_name": "Phase 8: Operations",
+      "passed": 5,
+      "failed": 0,
+      "warnings": 0,
+      "skipped": 0,
+      "total": 5,
+      "pass_rate": "100.0%",
+      "is_phase_passed": true,
+      "results": [
+        {
+          "item_name": "Auto reconnection",
+          "status": "PASSED",
+          "phase": "Phase 8: Operations",
+          "description": "Validate automatic reconnect runbook and timing.",
+          "criteria": "reconnection <= 10000.0ms and all steps true",
+          "actual_value": "time=5500.0ms, steps=3/3",
+          "expected_value": "within threshold and all true",
+          "message": "Auto reconnection acceptable",
+          "timestamp": "2026-03-07T13:29:11.005040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "checkpoint": "pre_open",
+            "critical": true
+          }
+        },
+        {
+          "item_name": "Log integrity",
+          "status": "PASSED",
+          "phase": "Phase 8: Operations",
+          "description": "Validate alerting coverage for error/critical logs.",
+          "criteria": "alert rate = 100% and log-management checklist all true",
+          "actual_value": "alert_rate=100.0%",
+          "expected_value": "100.0%",
+          "message": "Log integrity checks passed",
+          "timestamp": "2026-03-07T13:29:11.005040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "checkpoint": "post_close",
+            "critical": false
+          }
+        },
+        {
+          "item_name": "Data backup",
+          "status": "PASSED",
+          "phase": "Phase 8: Operations",
+          "description": "Validate backup and restore readiness.",
+          "criteria": "restore <= 60.0 minutes and checklist all true",
+          "actual_value": "restore=45.0m, checklist=3/3",
+          "expected_value": "within threshold and all true",
+          "message": "Backup and recovery acceptable",
+          "timestamp": "2026-03-07T13:29:11.005040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "checkpoint": "post_close",
+            "critical": true
+          }
+        },
+        {
+          "item_name": "Operations scheduler",
+          "status": "PASSED",
+          "phase": "Phase 8: Operations",
+          "description": "Validate automated market-session schedule and secure startup config.",
+          "criteria": "all schedule and auto-login controls true",
+          "actual_value": "schedule=3/3, login=2/2",
+          "expected_value": "all true",
+          "message": "Scheduler configuration complete",
+          "timestamp": "2026-03-07T13:29:11.005040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "checkpoint": "pre_open",
+            "critical": false
+          }
+        },
+        {
+          "item_name": "Monitoring alerts",
+          "status": "PASSED",
+          "phase": "Phase 8: Operations",
+          "description": "Validate alert channel activation and required event coverage.",
+          "criteria": "at least one channel active and all required alerts enabled",
+          "actual_value": "channels=1, required=4/4",
+          "expected_value": ">=1 active channel and all required alerts",
+          "message": "Monitoring alerts configured",
+          "timestamp": "2026-03-07T13:29:11.005040",
+          "execution_time_ms": 0.0,
+          "metadata": {
+            "checkpoint": "post_close",
+            "critical": false
+          }
+        }
+      ]
+    }
+  }
+}

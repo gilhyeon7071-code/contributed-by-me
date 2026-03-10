@@ -1,0 +1,590 @@
+﻿{
+    "status_label_map":  {
+                             "PASSED":  "통과",
+                             "FAILED":  "실패",
+                             "WARNING":  "경고",
+                             "SKIPPED":  "건너뜀",
+                             "ERROR":  "오류",
+                             "N/A":  "해당없음"
+                         },
+    "status_chip_map":  {
+                            "PASSED":  "chip-pass",
+                            "FAILED":  "chip-fail",
+                            "WARNING":  "chip-warn",
+                            "SKIPPED":  "chip-skip",
+                            "ERROR":  "chip-fail",
+                            "N/A":  "chip-na"
+                        },
+    "phase_title_map":  {
+                            "PLANNING":  "1단계: 요구사항 분석 및 타당성 검토",
+                            "DESIGN":  "2단계: 시스템 아키텍처 설계",
+                            "DATA":  "3단계: 데이터 엔지니어링 및 전처리",
+                            "STRATEGY":  "4단계: 퀀트 전략 구현 및 백테스팅",
+                            "EXECUTION":  "5단계: 주문 집행 시스템(OEMS) 구현",
+                            "RISK":  "6단계: 리스크 관리 시스템 구축",
+                            "TESTING":  "7단계: 테스트 및 모의 투자",
+                            "OPERATIONS":  "8단계: 배포, 운영 및 유지보수"
+                        },
+    "api_provider_map":  {
+                             "KIS":  "한국투자증권",
+                             "KIWOOM":  "키움증권",
+                             "EBEST":  "LS증권",
+                             "LS":  "LS증권"
+                         },
+    "message_prefix_map":  {
+                               "Round-trip with slippage=":  "왕복 비용(슬리피지 포함)=",
+                               "utilization=":  "사용률=",
+                               "Coverage policy satisfied;":  "커버리지 정책 충족;"
+                           },
+    "expected_post_replacements":  {
+                                       " and ":  " 및 ",
+                                       "all true":  "모두 예",
+                                       "pnl_diff":  "손익차이",
+                                       "pnl_차이":  "손익차이",
+                                       "diff \u003c=":  "차이 \u003c=",
+                                       "diff\u003c=":  "차이\u003c=",
+                                       "=sample":  "=샘플수"
+                                   },
+    "token_map":  {
+                      "rate_limit_429":  "429횟수",
+                      "negative_ev_executed":  "음수기대값집행",
+                      "reconnect_success":  "재연결성공",
+                      "internal_trades":  "내부체결건",
+                      "stmt_trades":  "명세서체결건",
+                      "internal_pnl":  "내부손익",
+                      "stmt_pnl":  "명세서손익",
+                      "match_rate":  "체결일치율",
+                      "observed_mdd":  "관측MDD",
+                      "invalid_transitions":  "무효전이",
+                      "blocked_dup":  "중복차단",
+                      "unique_keys":  "멱등키",
+                      "checklist":  "체크리스트",
+                      "disconnects":  "끊김횟수",
+                      "reconnects":  "재연결횟수",
+                      "reconnect":  "재연결시간",
+                      "mismatches":  "불일치건수",
+                      "sequences":  "시퀀스수",
+                      "issues":  "이슈건수",
+                      "coverage":  "커버리지",
+                      "present":  "다이어그램존재",
+                      "artifacts":  "산출물수",
+                      "loop_violations":  "순환오류",
+                      "dead_ends":  "단절흐름",
+                      "tested":  "테스트케이스",
+                      "critical_fail":  "치명실패",
+                      "null_case":  "결측치케이스",
+                      "extreme_case":  "극단값케이스",
+                      "records":  "처리레코드",
+                      "error_rate":  "오류율",
+                      "drill_days":  "드릴경과일",
+                      "schedule":  "스케줄항목",
+                      "channels":  "알림채널",
+                      "required":  "필수이벤트",
+                      "alert_rate":  "알림전송률",
+                      "restore":  "복구시간",
+                      "loss":  "손실률",
+                      "exceeded":  "한도초과",
+                      "blocked":  "차단건수",
+                      "checks":  "점검건수",
+                      "expectancy":  "거래기대값",
+                      "cost_floor":  "최소비용",
+                      "sample":  "샘플수",
+                      "matched":  "일치건수",
+                      "errors":  "오류건수",
+                      "target_tps":  "주문요청TPS",
+                      "ratio":  "주문비율",
+                      "gross":  "총익스포저",
+                      "single":  "단일종목익스포저",
+                      "sector":  "섹터익스포저",
+                      "leverage":  "레버리지",
+                      "violations":  "위반건수",
+                      "valid_rate":  "유효율",
+                      "invalid":  "오류건수",
+                      "snapshot":  "스냅샷시각",
+                      "latest_data":  "최신데이터시각",
+                      "asof_match":  "asof일치",
+                      "universe_fixed":  "유니버스고정",
+                      "submit":  "주문제출",
+                      "persistence":  "영속저장",
+                      "passed":  "통과케이스",
+                      "failed":  "실패건수",
+                      "critical":  "핵심",
+                      "normal":  "일반",
+                      "failed_periods":  "미달구간",
+                      "status":  "주문상태",
+                      "qty":  "수량",
+                      "time":  "소요시간",
+                      "steps":  "절차",
+                      "login":  "로그인점검",
+                      "limits":  "한계항목",
+                      "guides":  "가이드항목",
+                      "actual":  "실제",
+                      "expected":  "기대",
+                      "diff":  "차이",
+                      "trading_day":  "거래일여부",
+                      "controls":  "통제항목",
+                      "doc":  "문서",
+                      "gaps":  "누락항목",
+                      "sources":  "대조원천",
+                      "mismatch":  "대조불일치",
+                      "tol_breach":  "허용오차초과",
+                      "regimes":  "국면수",
+                      "strategy":  "전략수익",
+                      "configured":  "설정값",
+                      "pf":  "수익인자(PF)",
+                      "is_drift":  "체결드리프트",
+                      "rejected":  "거부여부",
+                      "limit":  "한도",
+                      "threshold":  "임계치",
+                      "p95":  "P95지연",
+                      "rpo":  "RPO",
+                      "rto":  "RTO",
+                      "missing":  "누락"
+                  },
+    "item_name_map":  {
+                          "OS compatibility":  "운영체제 호환성",
+                          "Cost structure":  "비용 구조 분석",
+                          "Architecture suitability":  "아키텍처 적합성",
+                          "API rate-limit compliance":  "API 제약사항",
+                          "Market calendar alignment":  "시장 캘린더 정합성",
+                          "Process isolation":  "프로세스 격리",
+                          "Message queue performance":  "메시지 큐 성능",
+                          "DB schema efficiency":  "DB 스키마 효율",
+                          "Module separation":  "모듈 분리 설계",
+                          "Exactly-once idempotency":  "정확히 한 번 처리(Idempotency)",
+                          "Draft check":  "초안 논리 점검",
+                          "Flowcharting":  "흐름도 점검",
+                          "Dry run":  "드라이런 검증",
+                          "Edge case test":  "엣지 케이스 테스트",
+                          "Cross-check":  "교차 대사 검증",
+                          "Stress test":  "스트레스 테스트",
+                          "Survivorship bias":  "생존 편향 검사",
+                          "Look-ahead bias":  "전방 참조 편향",
+                          "Point-in-time snapshot":  "시점고정(PIT) 스냅샷",
+                          "Data integrity":  "데이터 무결성",
+                          "Adjusted price handling":  "수정 주가 처리",
+                          "Overfitting":  "과최적화",
+                          "Walk-forward regime robustness":  "워크포워드/국면 강건성",
+                          "Randomness test":  "무작위성 테스트",
+                          "Max drawdown":  "최대 낙폭(MDD)",
+                          "Slippage modeling":  "슬리피지 모델링",
+                          "Liquidity constraints":  "유동성 제약",
+                          "Partial-fill handling":  "부분 체결 처리",
+                          "Order rejection handling":  "주문 거부 처리",
+                          "Network disconnection handling":  "네트워크 단절",
+                          "Order state machine":  "주문 상태 머신",
+                          "Event sequence integrity":  "이벤트 시퀀스 무결성",
+                          "API error-code handling":  "API 에러 코드 처리",
+                          "Order limits":  "주문 한도 테스트",
+                          "Portfolio exposure limits":  "포트폴리오 노출 한도",
+                          "Kill switch":  "킬 스위치",
+                          "Duplicate-order prevention":  "중복 주문 방지",
+                          "Price deviation guard":  "가격 괴리율 검증",
+                          "Cost optimization":  "비용 최적화",
+                          "API connection stability":  "API 연결 유지",
+                          "Execution consistency":  "체결 일치성",
+                          "Broker statement reconciliation":  "브로커 명세서 대사",
+                          "Tax/fee calculation":  "세금/수수료 계산",
+                          "Paper-trading awareness":  "모의 투자 한계 인식",
+                          "Canary readiness":  "카나리아 배포 준비",
+                          "Auto reconnection":  "자동 재접속",
+                          "Log integrity":  "로그 무결성",
+                          "Data backup":  "데이터 백업",
+                          "Backup drill runbook":  "백업 드릴/런북",
+                          "Operations scheduler":  "운영 스케줄러",
+                          "Monitoring alerts":  "모니터링 및 알림"
+                      },
+    "message_map":  {
+                        "Compatible runtime":  "호환 가능한 실행 환경",
+                        "Viable but not optimal":  "사용 가능하나 최적은 아님",
+                        "Session calendar controls validated":  "세션 캘린더 통제 검증 완료",
+                        "No look-ahead detected":  "전방 참조 없음",
+                        "Point-in-time snapshot validated":  "PIT 스냅샷 검증 완료",
+                        "OHLCV integrity clean":  "OHLCV 무결성 정상",
+                        "Adjustment handling complete":  "수정주가 처리 완료",
+                        "Onboarding mode: overfitting baseline/stat gates bypassed":  "온보딩 모드: 과최적화 기준/통계 게이트 우회",
+                        "Onboarding mode: risk-adjusted gate bypassed":  "온보딩 모드: 리스크 보정 게이트 우회",
+                        "Onboarding mode: performance gate bypassed":  "온보딩 모드: 성능 게이트 우회",
+                        "Onboarding mode: dry-run gate bypassed":  "온보딩 모드: 드라이런 게이트 우회",
+                        "Statistically significant edge":  "통계적으로 유의한 우위",
+                        "Drawdown within limit":  "낙폭 한도 이내",
+                        "Slippage assumption acceptable":  "슬리피지 가정 적정",
+                        "Liquidity constraint respected":  "유동성 제약 준수",
+                        "Partial fill handling correct":  "부분 체결 처리 정상",
+                        "Rejection handling complete":  "주문 거부 처리 완료",
+                        "Outage handling acceptable":  "단절 대응 정상",
+                        "State transitions valid":  "상태 전이 정상",
+                        "Event sequence integrity validated":  "이벤트 시퀀스 무결성 검증 완료",
+                        "Error handling complete":  "에러 처리 완료",
+                        "Order-limit handling correct":  "주문 한도 처리 정상",
+                        "Exposure limits validated":  "포트폴리오 노출 한도 검증 완료",
+                        "Kill-switch behavior correct":  "킬 스위치 동작 정상",
+                        "Duplicate-order protection active":  "중복 주문 방지 정상",
+                        "Price-deviation guard correct":  "가격 괴리율 방어 정상",
+                        "Connection recovery validated":  "연결 복구 검증 완료",
+                        "Execution records fully consistent":  "체결 기록 일치",
+                        "Broker statement reconciliation validated":  "브로커 명세서 대사 검증 완료",
+                        "Cost calculation accurate":  "세금/수수료 계산 정확",
+                        "Awareness checklist complete":  "한계 인식 체크리스트 완료",
+                        "Canary checklist complete":  "카나리아 체크리스트 완료",
+                        "Auto reconnection acceptable":  "자동 재접속 정상",
+                        "Log integrity checks passed":  "로그 무결성 검사 통과",
+                        "Backup and recovery acceptable":  "백업/복구 체계 정상",
+                        "Backup drill/runbook validated":  "백업 드릴/런북 검증 완료",
+                        "Scheduler configuration complete":  "스케줄러 구성 완료",
+                        "Monitoring alerts configured":  "모니터링 알림 구성 완료",
+                        "Flowchart integrity validated":  "흐름도 기반 검증 완료",
+                        "Draft logic validated":  "초안 논리 검증 완료",
+                        "Cross-check reconciliation validated":  "교차 대사 검증 완료",
+                        "Edge-case robustness validated":  "엣지 케이스 대응 확인",
+                        "Stress-test performance validated":  "스트레스 테스트 성능 확인",
+                        "Idempotency controls validated":  "Idempotency 통제 검증 완료",
+                        "Coverage policy satisfied; missing_critical=-; missing_normal=-; failed_periods=-":  "커버리지 정책 충족; 누락 핵심=-; 누락 일반=-; 실패 구간=-"
+                    },
+    "expected_map":  {
+                         "Windows 10+ (64-bit)":  "Windows 10+ (64비트)",
+                         "trading_day=True and controls all true":  "거래일여부=예 및 통제항목 모두 예",
+                         "chronology_ok=True, asof_match=True, universe_fixed=True":  "시계열정합=예, asof일치=예, 유니버스고정=예",
+                         "all true":  "모두 예",
+                         "all passed":  "모두 통과",
+                         "blocked_dup\u003e=2, persistence=True":  "중복차단\u003e=2, 영속저장=예",
+                         "trades_match=True, pnl_diff\u003c=1.00":  "trades_match=예, pnl_diff\u003c=1.00",
+                         "disconnect=0 or reconnect\u003e=disconnect and success":  "끊김=0 또는 재연결\u003e=끊김 및 성공",
+                         "present=True, artifacts\u003e=1, loop_violations=0, dead_ends=0":  "다이어그램존재=예, 산출물수\u003e=1, 순환오류=0, 단절흐름=0",
+                         "tested\u003e0, passed=tested, critical_fail=0, null_case=True, extreme_case=True":  "테스트케이스\u003e0, 통과케이스=테스트케이스, 치명실패=0, 결측치케이스=예, 극단값케이스=예",
+                         "within threshold and all true":  "임계 이내 + 모두 예",
+                         "sources\u003e=2, mismatch=0, tol_breach=0":  "대조원천\u003e=2, 대조불일치=0, 허용오차초과=0",
+                         "records\u003e=100, p95\u003c=500.0ms, error_rate\u003c=1.00%":  "처리레코드\u003e=100, P95지연\u003c=500.0ms, 오류율\u003c=1.00%",
+                         "doc=True, coverage=100%, gaps=0":  "문서=예, 커버리지=100%, 누락항목=0",
+                         "\u003e=1 active channel and all required alerts":  "활성 채널\u003e=1 및 필수 알림 모두 활성",
+                         "drill\u003c=30d, rpo\u003c=15.0m, rto\u003c=60.0m, checklist=all true":  "드릴경과일\u003c=30d, RPO\u003c=15.0m, RTO\u003c=60.0m, 체크리스트=모두 예",
+                         "missing=0, backoff_ok=True":  "누락=0, 백오프정상=예",
+                         "critical\u003e=90%, normal\u003e=70%, periods\u003e=50%":  "핵심\u003e=90%, 일반\u003e=70%, 구간\u003e=50%",
+                         "0 violations":  "위반 0건",
+                         "invalid=0":  "오류 0건"
+                     },
+    "domain_term_catalog":  {
+                                "version":  "2026-03-08",
+                                "selection_rule":  "현재 검증(1~8단계)에서 실제 사용하는 항목/메시지/토큰과 직접 연결되는 용어만 선별",
+                                "categories":  {
+                                                   "quant_verification_core":  [
+                                                                                   {
+                                                                                       "ko":  "백테스트",
+                                                                                       "en":  "Backtest",
+                                                                                       "desc":  "과거 데이터 기반 전략 검증"
+                                                                                   },
+                                                                                   {
+                                                                                       "ko":  "포워드테스트",
+                                                                                       "en":  "Forward Test",
+                                                                                       "desc":  "실시간/미래 구간에서 전략 검증"
+                                                                                   },
+                                                                                   {
+                                                                                       "ko":  "페이퍼트레이딩",
+                                                                                       "en":  "Paper Trading",
+                                                                                       "desc":  "가상 자금으로 실거래 절차 점검"
+                                                                                   },
+                                                                                   {
+                                                                                       "ko":  "시그널",
+                                                                                       "en":  "Signal",
+                                                                                       "desc":  "매수/매도 의사결정 규칙의 출력"
+                                                                                   },
+                                                                                   {
+                                                                                       "ko":  "과최적화",
+                                                                                       "en":  "Overfitting",
+                                                                                       "desc":  "과거 구간 과적합으로 실전 성능 저하"
+                                                                                   },
+                                                                                   {
+                                                                                       "ko":  "데이터 스누핑",
+                                                                                       "en":  "Data Snooping",
+                                                                                       "desc":  "반복 탐색으로 허위 우수성 발생"
+                                                                                   },
+                                                                                   {
+                                                                                       "ko":  "생존자 편향",
+                                                                                       "en":  "Survivorship Bias",
+                                                                                       "desc":  "생존 종목만 포함해 성과 과대추정"
+                                                                                   },
+                                                                                   {
+                                                                                       "ko":  "전방 참조 편향",
+                                                                                       "en":  "Look-ahead Bias",
+                                                                                       "desc":  "미래 정보가 과거 의사결정에 유입되는 오류"
+                                                                                   },
+                                                                                   {
+                                                                                       "ko":  "워크포워드",
+                                                                                       "en":  "Walk-Forward",
+                                                                                       "desc":  "훈련-검증 창을 순차 이동하며 강건성 확인"
+                                                                                   },
+                                                                                   {
+                                                                                       "ko":  "유니버스",
+                                                                                       "en":  "Universe",
+                                                                                       "desc":  "전략이 고려하는 종목 집합"
+                                                                                   },
+                                                                                   {
+                                                                                       "ko":  "후보 종목",
+                                                                                       "en":  "Candidates",
+                                                                                       "desc":  "필터를 통과한 투자 대상 목록"
+                                                                                   }
+                                                                               ],
+                                                   "execution_orders":  [
+                                                                            {
+                                                                                "ko":  "시장가 주문",
+                                                                                "en":  "Market Order",
+                                                                                "desc":  "가격 지정 없이 즉시 체결 우선"
+                                                                            },
+                                                                            {
+                                                                                "ko":  "지정가 주문",
+                                                                                "en":  "Limit Order",
+                                                                                "desc":  "희망 가격을 지정한 주문"
+                                                                            },
+                                                                            {
+                                                                                "ko":  "IOC",
+                                                                                "en":  "Immediate or Cancel",
+                                                                                "desc":  "즉시 체결분만 남기고 잔량 취소"
+                                                                            },
+                                                                            {
+                                                                                "ko":  "FOK",
+                                                                                "en":  "Fill or Kill",
+                                                                                "desc":  "전량 즉시 체결 아니면 전량 취소"
+                                                                            },
+                                                                            {
+                                                                                "ko":  "체결",
+                                                                                "en":  "Execution/Fill",
+                                                                                "desc":  "주문이 성사된 상태"
+                                                                            },
+                                                                            {
+                                                                                "ko":  "미체결",
+                                                                                "en":  "Unfilled",
+                                                                                "desc":  "주문이 아직 성사되지 않은 상태"
+                                                                            },
+                                                                            {
+                                                                                "ko":  "정정",
+                                                                                "en":  "Modify",
+                                                                                "desc":  "기존 주문의 가격/수량 변경"
+                                                                            },
+                                                                            {
+                                                                                "ko":  "취소",
+                                                                                "en":  "Cancel",
+                                                                                "desc":  "기존 주문 철회"
+                                                                            },
+                                                                            {
+                                                                                "ko":  "호가창",
+                                                                                "en":  "Order Book",
+                                                                                "desc":  "매수/매도 대기 주문 분포"
+                                                                            },
+                                                                            {
+                                                                                "ko":  "스프레드",
+                                                                                "en":  "Spread",
+                                                                                "desc":  "매수호가와 매도호가 차이"
+                                                                            },
+                                                                            {
+                                                                                "ko":  "틱",
+                                                                                "en":  "Tick",
+                                                                                "desc":  "최소 가격 변동 단위"
+                                                                            }
+                                                                        ],
+                                                   "performance_risk":  [
+                                                                            {
+                                                                                "ko":  "수익률",
+                                                                                "en":  "Return",
+                                                                                "desc":  "원금 대비 손익 비율"
+                                                                            },
+                                                                            {
+                                                                                "ko":  "손익",
+                                                                                "en":  "P\u0026L",
+                                                                                "desc":  "실현+미실현 손익 총합"
+                                                                            },
+                                                                            {
+                                                                                "ko":  "실현손익",
+                                                                                "en":  "Realized P\u0026L",
+                                                                                "desc":  "청산으로 확정된 손익"
+                                                                            },
+                                                                            {
+                                                                                "ko":  "미실현손익",
+                                                                                "en":  "Unrealized P\u0026L",
+                                                                                "desc":  "보유 중 평가 손익"
+                                                                            },
+                                                                            {
+                                                                                "ko":  "연환산수익률",
+                                                                                "en":  "CAGR",
+                                                                                "desc":  "연 복리 기준 수익률"
+                                                                            },
+                                                                            {
+                                                                                "ko":  "MDD",
+                                                                                "en":  "Max Drawdown",
+                                                                                "desc":  "고점 대비 최대 낙폭"
+                                                                            },
+                                                                            {
+                                                                                "ko":  "드로다운",
+                                                                                "en":  "Drawdown",
+                                                                                "desc":  "고점 대비 현재 하락 폭"
+                                                                            },
+                                                                            {
+                                                                                "ko":  "복구기간",
+                                                                                "en":  "Recovery Period",
+                                                                                "desc":  "낙폭 회복까지 걸린 기간"
+                                                                            },
+                                                                            {
+                                                                                "ko":  "샤프지수",
+                                                                                "en":  "Sharpe Ratio",
+                                                                                "desc":  "변동성 대비 초과수익 지표"
+                                                                            },
+                                                                            {
+                                                                                "ko":  "소르티노지수",
+                                                                                "en":  "Sortino Ratio",
+                                                                                "desc":  "하방 변동성 기준 위험대비 수익"
+                                                                            },
+                                                                            {
+                                                                                "ko":  "칼마지수",
+                                                                                "en":  "Calmar Ratio",
+                                                                                "desc":  "연환산수익률 대비 MDD 지표"
+                                                                            },
+                                                                            {
+                                                                                "ko":  "정보비율",
+                                                                                "en":  "Information Ratio",
+                                                                                "desc":  "초과수익 대비 추적오차 지표"
+                                                                            },
+                                                                            {
+                                                                                "ko":  "승률",
+                                                                                "en":  "Win Rate",
+                                                                                "desc":  "수익 거래 비중"
+                                                                            },
+                                                                            {
+                                                                                "ko":  "손익비",
+                                                                                "en":  "Profit Factor",
+                                                                                "desc":  "총수익/총손실 비율"
+                                                                            },
+                                                                            {
+                                                                                "ko":  "평균손익비",
+                                                                                "en":  "Avg Win/Loss Ratio",
+                                                                                "desc":  "평균 수익과 평균 손실의 비율"
+                                                                            }
+                                                                        ],
+                                                   "portfolio_and_controls":  [
+                                                                                  {
+                                                                                      "ko":  "포트폴리오",
+                                                                                      "en":  "Portfolio",
+                                                                                      "desc":  "전체 보유 자산 구성"
+                                                                                  },
+                                                                                  {
+                                                                                      "ko":  "비중",
+                                                                                      "en":  "Weight/Allocation",
+                                                                                      "desc":  "자산별 편입 비율"
+                                                                                  },
+                                                                                  {
+                                                                                      "ko":  "리밸런싱",
+                                                                                      "en":  "Rebalancing",
+                                                                                      "desc":  "목표 비중으로 재조정"
+                                                                                  },
+                                                                                  {
+                                                                                      "ko":  "익스포저",
+                                                                                      "en":  "Exposure",
+                                                                                      "desc":  "특정 리스크 노출 규모"
+                                                                                  },
+                                                                                  {
+                                                                                      "ko":  "포지션 사이징",
+                                                                                      "en":  "Position Sizing",
+                                                                                      "desc":  "종목별 투자 크기 결정"
+                                                                                  },
+                                                                                  {
+                                                                                      "ko":  "레버리지",
+                                                                                      "en":  "Leverage",
+                                                                                      "desc":  "차입을 통한 투자 배수 확대"
+                                                                                  },
+                                                                                  {
+                                                                                      "ko":  "손절",
+                                                                                      "en":  "Stop Loss",
+                                                                                      "desc":  "손실 제한을 위한 청산 규칙"
+                                                                                  },
+                                                                                  {
+                                                                                      "ko":  "익절",
+                                                                                      "en":  "Take Profit",
+                                                                                      "desc":  "목표 수익 도달 시 청산 규칙"
+                                                                                  },
+                                                                                  {
+                                                                                      "ko":  "킬스위치",
+                                                                                      "en":  "Kill Switch",
+                                                                                      "desc":  "손실/장애 시 자동 거래 중단 장치"
+                                                                                  },
+                                                                                  {
+                                                                                      "ko":  "집행",
+                                                                                      "en":  "Execution",
+                                                                                      "desc":  "신호를 실제 주문으로 전환/처리"
+                                                                                  },
+                                                                                  {
+                                                                                      "ko":  "집행비용",
+                                                                                      "en":  "Transaction Cost",
+                                                                                      "desc":  "수수료·세금·슬리피지 포함 거래 비용"
+                                                                                  }
+                                                                              ],
+                                                   "market_regime":  [
+                                                                         {
+                                                                             "ko":  "서킷브레이커",
+                                                                             "en":  "Circuit Breaker",
+                                                                             "desc":  "지수 급변 시 시장 일시 중단 장치"
+                                                                         },
+                                                                         {
+                                                                             "ko":  "VI",
+                                                                             "en":  "Volatility Interruption",
+                                                                             "desc":  "개별 종목 급변 시 단일가 전환 장치"
+                                                                         },
+                                                                         {
+                                                                             "ko":  "사이드카",
+                                                                             "en":  "Sidecar",
+                                                                             "desc":  "파생 급변 시 프로그램 매매 제한 장치"
+                                                                         },
+                                                                         {
+                                                                             "ko":  "유동성",
+                                                                             "en":  "Liquidity",
+                                                                             "desc":  "원하는 가격에서 거래 성사 가능성"
+                                                                         },
+                                                                         {
+                                                                             "ko":  "마켓 임팩트",
+                                                                             "en":  "Market Impact",
+                                                                             "desc":  "주문이 가격에 주는 영향"
+                                                                         },
+                                                                         {
+                                                                             "ko":  "변동성",
+                                                                             "en":  "Volatility",
+                                                                             "desc":  "가격 변동 폭의 크기"
+                                                                         }
+                                                                     ],
+                                                   "costs_taxes":  [
+                                                                       {
+                                                                           "ko":  "증권거래세",
+                                                                           "en":  "Securities Transaction Tax",
+                                                                           "desc":  "매도 시 부과되는 거래세"
+                                                                       },
+                                                                       {
+                                                                           "ko":  "수수료",
+                                                                           "en":  "Commission/Fee",
+                                                                           "desc":  "중개 서비스 이용 대가"
+                                                                       },
+                                                                       {
+                                                                           "ko":  "양도소득세",
+                                                                           "en":  "Capital Gains Tax",
+                                                                           "desc":  "주식 매매 차익 과세 항목"
+                                                                       },
+                                                                       {
+                                                                           "ko":  "배당소득세",
+                                                                           "en":  "Dividend Tax",
+                                                                           "desc":  "배당금에 대한 과세 항목"
+                                                                       },
+                                                                       {
+                                                                           "ko":  "거래비용",
+                                                                           "en":  "Transaction Cost",
+                                                                           "desc":  "세금·수수료·슬리피지의 합산 비용"
+                                                                       }
+                                                                   ]
+                                               },
+                                "aliases":  {
+                                                "생존 편향 검사":  "생존자 편향",
+                                                "전방 참조 편향":  "Look-ahead Bias",
+                                                "시점고정(PIT) 스냅샷":  "Point-in-Time Snapshot",
+                                                "최대 낙폭(MDD)":  "MDD",
+                                                "킬 스위치":  "킬스위치",
+                                                "체결 일치성":  "Execution Consistency",
+                                                "브로커 명세서 대사":  "Broker Statement Reconciliation",
+                                                "세금/수수료 계산":  "거래비용/세금 계산",
+                                                "가격 괴리율 검증":  "Price Deviation Guard"
+                                            }
+                            }
+}

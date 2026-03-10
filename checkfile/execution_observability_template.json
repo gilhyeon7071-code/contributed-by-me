@@ -1,0 +1,10 @@
+﻿{
+  "data_staleness_p95_ms": null,
+  "data_staleness_p99_ms": null,
+  "ack_latency_p95_ms": null,
+  "fill_latency_p95_ms": null,
+  "rate_limit_429_events": 0,
+  "rate_limit_429_warn_threshold": 0,
+  "is_drift_bps": null,
+  "note": "Populate with measured runtime metrics. Null fields are ignored by verifier."
+}

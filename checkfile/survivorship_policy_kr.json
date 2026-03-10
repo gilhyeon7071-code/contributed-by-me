@@ -1,0 +1,30 @@
+﻿{
+  "critical_threshold": 0.9,
+  "normal_threshold": 0.7,
+  "period_min_threshold": 0.5,
+  "min_universe_size_required": 500,
+  "required_input_scope": "FULL_UNIVERSE",
+  "enforcement_mode": "STRICT",
+  "critical_stocks_required": [
+    "한진해운",
+    "STX조선해양",
+    "STX팬오션",
+    "쌍용자동차",
+    "동양",
+    "대우그룹계열",
+    "루보"
+  ],
+  "normal_stocks_required": [
+    "대한전선",
+    "금호산업",
+    "대우조선해양",
+    "셀트리온헬스케어"
+  ],
+  "period_groups": {
+    "2000-2003": ["대우그룹계열"],
+    "2008-2010": ["쌍용자동차", "금호산업", "대한전선"],
+    "2013-2015": ["동양", "STX팬오션", "STX조선해양"],
+    "2017-2018": ["한진해운"],
+    "2020-2024": ["루보", "셀트리온헬스케어", "대우조선해양"]
+  }
+}

@@ -1,0 +1,339 @@
+﻿{
+    "phases":  {
+                   "PLANNING":  {
+                                    "verify_os_compatibility":  {
+                                                                    "os_name":  "Linux",
+                                                                    "os_version":  "6.8.0",
+                                                                    "arch":  "64bit",
+                                                                    "windows_major_version":  null
+                                                                },
+                                    "verify_cost_structure":  {
+                                                                  "market":  "KOSPI",
+                                                                  "slippage_bp":  5
+                                                              },
+                                    "verify_architecture_suitability":  {
+                                                                            "architecture_type":  "DUAL_PROCESS",
+                                                                            "api_provider":  "KIS"
+                                                                        },
+                                    "verify_api_constraints":  {
+                                                                   "api_provider":  "KIS",
+                                                                   "target_tps":  30
+                                                               }
+                                },
+                   "DATA":  {
+                                "verify_survivorship_bias_v2":  {
+                                                                    "result":  {
+                                                                                   "critical_stocks_required":  [
+                                                                                                                    "STX_OFFSHORE",
+                                                                                                                    "HANJIN_SHIPPING"
+                                                                                                                ],
+                                                                                   "critical_stocks_included":  [
+                                                                                                                    "STX_OFFSHORE"
+                                                                                                                ],
+                                                                                   "normal_stocks_required":  [
+                                                                                                                  "DAEWOO_SHIPBUILDING_MERGER"
+                                                                                                              ],
+                                                                                   "normal_stocks_included":  [
+                                                                                                                  "DAEWOO_SHIPBUILDING_MERGER"
+                                                                                                              ],
+                                                                                   "period_coverage":  {
+                                                                                                           "2008-2010":  0.8,
+                                                                                                           "2013-2015":  0.7,
+                                                                                                           "2020-2022":  0.6
+                                                                                                       }
+                                                                               }
+                                                                },
+                                "verify_lookahead_bias":  {
+                                                              "signal_timestamps":  [
+                                                                                        "2026-03-06T09:01:00",
+                                                                                        "2026-03-06T09:02:00"
+                                                                                    ],
+                                                              "data_timestamps":  [
+                                                                                      "2026-03-06T09:00:59",
+                                                                                      "2026-03-06T09:01:58"
+                                                                                  ]
+                                                          },
+                                "verify_data_integrity":  {
+                                                              "ohlcv_data":  [
+                                                                                 {
+                                                                                     "timestamp":  "2026-03-06T09:00:00",
+                                                                                     "open":  100.0,
+                                                                                     "high":  101.0,
+                                                                                     "low":  99.5,
+                                                                                     "close":  100.5,
+                                                                                     "volume":  10000,
+                                                                                     "symbol":  "005930"
+                                                                                 }
+                                                                             ]
+                                                          },
+                                "verify_adjusted_price_handling":  {
+                                                                       "checklist":  {
+                                                                                         "split_adjusted":  true,
+                                                                                         "dividend_adjusted":  true,
+                                                                                         "corporate_action_adjusted":  true,
+                                                                                         "raw_price_preserved":  true
+                                                                                     }
+                                                                   }
+                            },
+                   "STRATEGY":  {
+                                    "verify_overfitting":  {
+                                                               "in_sample_result":  {
+                                                                                        "total_return":  0.25,
+                                                                                        "sharpe_ratio":  1.8,
+                                                                                        "max_drawdown":  -0.18,
+                                                                                        "win_rate":  0.55,
+                                                                                        "total_trades":  120,
+                                                                                        "avg_holding_period":  4.2,
+                                                                                        "is_in_sample":  true
+                                                                                    },
+                                                               "out_sample_result":  {
+                                                                                         "total_return":  0.17,
+                                                                                         "sharpe_ratio":  1.4,
+                                                                                         "max_drawdown":  -0.2,
+                                                                                         "win_rate":  0.52,
+                                                                                         "total_trades":  90,
+                                                                                         "avg_holding_period":  4.0,
+                                                                                         "is_in_sample":  false
+                                                                                     }
+                                                           },
+                                    "verify_randomness_test":  {
+                                                                   "strategy_return":  0.15,
+                                                                   "random_returns":  [
+                                                                                          0.01,
+                                                                                          0.02,
+                                                                                          0.0,
+                                                                                          -0.01,
+                                                                                          0.03
+                                                                                      ]
+                                                               },
+                                    "verify_max_drawdown":  {
+                                                                "historical_mdd":  -25.0,
+                                                                "crisis_periods":  {
+                                                                                       "2008":  -18.5,
+                                                                                       "2020":  -12.0,
+                                                                                       "2022":  -8.0
+                                                                                   }
+                                                            },
+                                    "verify_liquidity_constraints":  {
+                                                                         "max_order_volume_ratio":  0.03
+                                                                     }
+                                },
+                   "EXECUTION":  {
+                                     "verify_partial_fill_handling":  {
+                                                                          "name":  "partial_fill_case",
+                                                                          "input_order":  {
+                                                                                              "order_id":  "ORD-1",
+                                                                                              "symbol":  "005930",
+                                                                                              "side":  "BUY",
+                                                                                              "order_type":  "LIMIT",
+                                                                                              "quantity":  100,
+                                                                                              "price":  100.0,
+                                                                                              "status":  "PARTIAL_FILLED",
+                                                                                              "filled_quantity":  30,
+                                                                                              "avg_fill_price":  100.0
+                                                                                          },
+                                                                          "expected_status":  "PARTIAL_FILLED",
+                                                                          "expected_filled_qty":  30,
+                                                                          "actual_status":  "PARTIAL_FILLED",
+                                                                          "actual_filled_qty":  30,
+                                                                          "passed":  true
+                                                                      },
+                                     "verify_order_rejection_handling":  {
+                                                                             "events":  [
+                                                                                            {
+                                                                                                "error_code":  "-308",
+                                                                                                "handled":  true,
+                                                                                                "final_status":  "REJECTED"
+                                                                                            },
+                                                                                            {
+                                                                                                "error_code":  "-302",
+                                                                                                "handled":  true,
+                                                                                                "final_status":  "REJECTED"
+                                                                                            },
+                                                                                            {
+                                                                                                "error_code":  "-304",
+                                                                                                "handled":  true,
+                                                                                                "final_status":  "FAILED"
+                                                                                            }
+                                                                                        ]
+                                                                         },
+                                     "verify_network_disconnection":  {
+                                                                          "reconnect_time_ms":  3500,
+                                                                          "emergency_checklist":  {
+                                                                                                      "block_new_orders":  true,
+                                                                                                      "cancel_open_orders":  true,
+                                                                                                      "notify_operator":  true,
+                                                                                                      "switch_safe_mode":  true
+                                                                                                  }
+                                                                      },
+                                     "verify_order_state_machine":  {
+                                                                        "transitions":  [
+                                                                                            [
+                                                                                                "PENDING",
+                                                                                                "SUBMITTED"
+                                                                                            ],
+                                                                                            [
+                                                                                                "SUBMITTED",
+                                                                                                "PARTIAL_FILLED"
+                                                                                            ],
+                                                                                            [
+                                                                                                "PARTIAL_FILLED",
+                                                                                                "FILLED"
+                                                                                            ]
+                                                                                        ]
+                                                                    },
+                                     "verify_error_code_handling":  {
+                                                                        "handled_codes":  {
+                                                                                              "-200":  true,
+                                                                                              "-302":  true,
+                                                                                              "-308":  true,
+                                                                                              "-310":  true
+                                                                                          },
+                                                                        "backoff_config":  {
+                                                                                               "initial_delay_ms":  200,
+                                                                                               "max_delay_ms":  5000,
+                                                                                               "multiplier":  2,
+                                                                                               "max_retries":  5
+                                                                                           }
+                                                                    }
+                                 },
+                   "RISK":  {
+                                "verify_order_limits":  {
+                                                            "test_order_amount":  2000000,
+                                                            "total_assets":  100000000,
+                                                            "rejected":  false
+                                                        },
+                                "verify_kill_switch":  {
+                                                           "simulated_loss_ratio":  0.025,
+                                                           "mode":  "REDUCE",
+                                                           "actions_triggered":  {
+                                                                                     "block_new_orders":  true,
+                                                                                     "notify_operator":  true
+                                                                                 }
+                                                       },
+                                "verify_duplicate_prevention":  {
+                                                                    "total_attempts":  10,
+                                                                    "duplicate_orders_blocked":  9
+                                                                },
+                                "verify_price_deviation":  {
+                                                               "order_checks":  [
+                                                                                    {
+                                                                                        "current_price":  100.0,
+                                                                                        "order_price":  110.0,
+                                                                                        "blocked":  true
+                                                                                    },
+                                                                                    {
+                                                                                        "current_price":  100.0,
+                                                                                        "order_price":  101.0,
+                                                                                        "blocked":  false
+                                                                                    }
+                                                                                ]
+                                                           },
+                                "verify_cost_optimization":  {
+                                                                 "has_ev_module":  true,
+                                                                 "trades":  [
+                                                                                {
+                                                                                    "expected_return":  0.01,
+                                                                                    "executed":  true
+                                                                                },
+                                                                                {
+                                                                                    "expected_return":  0.001,
+                                                                                    "executed":  false
+                                                                                }
+                                                                            ]
+                                                             }
+                            },
+                   "TESTING":  {
+                                   "verify_api_connection_stability":  {
+                                                                           "connection_logs":  [
+                                                                                                   {
+                                                                                                       "event_type":  "DISCONNECT",
+                                                                                                       "success":  false
+                                                                                                   },
+                                                                                                   {
+                                                                                                       "event_type":  "RECONNECT",
+                                                                                                       "success":  true
+                                                                                                   }
+                                                                                               ],
+                                                                           "test_duration_hours":  24
+                                                                       },
+                                   "verify_execution_consistency":  {
+                                                                        "match_rate_override":  100.0,
+                                                                        "total_trades_override":  10
+                                                                    },
+                                   "verify_tax_fee_calculation":  {
+                                                                      "trade_price":  70000,
+                                                                      "quantity":  1,
+                                                                      "market":  "KOSPI",
+                                                                      "actual_total_cost":  153.02
+                                                                  },
+                                   "verify_paper_trading_awareness":  {
+                                                                          "limitations_acknowledged":  {
+                                                                                                           "no_market_impact":  true,
+                                                                                                           "ideal_fill_assumption":  true
+                                                                                                       },
+                                                                          "usage_guidelines":  {
+                                                                                                   "logic_validation_only":  true,
+                                                                                                   "not_for_live_pnl_expectation":  true
+                                                                                               }
+                                                                      },
+                                   "verify_canary_deployment_readiness":  {
+                                                                              "canary_checklist":  {
+                                                                                                       "small_size_trade":  true,
+                                                                                                       "settlement_cycle_checked":  true,
+                                                                                                       "monitoring_ready":  true
+                                                                                                   }
+                                                                          }
+                               },
+                   "OPERATIONS":  {
+                                      "verify_auto_reconnection":  {
+                                                                       "reconnection_time_ms":  5500,
+                                                                       "reconnection_steps":  {
+                                                                                                  "detect_disconnect":  true,
+                                                                                                  "relogin":  true,
+                                                                                                  "session_restore":  true
+                                                                                              }
+                                                                   },
+                                      "verify_log_integrity":  {
+                                                                   "error_logs_with_alerts":  5,
+                                                                   "total_error_logs":  5,
+                                                                   "log_management":  {
+                                                                                          "structured_logs":  true,
+                                                                                          "rotation_enabled":  true,
+                                                                                          "alert_on_error":  true
+                                                                                      }
+                                                               },
+                                      "verify_data_backup":  {
+                                                                 "recovery_time_minutes":  45,
+                                                                 "backup_checklist":  {
+                                                                                          "daily_backup":  true,
+                                                                                          "offsite_copy":  true,
+                                                                                          "restore_tested":  true
+                                                                                      }
+                                                             },
+                                      "verify_scheduler":  {
+                                                               "schedule_items":  {
+                                                                                      "pre_open_job":  true,
+                                                                                      "market_open_job":  true,
+                                                                                      "post_close_job":  true
+                                                                                  },
+                                                               "auto_login_config":  {
+                                                                                         "auto_login_enabled":  true,
+                                                                                         "credential_protected":  true
+                                                                                     }
+                                                           },
+                                      "verify_monitoring_alerts":  {
+                                                                       "alert_channels":  {
+                                                                                              "telegram":  true,
+                                                                                              "slack":  false
+                                                                                          },
+                                                                       "required_alerts":  {
+                                                                                               "fill_event":  true,
+                                                                                               "error_event":  true,
+                                                                                               "heartbeat":  true,
+                                                                                               "kill_switch":  true
+                                                                                           }
+                                                                   }
+                                  }
+               }
+}

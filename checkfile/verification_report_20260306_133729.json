@@ -1,0 +1,1148 @@
+{
+  "system_config": {
+    "system_name": "Demo Trading System",
+    "version": "1.0.0",
+    "market": "KOSPI",
+    "architecture_type": "DUAL_PROCESS",
+    "api_provider": "KIWOOM",
+    "target_latency_ms": 100.0,
+    "target_tps": 10,
+    "max_single_order_ratio": 0.05,
+    "max_daily_loss_ratio": 0.02,
+    "max_position_ratio": 0.2,
+    "price_deviation_limit": 0.03,
+    "slippage_bp": 5,
+    "backtest_start_date": "2015-01-01",
+    "backtest_end_date": "2024-12-31",
+    "include_delisted": true,
+    "max_drawdown_limit": 0.2
+  },
+  "summary": {
+    "overall_status": "FAILED",
+    "total_tests": 37,
+    "passed": 30,
+    "failed": 4,
+    "warnings": 3,
+    "pass_rate": "81.1%",
+    "is_deployment_ready": false,
+    "start_time": "2026-03-06T13:37:29.647468",
+    "end_time": "2026-03-06T13:37:29.679717"
+  },
+  "phases": {
+    "PLANNING": {
+      "phase_name": "1단계: 요구사항 분석 및 타당성 검토",
+      "passed": 1,
+      "failed": 2,
+      "warnings": 1,
+      "total": 4,
+      "pass_rate": "25.0%",
+      "is_phase_passed": false,
+      "results": [
+        {
+          "item_name": "운영체제 호환성",
+          "status": "FAILED",
+          "phase": "1단계: 요구사항 분석 및 타당성 검토",
+          "description": "선정된 OS가 증권사 API(OCX)를 네이티브로 지원하는가?",
+          "criteria": "Windows 10/11 또는 Windows Server 환경 필수",
+          "actual_value": "Linux #1 SMP Sun Jan 10 15:06:54 PST 2016 (64bit)",
+          "expected_value": "Windows 10+ (64-bit)",
+          "message": "비Windows 환경 (Linux) - OCX API 사용 불가",
+          "timestamp": "2026-03-06T13:37:29.669396",
+          "execution_time_ms": 21.84605598449707,
+          "metadata": {
+            "os_name": "Linux",
+            "os_version": "#1 SMP Sun Jan 10 15:06:54 PST 2016",
+            "architecture": "64bit",
+            "is_windows": false
+          }
+        },
+        {
+          "item_name": "비용 구조 분석",
+          "status": "WARNING",
+          "phase": "1단계: 요구사항 분석 및 타당성 검토",
+          "description": "2025년 세제 개편안이 반영된 손익분기점이 산출되었는가?",
+          "criteria": "KOSPI 거래세 0.20% 적용 모델링",
+          "actual_value": "BEP: 0.537%",
+          "expected_value": "BEP < 1.0%",
+          "message": "총 왕복 비용: 0.537% (세금+수수료+슬리피지)",
+          "timestamp": "2026-03-06T13:37:29.669616",
+          "execution_time_ms": 0.003337860107421875,
+          "metadata": {
+            "market": "KOSPI",
+            "tax_rate": 0.002,
+            "krx_fee": 3.6e-05,
+            "broker_fee": 0.00015,
+            "slippage_bp": 5,
+            "round_trip_cost": 0.004372,
+            "total_with_slippage": 0.005372,
+            "bep_percent": 0.5372
+          }
+        },
+        {
+          "item_name": "아키텍처 적합성",
+          "status": "PASSED",
+          "phase": "1단계: 요구사항 분석 및 타당성 검토",
+          "description": "32비트 API와 64비트 분석 환경의 연동 방안이 수립되었는가?",
+          "criteria": "IPC(ZeroMQ, gRPC) 통신 프로토타입의 RTT < 5ms",
+          "actual_value": "DUAL_PROCESS (점수: 90/100)",
+          "expected_value": "권장: DUAL_PROCESS",
+          "message": "장점: 최적의 성능, 프로세스 격리로 안정성 확보 | 단점: 복잡한 구조",
+          "timestamp": "2026-03-06T13:37:29.670257",
+          "execution_time_ms": 0.010013580322265625,
+          "metadata": {
+            "architecture_type": "DUAL_PROCESS",
+            "api_provider": "KIWOOM",
+            "score": 90,
+            "is_optimal": true,
+            "recommended_arch": "DUAL_PROCESS",
+            "pros": [
+              "최적의 성능",
+              "프로세스 격리로 안정성 확보",
+              "ML/AI 모델 활용 가능"
+            ],
+            "cons": [
+              "복잡한 구조",
+              "IPC 오버헤드"
+            ]
+          }
+        },
+        {
+          "item_name": "API 제약사항",
+          "status": "FAILED",
+          "phase": "1단계: 요구사항 분석 및 타당성 검토",
+          "description": "목표 전략의 주문 빈도가 API 호출 제한(Rate Limit)을 초과하지 않는가?",
+          "criteria": "전략의 최대 TPS < API 허용 TPS (KIWOOM: 5 TPS)",
+          "actual_value": "목표 TPS: 10",
+          "expected_value": "제한 TPS: 5",
+          "message": "API 사용률: 200.0% | 과도한 요청 시 시세과부하 에러(-200)",
+          "timestamp": "2026-03-06T13:37:29.670871",
+          "execution_time_ms": 0.011682510375976562,
+          "metadata": {
+            "api_provider": "KIWOOM",
+            "target_tps": 10,
+            "api_tps_limit": 5,
+            "utilization_percent": 200.0,
+            "description": "초당 약 5회 조회 제한 (유동적)",
+            "note": "과도한 요청 시 시세과부하 에러(-200)"
+          }
+        }
+      ]
+    },
+    "DESIGN": {
+      "phase_name": "2단계: 시스템 아키텍처 설계",
+      "passed": 4,
+      "failed": 0,
+      "warnings": 0,
+      "total": 4,
+      "pass_rate": "100.0%",
+      "is_phase_passed": true,
+      "results": [
+        {
+          "item_name": "프로세스 격리",
+          "status": "PASSED",
+          "phase": "2단계: 시스템 아키텍처 설계",
+          "description": "수집기(Ingestion) 프로세스가 강제 종료되었을 때 전략 엔진이 이를 감지하는가?",
+          "criteria": "Watchdog 프로세스의 감지 시간 < 1000ms",
+          "actual_value": "500.0ms",
+          "expected_value": "< 1000ms",
+          "message": "정상 감지 범위",
+          "timestamp": "2026-03-06T13:37:29.673137",
+          "execution_time_ms": 0.001430511474609375,
+          "metadata": {
+            "watchdog_detect_time_ms": 500.0,
+            "threshold_ms": 1000,
+            "architecture_type": "DUAL_PROCESS"
+          }
+        },
+        {
+          "item_name": "메시지 큐 성능",
+          "status": "PASSED",
+          "phase": "2단계: 시스템 아키텍처 설계",
+          "description": "틱 데이터 폭주(장 시작/마감) 시 큐의 지연 시간은?",
+          "criteria": "Tick 발생 시점과 전략 엔진 수신 시점의 차이(Lag) < 10ms",
+          "actual_value": "3.50ms",
+          "expected_value": "< 10ms",
+          "message": "정상 범위 내 지연",
+          "timestamp": "2026-03-06T13:37:29.673594",
+          "execution_time_ms": 0.0011920928955078125,
+          "metadata": {
+            "measured_lag_ms": 3.5,
+            "threshold_ms": 10,
+            "recommended_mq": [
+              "ZeroMQ",
+              "Kafka",
+              "RabbitMQ"
+            ]
+          }
+        },
+        {
+          "item_name": "DB 스키마 효율",
+          "status": "PASSED",
+          "phase": "2단계: 시스템 아키텍처 설계",
+          "description": "10년 치 틱 데이터를 쿼리할 때의 응답 속도는?",
+          "criteria": "특정 종목 1일치 틱 조회 < 200ms",
+          "actual_value": "80.0ms",
+          "expected_value": "< 200ms",
+          "message": "쿼리 성능 양호",
+          "timestamp": "2026-03-06T13:37:29.673802",
+          "execution_time_ms": 0.00095367431640625,
+          "metadata": {
+            "query_response_ms": 80.0,
+            "threshold_ms": 200,
+            "recommended_db": {
+              "timeseries": [
+                "InfluxDB",
+                "TimescaleDB",
+                "Kdb+"
+              ],
+              "relational": [
+                "PostgreSQL",
+                "MySQL"
+              ]
+            }
+          }
+        },
+        {
+          "item_name": "모듈 분리 설계",
+          "status": "PASSED",
+          "phase": "2단계: 시스템 아키텍처 설계",
+          "description": "마이크로서비스 형태의 모듈 분리가 설계되었는가?",
+          "criteria": "필수 4개 모듈(수집기, 전략엔진, 주문관리자, 리스크관리자) 분리",
+          "actual_value": "4개 모듈 설계됨",
+          "expected_value": "4개 이상",
+          "message": "설계된 모듈: Ingestion Agent, Strategy Engine, Order Manager, Risk Controller",
+          "timestamp": "2026-03-06T13:37:29.673889",
+          "execution_time_ms": 0.0016689300537109375,
+          "metadata": {
+            "required_modules": [
+              "Ingestion Agent (수집기)",
+              "Strategy Engine (전략 엔진)",
+              "Order Manager (주문 관리자)",
+              "Risk Controller (리스크 관리자)"
+            ],
+            "optional_modules": [
+              "Data Store (데이터 저장소)",
+              "Monitoring Service (모니터링)",
+              "Alert Service (알림 서비스)",
+              "Backtest Engine (백테스트 엔진)"
+            ],
+            "designed_modules": [
+              "Ingestion Agent (수집기)",
+              "Strategy Engine (전략 엔진)",
+              "Order Manager (주문 관리자)",
+              "Risk Controller (리스크 관리자)"
+            ],
+            "architecture_type": "DUAL_PROCESS"
+          }
+        }
+      ]
+    },
+    "DATA": {
+      "phase_name": "3단계: 데이터 엔지니어링 및 전처리",
+      "passed": 2,
+      "failed": 2,
+      "warnings": 0,
+      "total": 4,
+      "pass_rate": "50.0%",
+      "is_phase_passed": false,
+      "results": [
+        {
+          "item_name": "생존 편향 검사",
+          "status": "FAILED",
+          "phase": "3단계: 데이터 엔지니어링 및 전처리",
+          "description": "2010-01-01 기준 KOSPI 200 종목 리스트를 로드했을 때, 현재 상장 폐지된 종목이 포함되어 있는가?",
+          "criteria": "상장 폐지 종목(예: STX조선해양 등)의 데이터 존재 확인",
+          "actual_value": "상장폐지 종목 3/5개 포함 (60.0%)",
+          "expected_value": "주요 상장폐지 종목 70% 이상 포함",
+          "message": "누락 종목: STX조선해양, 현대제철...",
+          "timestamp": "2026-03-06T13:37:29.674367",
+          "execution_time_ms": 0.0026226043701171875,
+          "metadata": {
+            "reference_date": "2010-01-01",
+            "total_delisted_checked": 5,
+            "included_count": 3,
+            "coverage_rate": 60.0,
+            "included_stocks": [
+              "기아자동차",
+              "대우건설",
+              "대우조선해양우"
+            ],
+            "missing_stocks": [
+              {
+                "name": "STX조선해양",
+                "reason": "상장폐지"
+              },
+              {
+                "name": "현대제철",
+                "reason": "합병"
+              }
+            ]
+          }
+        },
+        {
+          "item_name": "전방 참조 편향",
+          "status": "FAILED",
+          "phase": "3단계: 데이터 엔지니어링 및 전처리",
+          "description": "거래 시점에 미래의 데이터(예: 당일 종가, 장 마감 후 공시)를 참조하지 않는가?",
+          "criteria": "데이터 타임스탬프와 시그널 발생 시점의 엄격한 비교",
+          "actual_value": "위반 1건 / 1000건 검사",
+          "expected_value": "위반 0건",
+          "message": "전방 참조 위반 발견됨 - 긴급 수정 필요",
+          "timestamp": "2026-03-06T13:37:29.674457",
+          "execution_time_ms": 0.01049041748046875,
+          "metadata": {
+            "violations_found": 1,
+            "total_checks": 1000,
+            "violation_rate": 0.1,
+            "common_violations": [
+              "당일 종가로 당일 매매 신호 생성",
+              "장 마감 후 공시 데이터로 장중 결정",
+              "리밸런싱 날짜 이전에 신규 구성종목 사용"
+            ]
+          }
+        },
+        {
+          "item_name": "데이터 무결성",
+          "status": "PASSED",
+          "phase": "3단계: 데이터 엔지니어링 및 전처리",
+          "description": "OHLC(시가, 고가, 저가, 종가)의 논리적 오류가 없는가?",
+          "criteria": "High >= Low, High >= Open, High >= Close, Low <= Open 등 논리 검증 통과율 100%",
+          "actual_value": "유효성 100.00% (0건 오류)",
+          "expected_value": "100% 통과",
+          "message": "모든 데이터 무결성 확인됨",
+          "timestamp": "2026-03-06T13:37:29.674502",
+          "execution_time_ms": 0.004291534423828125,
+          "metadata": {
+            "total_records": 100000,
+            "invalid_records": 0,
+            "validity_rate": 100.0,
+            "error_types": {},
+            "validation_rules": [
+              "High >= Low",
+              "High >= Open",
+              "High >= Close",
+              "Low <= Open",
+              "Low <= Close",
+              "Volume >= 0",
+              "All prices > 0"
+            ]
+          }
+        },
+        {
+          "item_name": "수정 주가 처리",
+          "status": "PASSED",
+          "phase": "3단계: 데이터 엔지니어링 및 전처리",
+          "description": "배당락, 액면분할, 유상증자 등으로 인한 주가 단층 보정이 적용되었는가?",
+          "criteria": "백테스팅: 수정주가 사용, 실시간 매매: 원본가격 사용 (이중 체계)",
+          "actual_value": "6/6 항목 충족",
+          "expected_value": "모든 항목 충족",
+          "message": "수정주가 처리 체계 완비",
+          "timestamp": "2026-03-06T13:37:29.674622",
+          "execution_time_ms": 0.0069141387939453125,
+          "metadata": {
+            "checklist": {
+              "배당락 조정": true,
+              "액면분할 조정": true,
+              "유상증자 조정": true,
+              "무상증자 조정": true,
+              "원본가격 보존": true,
+              "이중 가격 체계": true
+            },
+            "adjustment_types": [
+              "배당락",
+              "액면분할",
+              "유상증자",
+              "무상증자",
+              "감자",
+              "합병"
+            ]
+          }
+        }
+      ]
+    },
+    "STRATEGY": {
+      "phase_name": "4단계: 퀀트 전략 구현 및 백테스팅",
+      "passed": 3,
+      "failed": 0,
+      "warnings": 2,
+      "total": 5,
+      "pass_rate": "60.0%",
+      "is_phase_passed": true,
+      "results": [
+        {
+          "item_name": "과최적화(Overfitting)",
+          "status": "WARNING",
+          "phase": "4단계: 퀀트 전략 구현 및 백테스팅",
+          "description": "Walk-Forward Testing (전진 분석) 수행 결과",
+          "criteria": "학습 구간(In-Sample)과 검증 구간(Out-of-Sample)의 샤프 지수 차이가 20% 이내일 것",
+          "actual_value": "IS Sharpe: 1.80, OOS Sharpe: 1.50 (차이: 16.7%)",
+          "expected_value": "Sharpe 차이 ≤ 20%",
+          "message": "성능 저하율: 16.7% - 양호",
+          "timestamp": "2026-03-06T13:37:29.675262",
+          "execution_time_ms": 0.0054836273193359375,
+          "metadata": {
+            "in_sample_sharpe": 1.8,
+            "out_sample_sharpe": 1.5,
+            "sharpe_diff_percent": 16.666666666666668,
+            "performance_decay_percent": 16.666666666666675,
+            "threshold_percent": 20,
+            "recommendation": null
+          }
+        },
+        {
+          "item_name": "무작위성 테스트",
+          "status": "PASSED",
+          "phase": "4단계: 퀀트 전략 구현 및 백테스팅",
+          "description": "전략을 무작위 데이터(Random Walk)에 적용한 결과",
+          "criteria": "무작위 데이터에서의 성과가 통계적으로 유의미하게 낮아야 함 (알파의 존재 증명)",
+          "actual_value": "전략 수익률: 15.50%, Z-score: 3.17",
+          "expected_value": "Z-score > 1.96 (95% 신뢰수준)",
+          "message": "상위 0.1% 성과 - 알파 존재 확인",
+          "timestamp": "2026-03-06T13:37:29.677796",
+          "execution_time_ms": 1.9772052764892578,
+          "metadata": {
+            "strategy_return": 15.5,
+            "random_mean": -0.12594574622196805,
+            "random_std": 4.925648043671307,
+            "z_score": 3.1723634347563427,
+            "percentile": 99.9,
+            "confidence_level": 99.9,
+            "is_statistically_significant": true
+          }
+        },
+        {
+          "item_name": "최대 낙폭(MDD)",
+          "status": "WARNING",
+          "phase": "4단계: 퀀트 전략 구현 및 백테스팅",
+          "description": "역사적 폭락장(2008년, 2020년 3월) 구간 시뮬레이션 결과",
+          "criteria": "MDD가 설정된 리스크 한도(예: -20%)를 초과하지 않을 것",
+          "actual_value": "최대 MDD: -18.5% (2008년 금융위기)",
+          "expected_value": "MDD ≥ -20%",
+          "message": "위기 시나리오별 MDD: 2008년 금융위기: -18.5%, 2020년 3월 코로나: -15.2%",
+          "timestamp": "2026-03-06T13:37:29.678001",
+          "execution_time_ms": 0.007867813110351562,
+          "metadata": {
+            "historical_mdd": -18.5,
+            "mdd_limit_percent": 20.0,
+            "crisis_periods": {
+              "2008년 금융위기": -18.5,
+              "2020년 3월 코로나": -15.2,
+              "2022년 금리인상기": -12.8
+            },
+            "worst_period": "2008년 금융위기",
+            "worst_mdd": -18.5
+          }
+        },
+        {
+          "item_name": "슬리피지 모델링",
+          "status": "PASSED",
+          "phase": "4단계: 퀀트 전략 구현 및 백테스팅",
+          "description": "매수 주문 시 호가 공백으로 인한 체결가 불이익이 모델링되었는가?",
+          "criteria": "KOSPI 대형주는 3bp 이상 슬리피지 적용 필요",
+          "actual_value": "설정된 슬리피지: 5bp",
+          "expected_value": "≥ 3bp",
+          "message": "현실적인 슬리피지 적용됨",
+          "timestamp": "2026-03-06T13:37:29.678188",
+          "execution_time_ms": 0.0019073486328125,
+          "metadata": {
+            "configured_slippage_bp": 5,
+            "recommended_min_bp": 3,
+            "market": "KOSPI",
+            "market_type": "대형주",
+            "slippage_in_percent": 0.05
+          }
+        },
+        {
+          "item_name": "유동성 제약",
+          "status": "PASSED",
+          "phase": "4단계: 퀀트 전략 구현 및 백테스팅",
+          "description": "거래량이 적은 종목에 대해 시장 충격(Market Impact) 없이 체결 가능한 수량으로 제한하는가?",
+          "criteria": "일일 거래량의 5% 이내에서만 체결되도록 제약",
+          "actual_value": "최대 주문 비율: 5.0%",
+          "expected_value": "≤ 5%",
+          "message": "유동성 제약 적용됨",
+          "timestamp": "2026-03-06T13:37:29.678236",
+          "execution_time_ms": 0.0011920928955078125,
+          "metadata": {
+            "max_order_volume_ratio": 0.05,
+            "recommended_max": 0.05,
+            "impact_model": "Square-root impact model 권장"
+          }
+        }
+      ]
+    },
+    "EXECUTION": {
+      "phase_name": "5단계: 주문 집행 시스템(OEMS) 구현",
+      "passed": 5,
+      "failed": 0,
+      "warnings": 0,
+      "total": 5,
+      "pass_rate": "100.0%",
+      "is_phase_passed": true,
+      "results": [
+        {
+          "item_name": "부분 체결 처리",
+          "status": "PASSED",
+          "phase": "5단계: 주문 집행 시스템(OEMS) 구현",
+          "description": "100주 주문 -> 60주 체결 이벤트 수신 시 내부 상태 관리",
+          "criteria": "내부 상태: 보유수량 +60, 미체결 40. 잔고: 매수금액만큼 차감. 중복 처리 없음 확인.",
+          "actual_value": "체결량: 60, 미체결: 40",
+          "expected_value": "체결량 추적 및 잔고 정확성",
+          "message": "부분 체결 상태 관리 정상",
+          "timestamp": "2026-03-06T13:37:29.678444",
+          "execution_time_ms": 0.00762939453125,
+          "metadata": {
+            "test_order": {
+              "order_id": "TEST001",
+              "symbol": "005930",
+              "quantity": 100,
+              "filled_quantity": 60,
+              "unfilled_quantity": 40,
+              "status": "부분체결"
+            },
+            "expected_behavior": [
+              "OnReceiveChejanData 이벤트에서 체결량 추적",
+              "미체결수량 필드 지속 업데이트",
+              "로컬 DB 상태와 동기화",
+              "중복 이벤트 필터링"
+            ]
+          }
+        },
+        {
+          "item_name": "주문 거부 처리",
+          "status": "PASSED",
+          "phase": "5단계: 주문 집행 시스템(OEMS) 구현",
+          "description": "상한가보다 높은 가격으로 매수 주문 등 거부 상황 처리",
+          "criteria": "API 에러 이벤트 수신. 시스템 로그에 '가격 범위 초과' 기록 후 해당 주문 상태를 'Failed'로 변경.",
+          "actual_value": "3/3 시나리오 처리됨",
+          "expected_value": "모든 거부 시나리오 정상 처리",
+          "message": "주문 거부 핸들링 완비",
+          "timestamp": "2026-03-06T13:37:29.678485",
+          "execution_time_ms": 0.0019073486328125,
+          "metadata": {
+            "rejection_scenarios": [
+              {
+                "name": "가격 범위 초과",
+                "error_code": "-308",
+                "scenario": "상한가보다 높은 가격으로 매수 주문",
+                "expected_action": "주문 상태 'Failed' 변경, 재주문 차단"
+              },
+              {
+                "name": "증거금 부족",
+                "error_code": "-302",
+                "scenario": "가용 증거금 초과 주문",
+                "expected_action": "주문 상태 'Rejected' 변경, 알림 발송"
+              },
+              {
+                "name": "종목 코드 오류",
+                "error_code": "-304",
+                "scenario": "존재하지 않는 종목 코드",
+                "expected_action": "즉시 에러 반환, 주문 차단"
+              }
+            ],
+            "handled_count": 3,
+            "error_codes": {
+              "0": "정상처리",
+              "-100": "사용자정보교환에 실패하였습니다",
+              "-101": "서버 접속 실패",
+              "-102": "버전처리가 , 필요합니다",
+              "-200": "시세과부하",
+              "-201": "조회전문작성 에러",
+              "-300": "주문 전송 실패",
+              "-301": "주문 입력값 오류",
+              "-302": "매수가능금액 부족",
+              "-303": "현금주문은 수량 입력을 하세요",
+              "-304": "종목코드 없음",
+              "-305": "계좌비밀번호 없음",
+              "-306": "주문 수량 0 오류",
+              "-307": "계좌정보 없음",
+              "-308": "주문가격 범위 초과",
+              "-309": "주문 가격을 확인하세요",
+              "-310": "통신 에러"
+            },
+            "critical_errors": [
+              "-308",
+              "-302",
+              "-300"
+            ]
+          }
+        },
+        {
+          "item_name": "네트워크 단절",
+          "status": "PASSED",
+          "phase": "5단계: 주문 집행 시스템(OEMS) 구현",
+          "description": "LAN 케이블 분리 또는 프로세스 강제 종료 시 대응",
+          "criteria": "OnEventConnect 또는 Heartbeat 실패 감지. 시스템 '비상 정지' 모드 전환 및 관리자 알림 발송.",
+          "actual_value": "재연결 시간: 2000ms, 체크리스트: 6/6",
+          "expected_value": "재연결 < 5000ms, 모든 비상 절차 완료",
+          "message": "네트워크 복구 절차 정상",
+          "timestamp": "2026-03-06T13:37:29.678524",
+          "execution_time_ms": 0.0030994415283203125,
+          "metadata": {
+            "reconnect_time_ms": 2000.0,
+            "max_allowed_ms": 5000,
+            "emergency_checklist": {
+              "OnEventConnect/Heartbeat 실패 감지": true,
+              "비상 정지 모드 전환": true,
+              "미체결 주문 취소 시도": true,
+              "관리자 알림 발송": true,
+              "자동 재연결 시도": true,
+              "재연결 후 상태 복구": true
+            },
+            "required_actions": [
+              "Heartbeat 타이머 구현 (5초 주기)",
+              "연결 상태 모니터링",
+              "Graceful Degradation",
+              "텔레그램/슬랙 알림 연동"
+            ]
+          }
+        },
+        {
+          "item_name": "주문 상태 머신",
+          "status": "PASSED",
+          "phase": "5단계: 주문 집행 시스템(OEMS) 구현",
+          "description": "주문의 상태(접수, 체결, 거부, 취소)를 관리하는 상태 머신 검증",
+          "criteria": "유효한 상태 전이만 허용, 무효한 전이 차단",
+          "actual_value": "무효 전이 3/3건 차단됨",
+          "expected_value": "모든 무효 전이 차단",
+          "message": "상태 머신 무결성 확인",
+          "timestamp": "2026-03-06T13:37:29.678561",
+          "execution_time_ms": 0.0045299530029296875,
+          "metadata": {
+            "valid_transitions": {
+              "대기": [
+                "접수",
+                "거부",
+                "실패"
+              ],
+              "접수": [
+                "부분체결",
+                "전량체결",
+                "취소",
+                "거부"
+              ],
+              "부분체결": [
+                "부분체결",
+                "전량체결",
+                "취소"
+              ],
+              "전량체결": [],
+              "취소": [],
+              "거부": [],
+              "실패": []
+            },
+            "invalid_transitions_tested": [
+              [
+                "전량체결",
+                "취소"
+              ],
+              [
+                "취소",
+                "전량체결"
+              ],
+              [
+                "거부",
+                "접수"
+              ]
+            ],
+            "final_states": [
+              "FILLED",
+              "CANCELLED",
+              "REJECTED",
+              "FAILED"
+            ]
+          }
+        },
+        {
+          "item_name": "API 에러 코드 처리",
+          "status": "PASSED",
+          "phase": "5단계: 주문 집행 시스템(OEMS) 구현",
+          "description": "API별 에러 코드 파싱 및 예외 처리 구현",
+          "criteria": "에러 코드별 적절한 처리 로직 및 Exponential Backoff 재시도",
+          "actual_value": "처리 구현된 에러 코드: 4개",
+          "expected_value": "주요 에러 코드 전체 처리",
+          "message": "에러 핸들링 완비",
+          "timestamp": "2026-03-06T13:37:29.678591",
+          "execution_time_ms": 0.0021457672119140625,
+          "metadata": {
+            "critical_error_codes": {
+              "-200": {
+                "name": "시세과부하",
+                "action": "요청 간격 증가 후 재시도"
+              },
+              "-302": {
+                "name": "매수가능금액 부족",
+                "action": "주문 중단, 포지션 재계산"
+              },
+              "-308": {
+                "name": "주문가격 범위 초과",
+                "action": "가격 재조정 또는 주문 중단"
+              },
+              "-310": {
+                "name": "통신 에러",
+                "action": "재연결 시도, 비상 모드 전환"
+              }
+            },
+            "backoff_config": {
+              "initial_delay_ms": 100,
+              "max_delay_ms": 5000,
+              "multiplier": 2,
+              "max_retries": 5
+            },
+            "kiwoom_all_errors": {
+              "0": "정상처리",
+              "-100": "사용자정보교환에 실패하였습니다",
+              "-101": "서버 접속 실패",
+              "-102": "버전처리가 , 필요합니다",
+              "-200": "시세과부하",
+              "-201": "조회전문작성 에러",
+              "-300": "주문 전송 실패",
+              "-301": "주문 입력값 오류",
+              "-302": "매수가능금액 부족",
+              "-303": "현금주문은 수량 입력을 하세요",
+              "-304": "종목코드 없음",
+              "-305": "계좌비밀번호 없음",
+              "-306": "주문 수량 0 오류",
+              "-307": "계좌정보 없음",
+              "-308": "주문가격 범위 초과",
+              "-309": "주문 가격을 확인하세요",
+              "-310": "통신 에러"
+            }
+          }
+        }
+      ]
+    },
+    "RISK": {
+      "phase_name": "6단계: 리스크 관리 시스템 구축",
+      "passed": 5,
+      "failed": 0,
+      "warnings": 0,
+      "total": 5,
+      "pass_rate": "100.0%",
+      "is_phase_passed": true,
+      "results": [
+        {
+          "item_name": "주문 한도 테스트",
+          "status": "PASSED",
+          "phase": "6단계: 리스크 관리 시스템 구축",
+          "description": "자산보다 큰 금액의 주문 생성 시도",
+          "criteria": "리스크 모듈에서 즉시 Reject 리턴하고 주문 전송 차단",
+          "actual_value": "주문 비율: 150.0% (한도: 5%)",
+          "expected_value": "한도 초과 시 즉시 차단",
+          "message": "주문 한도 검증 정상 작동",
+          "timestamp": "2026-03-06T13:37:29.678780",
+          "execution_time_ms": 0.00095367431640625,
+          "metadata": {
+            "total_assets": 100000000,
+            "test_order_amount": 150000000,
+            "order_ratio": 1.5,
+            "max_single_order_ratio": 0.05,
+            "exceeds_limit": true,
+            "correctly_rejected": true
+          }
+        },
+        {
+          "item_name": "Kill Switch",
+          "status": "PASSED",
+          "phase": "6단계: 리스크 관리 시스템 구축",
+          "description": "강제로 손실 상황을 시뮬레이션(가상 손실 주입)",
+          "criteria": "설정된 손실 한도(2%) 도달 시 모든 신규 주문 차단 및 기존 미체결 주문 취소",
+          "actual_value": "시뮬레이션 손실: 2.5%",
+          "expected_value": "한도: 2% 초과 시 Kill Switch 작동",
+          "message": "Kill Switch 정상 작동",
+          "timestamp": "2026-03-06T13:37:29.678852",
+          "execution_time_ms": 0.0016689300537109375,
+          "metadata": {
+            "simulated_loss_ratio": 0.025,
+            "max_daily_loss_ratio": 0.02,
+            "exceeds_limit": true,
+            "kill_switch_actions": {
+              "손실 한도 감지": true,
+              "신규 주문 차단": true,
+              "미체결 주문 취소": true,
+              "포지션 청산 옵션": true,
+              "관리자 알림": true
+            }
+          }
+        },
+        {
+          "item_name": "중복 주문 방지",
+          "status": "PASSED",
+          "phase": "6단계: 리스크 관리 시스템 구축",
+          "description": "동일 주문을 0.1초 간격으로 10회 전송",
+          "criteria": "첫 번째 주문만 통과되고 나머지 9개는 '중복 요청'으로 차단",
+          "actual_value": "차단된 중복 주문: 9/9",
+          "expected_value": "9건 차단",
+          "message": "중복 주문 방지 정상",
+          "timestamp": "2026-03-06T13:37:29.678878",
+          "execution_time_ms": 0.000476837158203125,
+          "metadata": {
+            "total_attempts": 10,
+            "expected_blocked": 9,
+            "actual_blocked": 9,
+            "deduplication_window_ms": 100,
+            "deduplication_criteria": [
+              "종목코드",
+              "주문유형",
+              "수량",
+              "가격"
+            ]
+          }
+        },
+        {
+          "item_name": "가격 괴리율 검증",
+          "status": "PASSED",
+          "phase": "6단계: 리스크 관리 시스템 구축",
+          "description": "현재가 대비 주문가 괴리율이 한도를 초과하는지 검사",
+          "criteria": "가격 괴리율 3% 이상 주문 차단 (Fat Finger 방지)",
+          "actual_value": "모든 테스트 시나리오 통과: True",
+          "expected_value": "괴리율 초과 주문 정확히 차단",
+          "message": "Fat Finger 방지 정상",
+          "timestamp": "2026-03-06T13:37:29.679003",
+          "execution_time_ms": 0.004291534423828125,
+          "metadata": {
+            "price_deviation_limit": 0.03,
+            "test_scenarios": [
+              {
+                "current_price": 70000,
+                "order_price": 77000,
+                "deviation": 0.1,
+                "should_block": true
+              },
+              {
+                "current_price": 70000,
+                "order_price": 72000,
+                "deviation": 0.0286,
+                "should_block": false
+              },
+              {
+                "current_price": 70000,
+                "order_price": 63000,
+                "deviation": -0.1,
+                "should_block": true
+              }
+            ]
+          }
+        },
+        {
+          "item_name": "비용 최적화",
+          "status": "PASSED",
+          "phase": "6단계: 리스크 관리 시스템 구축",
+          "description": "2025년 세제 개편 반영, 기대 수익값이 양수인 거래만 집행",
+          "criteria": "총 비용(0.269%)을 초과하는 기대 수익 거래만 집행",
+          "actual_value": "EV 계산 모듈: 있음",
+          "expected_value": "실시간 비용 계산 및 EV 필터링",
+          "message": "비용 최적화 모듈 정상",
+          "timestamp": "2026-03-06T13:37:29.679035",
+          "execution_time_ms": 0.002384185791015625,
+          "metadata": {
+            "market": "KOSPI",
+            "tax_rate": 0.002,
+            "total_cost": 0.002686,
+            "slippage_bp": 5,
+            "has_ev_module": true,
+            "test_trade": {
+              "expected_return": 0.001,
+              "total_cost": 0.002686,
+              "ev_positive": false
+            },
+            "2025_tax_policy": {
+              "KOSPI": "거래세 0.05% + 농특세 0.15% = 0.20%",
+              "KOSDAQ": "거래세 0.20%"
+            }
+          }
+        }
+      ]
+    },
+    "TESTING": {
+      "phase_name": "7단계: 테스트 및 모의 투자",
+      "passed": 5,
+      "failed": 0,
+      "warnings": 0,
+      "total": 5,
+      "pass_rate": "100.0%",
+      "is_phase_passed": true,
+      "results": [
+        {
+          "item_name": "API 연결 유지",
+          "status": "PASSED",
+          "phase": "7단계: 테스트 및 모의 투자",
+          "description": "모의 투자 환경에서 24시간 구동 테스트",
+          "criteria": "장중(09:00~15:30) 연결 끊김 횟수 0회, 재접속 로직 정상 작동 확인",
+          "actual_value": "끊김: 0회, 재연결 성공: True",
+          "expected_value": "끊김 0회 또는 100% 자동 재연결",
+          "message": "연결 안정성 확인",
+          "timestamp": "2026-03-06T13:37:29.679179",
+          "execution_time_ms": 0.000476837158203125,
+          "metadata": {
+            "test_duration_hours": 24.0,
+            "disconnect_count": 0,
+            "reconnect_count": 0,
+            "reconnect_success": true,
+            "market_hours": "09:00 ~ 15:30"
+          }
+        },
+        {
+          "item_name": "체결 불일치",
+          "status": "PASSED",
+          "phase": "7단계: 테스트 및 모의 투자",
+          "description": "실전 소액(1주) 거래 - HTS 상의 체결 내역과 프로그램 DB 상의 체결 내역 비교",
+          "criteria": "HTS와 프로그램 DB 체결 내역 100% 일치",
+          "actual_value": "일치율: 100.0% (10/10)",
+          "expected_value": "100% 일치",
+          "message": "체결 기록 완전 일치",
+          "timestamp": "2026-03-06T13:37:29.679213",
+          "execution_time_ms": 0.00095367431640625,
+          "metadata": {
+            "total_trades": 10,
+            "matched_trades": 10,
+            "match_rate": 100.0,
+            "mismatches": []
+          }
+        },
+        {
+          "item_name": "세금/수수료 계산",
+          "status": "PASSED",
+          "phase": "7단계: 테스트 및 모의 투자",
+          "description": "실전 소액 거래 후 정산 금액 검증",
+          "criteria": "매매 차익에서 0.20% 세금과 수수료가 정확히 차감된 정산 금액 확인",
+          "actual_value": "총 비용: 153원 (예상: 153원)",
+          "expected_value": "오차 ≤ 1.0원",
+          "message": "세금/수수료 계산 정확",
+          "timestamp": "2026-03-06T13:37:29.679244",
+          "execution_time_ms": 0.001430511474609375,
+          "metadata": {
+            "market": "KOSPI",
+            "trade_amount": 70000,
+            "breakdown": {
+              "tax": 140.0,
+              "krx_fee": 2.52,
+              "broker_fee": 10.499999999999998,
+              "total": 153.02
+            },
+            "2025_rates": {
+              "KOSPI_tax": "0.05% + 농특세 0.15%",
+              "KOSDAQ_tax": "0.20%",
+              "KRX_fee": "0.0036%",
+              "broker_fee": "약 0.015%"
+            }
+          }
+        },
+        {
+          "item_name": "모의 투자 한계 인식",
+          "status": "PASSED",
+          "phase": "7단계: 테스트 및 모의 투자",
+          "description": "모의 투자 서버의 한계와 올바른 활용법 인식 여부",
+          "criteria": "모의 투자 수익률을 맹신하지 않고, 시스템 동작 안정성 검증 용도로만 사용",
+          "actual_value": "한계 인식: 5/5",
+          "expected_value": "모든 한계점 인식",
+          "message": "모의 투자 한계 충분히 인식됨",
+          "timestamp": "2026-03-06T13:37:29.679272",
+          "execution_time_ms": 0.001430511474609375,
+          "metadata": {
+            "limitations": {
+              "무한 유동성 가정": true,
+              "슬리피지 미반영": true,
+              "체결 로직 차이": true,
+              "시장 충격 미반영": true,
+              "수익률 과대 평가 가능성": true
+            },
+            "usage_guidelines": {
+              "API 연결 안정성 테스트": true,
+              "주문 로직 정합성 테스트": true,
+              "에러 핸들링 테스트": true,
+              "수익률 검증 목적 사용 금지": true
+            },
+            "warning": "모의 투자 수익률 ≠ 실전 수익률"
+          }
+        },
+        {
+          "item_name": "카나리아 배포 준비",
+          "status": "PASSED",
+          "phase": "7단계: 테스트 및 모의 투자",
+          "description": "실전 계좌에서 최소 수량으로 전략 검증 준비",
+          "criteria": "최소 수량(1주) 거래로 실제 세금, 수수료, 정산 주기 검증 가능 상태",
+          "actual_value": "준비 완료: 7/7",
+          "expected_value": "모든 항목 준비 완료",
+          "message": "카나리아 배포 준비 완료",
+          "timestamp": "2026-03-06T13:37:29.679325",
+          "execution_time_ms": 0.0026226043701171875,
+          "metadata": {
+            "canary_checklist": {
+              "최소 수량(1주) 거래 설정": true,
+              "실전 계좌 연결 테스트": true,
+              "T+2 정산 주기 확인": true,
+              "실제 세금 정산 확인": true,
+              "수수료 차감 확인": true,
+              "비상 정지 버튼 준비": true,
+              "모니터링 대시보드 준비": true
+            },
+            "deployment_strategy": "1주 단위 소액 거래로 시작 -> 점진적 증액"
+          }
+        }
+      ]
+    },
+    "OPERATIONS": {
+      "phase_name": "8단계: 배포, 운영 및 유지보수",
+      "passed": 5,
+      "failed": 0,
+      "warnings": 0,
+      "total": 5,
+      "pass_rate": "100.0%",
+      "is_phase_passed": true,
+      "results": [
+        {
+          "item_name": "자동 재접속",
+          "status": "PASSED",
+          "phase": "8단계: 배포, 운영 및 유지보수",
+          "description": "장중 인터넷 연결 강제 차단 후 복구 시나리오",
+          "criteria": "네트워크 복구 시 프로그램이 이를 감지하고 API 재로그인 및 정상화 수행",
+          "actual_value": "재연결 시간: 3000ms",
+          "expected_value": "< 10000ms",
+          "message": "자동 재연결 정상",
+          "timestamp": "2026-03-06T13:37:29.679502",
+          "execution_time_ms": 0.0007152557373046875,
+          "metadata": {
+            "reconnection_time_ms": 3000.0,
+            "max_reconnection_time_ms": 10000,
+            "reconnection_steps": {
+              "네트워크 복구 감지": true,
+              "API 재로그인 시도": true,
+              "세션 복구": true,
+              "미체결 주문 상태 동기화": true,
+              "정상 운영 모드 전환": true
+            }
+          }
+        },
+        {
+          "item_name": "로그 무결성",
+          "status": "PASSED",
+          "phase": "8단계: 배포, 운영 및 유지보수",
+          "description": "일주일간 운영 후 로그 파일 분석",
+          "criteria": "에러 레벨(Error/Critical) 로그 발생 시 즉시 알림 전송 여부 확인",
+          "actual_value": "에러 알림 전송률: 100%",
+          "expected_value": "100% 알림 전송",
+          "message": "로그 관리 정상",
+          "timestamp": "2026-03-06T13:37:29.679537",
+          "execution_time_ms": 0.00095367431640625,
+          "metadata": {
+            "error_logs_with_alerts": 10,
+            "total_error_logs": 10,
+            "alert_rate": 100.0,
+            "log_management": {
+              "로그 레벨 분류": true,
+              "타임스탬프 포함": true,
+              "구조화된 로그 형식": true,
+              "로그 로테이션": true,
+              "에러 즉시 알림": true
+            },
+            "recommended_tools": [
+              "structlog",
+              "loguru",
+              "ELK Stack"
+            ]
+          }
+        },
+        {
+          "item_name": "데이터 백업",
+          "status": "PASSED",
+          "phase": "8단계: 배포, 운영 및 유지보수",
+          "description": "서버 고장 시나리오 - 백업된 DB를 통해 다른 PC에서 복구",
+          "criteria": "1시간 이내 시스템 복구 가능 여부",
+          "actual_value": "복구 시간: 45분",
+          "expected_value": "< 60분",
+          "message": "백업/복구 체계 정상",
+          "timestamp": "2026-03-06T13:37:29.679564",
+          "execution_time_ms": 0.00095367431640625,
+          "metadata": {
+            "recovery_time_minutes": 45.0,
+            "max_recovery_time_minutes": 60,
+            "backup_checklist": {
+              "일일 자동 백업": true,
+              "증분 백업 지원": true,
+              "원격 백업 저장소": true,
+              "백업 암호화": true,
+              "복구 테스트 완료": true,
+              "복구 매뉴얼 문서화": true
+            },
+            "backup_items": [
+              "거래 내역 DB",
+              "전략 설정 파일",
+              "API 인증 정보 (암호화)",
+              "시스템 로그"
+            ]
+          }
+        },
+        {
+          "item_name": "운영 스케줄러",
+          "status": "PASSED",
+          "phase": "8단계: 배포, 운영 및 유지보수",
+          "description": "자동 로그인, 장 시작/마감 스케줄링 검증",
+          "criteria": "Windows 작업 스케줄러 또는 Python schedule 라이브러리로 전체 운영 자동화",
+          "actual_value": "스케줄 항목: 9/9",
+          "expected_value": "모든 스케줄 자동화 완료",
+          "message": "운영 자동화 완료",
+          "timestamp": "2026-03-06T13:37:29.679601",
+          "execution_time_ms": 0.0019073486328125,
+          "metadata": {
+            "schedule_items": {
+              "08:30 - 시스템 부팅": true,
+              "08:35 - API 버전 체크": true,
+              "08:40 - 시세 연결": true,
+              "08:50 - 사전 점검 완료": true,
+              "09:00 - 장 시작 대기": true,
+              "15:35 - 장 마감 처리": true,
+              "15:40 - 일일 리포트 생성": true,
+              "16:00 - 데이터 백업": true,
+              "18:00 - 시스템 종료 (선택)": true
+            },
+            "auto_login_config": {
+              "인증서 비밀번호 자동화": true,
+              "계좌 비밀번호 보안 저장": true,
+              "pywinauto 또는 증권사 기능 사용": true
+            },
+            "market_hours": {
+              "pre_market": "08:30",
+              "market_open": "09:00",
+              "market_close": "15:30",
+              "post_market": "16:00"
+            }
+          }
+        },
+        {
+          "item_name": "모니터링 및 알림",
+          "status": "PASSED",
+          "phase": "8단계: 배포, 운영 및 유지보수",
+          "description": "텔레그램/슬랙 등을 통한 실시간 알림 시스템 검증",
+          "criteria": "주요 이벤트(체결, 에러, Heartbeat) 발생 시 관리자 스마트폰으로 즉시 알림",
+          "actual_value": "알림 채널: 1개, 이벤트: 6/6",
+          "expected_value": "1개 이상 채널 + 모든 필수 이벤트 알림",
+          "message": "모니터링 시스템 정상",
+          "timestamp": "2026-03-06T13:37:29.679636",
+          "execution_time_ms": 0.0021457672119140625,
+          "metadata": {
+            "alert_channels": {
+              "텔레그램 봇": true,
+              "슬랙 웹훅": false,
+              "이메일": false,
+              "SMS": false
+            },
+            "required_alerts": {
+              "매매 체결 시": true,
+              "에러 발생 시": true,
+              "일일 손익 리포트": true,
+              "시스템 Heartbeat (주기적)": true,
+              "Kill Switch 작동 시": true,
+              "연결 끊김/재연결 시": true
+            },
+            "recommended_setup": {
+              "primary": "텔레그램 봇 (무료, 안정적)",
+              "secondary": "슬랙 웹훅 (팀 협업 시)",
+              "heartbeat_interval": "5분"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

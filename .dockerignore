@@ -1,0 +1,43 @@
+# Backups
+*.bak
+*.bak_*
+*.BROKEN_*
+
+# Data (large)
+data/
+_cache/
+_krx_seed_full/
+_krx_manual/
+paper/
+runs/
+2_Logs/
+_diag/
+
+# Evolution results
+3_Evolution/
+4_GoldVein/
+5_StrategyMap/
+6_Final_Landscape/
+8_MetaEvolution/
+9_MasterAlpha/
+10_Validation_Report/
+11_Autonomous_Evolution/
+12_Risk_Controlled/
+13_Elite_Results/
+16_Audit_Report/
+02_Audit/
+03_Distribution/
+
+# Git
+.git/
+.gitignore
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Junk files
+_bak/
+_dev/
+_notes/
+*.log

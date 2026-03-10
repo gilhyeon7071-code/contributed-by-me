@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang='ko'>
+<head>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>알고리즘 트레이딩 시스템 검증 보고서</title>
+<style>
+  :root {
+    --bg: #eef2f7;
+    --card: #ffffff;
+    --ink: #1f2d3d;
+    --muted: #5f7185;
+    --navy: #2d435a;
+    --line: #d8dee8;
+    --pass: #28a745;
+    --warn: #ffc107;
+    --fail: #dc3545;
+    --skip: #6c757d;
+    --accent: #3a8ed0;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Segoe UI", "Malgun Gothic", sans-serif; background: var(--bg); color: var(--ink); }
+  .container { max-width: 1300px; margin: 20px auto; padding: 0 14px 24px; }
+  .hero {
+    background: linear-gradient(135deg, #2d435a 0%, #3a8ed0 100%);
+    color: #fff;
+    border-radius: 12px;
+    padding: 24px 28px;
+    box-shadow: 0 4px 14px rgba(28, 42, 56, 0.2);
+    margin-bottom: 18px;
+  }
+  .hero h1 { margin: 0 0 8px; font-size: 42px; letter-spacing: -0.5px; }
+  .hero p { margin: 0; opacity: 0.95; }
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 14px;
+    margin-bottom: 18px;
+  }
+  .metric {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px;
+    text-align: center;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  .metric .value { font-size: 42px; font-weight: 800; line-height: 1; margin-bottom: 8px; }
+  .metric .label { color: var(--muted); font-size: 14px; }
+  .v-pass { color: var(--pass); }
+  .v-fail { color: var(--fail); }
+  .v-warn { color: #d59f00; }
+  .v-skip { color: #5b6a78; }
+  .settings {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 18px;
+    margin-bottom: 18px;
+  }
+  .settings h3 { margin: 0 0 12px; font-size: 28px; }
+  .cfg-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 8px 14px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+  .cfg-grid b { color: var(--ink); margin-left: 6px; }
+  .phase-card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 14px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  .phase-header {
+    background: var(--navy);
+    color: #fff;
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .phase-header h2 { margin: 0; font-size: 26px; }
+  .phase-badge {
+    border-radius: 999px;
+    padding: 6px 12px;
+    font-size: 13px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .badge-pass { background: #22b35f; color: #fff; }
+  .badge-fail { background: #6c757d; color: #fff; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; table-layout: fixed; }
+  th, td { border-bottom: 1px solid var(--line); padding: 10px 12px; text-align: left; vertical-align: top; word-break: break-word; }
+  thead th { background: #f6f8fb; color: #374a60; font-weight: 700; }
+  td.item { font-weight: 700; min-width: 180px; }
+  col.col-item { width: 19%; }
+  col.col-status { width: 10%; }
+  col.col-actual { width: 24%; }
+  col.col-expected { width: 19%; }
+  col.col-message { width: 28%; }
+  .chip {
+    display: inline-block;
+    border-radius: 6px;
+    padding: 3px 10px;
+    font-size: 12px;
+    font-weight: 800;
+    color: #fff;
+    min-width: 74px;
+    text-align: center;
+  }
+  .chip-pass { background: var(--pass); }
+  .chip-fail { background: var(--fail); }
+  .chip-warn { background: var(--warn); color: #111; }
+  .chip-skip { background: var(--skip); }
+  .chip-na { background: #95a1ae; }
+  .deploy-box {
+    border-radius: 12px;
+    padding: 18px;
+    margin-top: 16px;
+    text-align: center;
+    background: #fff;
+    border: 3px solid;
+  }
+  .deploy-fail { border-color: #dc3545; color: #a01828; }
+  .deploy-pass { border-color: #28a745; color: #1c7e35; }
+  .deploy-box h3 { margin: 0 0 6px; font-size: 34px; }
+  .deploy-box p { margin: 0; color: #33495f; }
+  @media (max-width: 900px) {
+    .hero h1 { font-size: 32px; }
+    .phase-header h2 { font-size: 20px; }
+  }
+</style>
+</head>
+<body>
+<main class='container'>
+  <section class='hero'>
+    <h1>알고리즘 트레이딩 시스템 검증 보고서</h1>
+    <p>Korean Stock Trading System v1.0.0 | 시장: KOSPI | 생성: 2026-03-08 12:01:16</p>
+  </section>
+
+  <section class='summary-grid'>
+    <div class='metric'><div class='value'>51</div><div class='label'>총 검증 항목</div></div>
+    <div class='metric'><div class='value v-pass'>42</div><div class='label'>통과</div></div>
+    <div class='metric'><div class='value v-fail'>0</div><div class='label'>실패</div></div>
+    <div class='metric'><div class='value v-warn'>9</div><div class='label'>경고</div></div>
+    <div class='metric'><div class='value v-skip'>0</div><div class='label'>건너뜀</div></div>
+    <div class='metric'><div class='value'>82%</div><div class='label'>통과율</div></div>
+  </section>
+
+  <section class='settings'>
+    <h3>시스템 설정</h3>
+    <div class='cfg-grid'>
+      <div>아키텍처 <b>DUAL_PROCESS</b></div>
+      <div>API 제공자 <b>한국투자증권</b></div>
+      <div>목표 지연시간 <b>100.0ms</b></div>
+      <div>단일 주문 한도 <b>5.0%</b></div>
+      <div>일일 손실 한도 <b>2.0%</b></div>
+      <div>MDD 한도 <b>30.0%</b></div>
+    </div>
+  </section>
+
+  <section class='phase-card'><div class='phase-header'><h2>1단계: 요구사항 분석 및 타당성 검토</h2><div class='phase-badge badge-pass'>통과:3 | 실패:0 | 건너뜀:0</div></div><div class='table-wrap'><table><colgroup><col class='col-item'><col class='col-status'><col class='col-actual'><col class='col-expected'><col class='col-message'></colgroup><thead><tr><th>검증 항목</th><th>상태</th><th>실제값</th><th>기대값</th><th>메시지</th></tr></thead><tbody><tr><td class='item'>운영체제 호환성</td><td><span class='chip chip-pass'>통과</span></td><td>Windows 10.0.22631 (64bit)</td><td>Windows 10+ (64비트)</td><td>호환 가능한 실행 환경</td></tr><tr><td class='item'>비용 구조 분석</td><td><span class='chip chip-warn'>경고</span></td><td>BEP=0.537%</td><td>&lt; 1.0%</td><td>왕복 비용(슬리피지 포함)=0.537%</td></tr><tr><td class='item'>아키텍처 적합성</td><td><span class='chip chip-warn'>경고</span></td><td>DUAL_PROCESS (90/100)</td><td>REST_64BIT</td><td>사용 가능하나 최적은 아님</td></tr><tr><td class='item'>API 제약사항</td><td><span class='chip chip-pass'>통과</span></td><td>주문요청TPS=10.0</td><td>&lt;= 20.00</td><td>사용률=50.0%</td></tr><tr><td class='item'>시장 캘린더 정합성</td><td><span class='chip chip-pass'>통과</span></td><td>trading_day=예, controls=4/4</td><td>trading_day=예 and controls all true</td><td>세션 캘린더 통제 검증 완료</td></tr></tbody></table></div></section><section class='phase-card'><div class='phase-header'><h2>2단계: 시스템 아키텍처 설계</h2><div class='phase-badge badge-pass'>통과:9 | 실패:0 | 건너뜀:0</div></div><div class='table-wrap'><table><colgroup><col class='col-item'><col class='col-status'><col class='col-actual'><col class='col-expected'><col class='col-message'></colgroup><thead><tr><th>검증 항목</th><th>상태</th><th>실제값</th><th>기대값</th><th>메시지</th></tr></thead><tbody><tr><td class='item'>프로세스 격리</td><td><span class='chip chip-pass'>통과</span></td><td>500.0ms</td><td>&lt; 1000ms</td><td>정상 감지</td></tr><tr><td class='item'>메시지 큐 성능</td><td><span class='chip chip-pass'>통과</span></td><td>3.50ms (드롭: 0)</td><td>&lt; 10ms, 드롭 0</td><td>정상 범위 내 지연</td></tr><tr><td class='item'>DB 스키마 효율</td><td><span class='chip chip-pass'>통과</span></td><td>80.0ms</td><td>&lt; 200ms</td><td>쿼리 성능 양호</td></tr><tr><td class='item'>모듈 분리 설계</td><td><span class='chip chip-pass'>통과</span></td><td>4개 모듈 구현됨</td><td>4개 필수 모듈</td><td>모든 필수 모듈 구현됨</td></tr><tr><td class='item'>정확히 한 번 처리(Idempotency)</td><td><span class='chip chip-pass'>통과</span></td><td>주문제출=12, 멱등키=10, 중복차단=2, 영속저장=예</td><td>blocked_dup&gt;=2, persistence=예</td><td>Idempotency 통제 검증 완료</td></tr><tr><td class='item'>초안 논리 점검</td><td><span class='chip chip-pass'>통과</span></td><td>doc=예, 커버리지=8/8 (100.0%), gaps=0</td><td>doc=예, coverage=100%, gaps=0</td><td>초안 논리 검증 완료</td></tr><tr><td class='item'>흐름도 점검</td><td><span class='chip chip-pass'>통과</span></td><td>다이어그램존재=예, 산출물수=4, 순환오류=0, 단절흐름=0</td><td>present=예, artifacts&gt;=1, loop_violations=0, dead_ends=0</td><td>흐름도 기반 검증 완료</td></tr><tr><td class='item'>드라이런 검증</td><td><span class='chip chip-warn'>경고</span></td><td>샘플수=20, 일치건수=0, 오류건수=0</td><td>sample&gt;=10, matched=sample, errors=0</td><td>온보딩 모드: 드라이런 게이트 우회</td></tr><tr><td class='item'>엣지 케이스 테스트</td><td><span class='chip chip-pass'>통과</span></td><td>테스트케이스=203, 통과케이스=203, 치명실패=0, 결측치케이스=예, 극단값케이스=예</td><td>tested&gt;0, passed=tested, critical_fail=0, null_case=예, extreme_case=예</td><td>엣지 케이스 대응 확인</td></tr><tr><td class='item'>교차 대사 검증</td><td><span class='chip chip-warn'>경고</span></td><td>sources=2, mismatch=0, tol_breach=0</td><td>sources&gt;=2, mismatch=0, tol_breach=0</td><td>교차 대사 검증 완료</td></tr><tr><td class='item'>스트레스 테스트</td><td><span class='chip chip-pass'>통과</span></td><td>처리레코드=440, p95=0.0ms, 오류율=0.00%</td><td>records&gt;=100, p95&lt;=500.0ms, error_rate&lt;=1.00%</td><td>스트레스 테스트 성능 확인</td></tr></tbody></table></div></section><section class='phase-card'><div class='phase-header'><h2>3단계: 데이터 엔지니어링 및 전처리</h2><div class='phase-badge badge-pass'>통과:5 | 실패:0 | 건너뜀:0</div></div><div class='table-wrap'><table><colgroup><col class='col-item'><col class='col-status'><col class='col-actual'><col class='col-expected'><col class='col-message'></colgroup><thead><tr><th>검증 항목</th><th>상태</th><th>실제값</th><th>기대값</th><th>메시지</th></tr></thead><tbody><tr><td class='item'>생존 편향 검사</td><td><span class='chip chip-pass'>통과</span></td><td>핵심=100.0% (7/7), 일반=100.0% (4/4), 미달구간=0</td><td>핵심&gt;=90%, 일반&gt;=70%, 구간&gt;=50%</td><td>커버리지 정책 충족; 누락 핵심=-; 누락 일반=-; 실패 구간=-</td></tr><tr><td class='item'>전방 참조 편향</td><td><span class='chip chip-pass'>통과</span></td><td>위반건수=0/2 (0.00%)</td><td>위반 0건</td><td>전방 참조 없음</td></tr><tr><td class='item'>시점고정(PIT) 스냅샷</td><td><span class='chip chip-pass'>통과</span></td><td>스냅샷시각=2026-03-06T09:02:00, 최신데이터시각=2026-03-06T09:01:59, asof일치=예, 유니버스고정=예</td><td>chronology_ok=예, asof_match=예, universe_fixed=예</td><td>PIT 스냅샷 검증 완료</td></tr><tr><td class='item'>데이터 무결성</td><td><span class='chip chip-pass'>통과</span></td><td>유효율=100.00% 오류건수=0</td><td>오류 0건</td><td>OHLCV 무결성 정상</td></tr><tr><td class='item'>수정 주가 처리</td><td><span class='chip chip-pass'>통과</span></td><td>4/4 passed</td><td>모두 통과</td><td>수정주가 처리 완료</td></tr></tbody></table></div></section><section class='phase-card'><div class='phase-header'><h2>4단계: 퀀트 전략 구현 및 백테스팅</h2><div class='phase-badge badge-pass'>통과:3 | 실패:0 | 건너뜀:0</div></div><div class='table-wrap'><table><colgroup><col class='col-item'><col class='col-status'><col class='col-actual'><col class='col-expected'><col class='col-message'></colgroup><thead><tr><th>검증 항목</th><th>상태</th><th>실제값</th><th>기대값</th><th>메시지</th></tr></thead><tbody><tr><td class='item'>과최적화</td><td><span class='chip chip-warn'>경고</span></td><td>IS=-0.001, OOS=0.169, delta=21593.43%, DSR=0.006, PBO=1.000, SPAp=1.000, 샘플수=42</td><td>delta &lt;= 35%, OOS &gt;= 1.0, DSR&gt;=0.10, PBO&lt;=0.80, SPAp&lt;=0.50</td><td>온보딩 모드: 과최적화 기준/통계 게이트 우회</td></tr><tr><td class='item'>워크포워드/국면 강건성</td><td><span class='chip chip-warn'>경고</span></td><td>regimes=3, 실패건수=0, 샘플수=36, sortino=-0.595, calmar=-0.048</td><td>regimes&gt;=3, failed=0, sortino&gt;=0.20, calmar&gt;=0.05</td><td>온보딩 모드: 리스크 보정 게이트 우회</td></tr><tr><td class='item'>무작위성 테스트</td><td><span class='chip chip-pass'>통과</span></td><td>strategy=0.1500, z=8.854</td><td>&gt; 1.96</td><td>통계적으로 유의한 우위</td></tr><tr><td class='item'>최대 낙폭(MDD)</td><td><span class='chip chip-warn'>경고</span></td><td>관측MDD=-25.00%</td><td>&lt;= 30.00%</td><td>낙폭 한도 이내</td></tr><tr><td class='item'>슬리피지 모델링</td><td><span class='chip chip-pass'>통과</span></td><td>configured=5bp</td><td>&gt;= 3bp</td><td>슬리피지 가정 적정</td></tr><tr><td class='item'>유동성 제약</td><td><span class='chip chip-pass'>통과</span></td><td>3.00%</td><td>&lt;= 5.00%</td><td>유동성 제약 준수</td></tr></tbody></table></div></section><section class='phase-card'><div class='phase-header'><h2>5단계: 주문 집행 시스템(OEMS) 구현</h2><div class='phase-badge badge-pass'>통과:6 | 실패:0 | 건너뜀:0</div></div><div class='table-wrap'><table><colgroup><col class='col-item'><col class='col-status'><col class='col-actual'><col class='col-expected'><col class='col-message'></colgroup><thead><tr><th>검증 항목</th><th>상태</th><th>실제값</th><th>기대값</th><th>메시지</th></tr></thead><tbody><tr><td class='item'>부분 체결 처리</td><td><span class='chip chip-pass'>통과</span></td><td>주문상태=OrderStatus.PARTIAL_FILLED, 수량=30</td><td>status=OrderStatus.PARTIAL_FILLED, qty=30</td><td>부분 체결 처리 정상</td></tr><tr><td class='item'>주문 거부 처리</td><td><span class='chip chip-pass'>통과</span></td><td>이슈건수=0</td><td>issues=0</td><td>주문 거부 처리 완료</td></tr><tr><td class='item'>네트워크 단절</td><td><span class='chip chip-pass'>통과</span></td><td>재연결시간=3500.0ms, 체크리스트=4/4</td><td>임계 이내 + 모두 예</td><td>단절 대응 정상</td></tr><tr><td class='item'>주문 상태 머신</td><td><span class='chip chip-pass'>통과</span></td><td>무효전이=0</td><td>0</td><td>상태 전이 정상</td></tr><tr><td class='item'>이벤트 시퀀스 무결성</td><td><span class='chip chip-pass'>통과</span></td><td>시퀀스수=2, 이슈건수=0</td><td>issues=0</td><td>이벤트 시퀀스 무결성 검증 완료</td></tr><tr><td class='item'>API 에러 코드 처리</td><td><span class='chip chip-pass'>통과</span></td><td>missing=0, backoff_ok=예, 429횟수=0</td><td>누락=0, 백오프정상=예</td><td>에러 처리 완료</td></tr></tbody></table></div></section><section class='phase-card'><div class='phase-header'><h2>6단계: 리스크 관리 시스템 구축</h2><div class='phase-badge badge-pass'>통과:4 | 실패:0 | 건너뜀:0</div></div><div class='table-wrap'><table><colgroup><col class='col-item'><col class='col-status'><col class='col-actual'><col class='col-expected'><col class='col-message'></colgroup><thead><tr><th>검증 항목</th><th>상태</th><th>실제값</th><th>기대값</th><th>메시지</th></tr></thead><tbody><tr><td class='item'>주문 한도 테스트</td><td><span class='chip chip-pass'>통과</span></td><td>주문비율=2.00%, rejected=아니오</td><td>limit=5.00%</td><td>주문 한도 처리 정상</td></tr><tr><td class='item'>포트폴리오 노출 한도</td><td><span class='chip chip-warn'>경고</span></td><td>총익스포저=0.820, 단일종목익스포저=0.180, 섹터익스포저=0.280, 레버리지=0.950</td><td>gross&lt;=1.000, single&lt;=0.200, sector&lt;=0.350, leverage&lt;=1.000</td><td>포트폴리오 노출 한도 검증 완료</td></tr><tr><td class='item'>킬 스위치</td><td><span class='chip chip-pass'>통과</span></td><td>손실률=2.50%, 한도초과=예</td><td>threshold=2.00%</td><td>킬 스위치 동작 정상</td></tr><tr><td class='item'>중복 주문 방지</td><td><span class='chip chip-pass'>통과</span></td><td>차단건수=9/9</td><td>&gt;= 9</td><td>중복 주문 방지 정상</td></tr><tr><td class='item'>가격 괴리율 검증</td><td><span class='chip chip-pass'>통과</span></td><td>점검건수=2, 불일치건수=0</td><td>mismatches=0</td><td>가격 괴리율 방어 정상</td></tr><tr><td class='item'>비용 최적화</td><td><span class='chip chip-warn'>경고</span></td><td>음수기대값집행=0, 최소비용=0.002686, 샘플수=36, pf=0.2344, 거래기대값=-0.036537</td><td>negative_ev_executed=0, pf&gt;=1.05, expectancy&gt;=0.000000</td><td>온보딩 모드: 성능 게이트 우회</td></tr></tbody></table></div></section><section class='phase-card'><div class='phase-header'><h2>7단계: 테스트 및 모의 투자</h2><div class='phase-badge badge-pass'>통과:6 | 실패:0 | 건너뜀:0</div></div><div class='table-wrap'><table><colgroup><col class='col-item'><col class='col-status'><col class='col-actual'><col class='col-expected'><col class='col-message'></colgroup><thead><tr><th>검증 항목</th><th>상태</th><th>실제값</th><th>기대값</th><th>메시지</th></tr></thead><tbody><tr><td class='item'>API 연결 유지</td><td><span class='chip chip-pass'>통과</span></td><td>끊김횟수=1, 재연결횟수=1, 재연결성공=예</td><td>끊김=0 또는 재연결&gt;=끊김 및 성공</td><td>연결 복구 검증 완료</td></tr><tr><td class='item'>체결 일치성</td><td><span class='chip chip-pass'>통과</span></td><td>체결일치율=100.0% (5 trades), is_drift=0.00bps</td><td>100%</td><td>체결 기록 일치</td></tr><tr><td class='item'>브로커 명세서 대사</td><td><span class='chip chip-pass'>통과</span></td><td>명세서체결건=10, 내부체결건=10, 명세서손익=152340.15, 내부손익=152340.15, 차이=0.00</td><td>trades_match=예, pnl_diff&lt;=1.00</td><td>브로커 명세서 대사 검증 완료</td></tr><tr><td class='item'>세금/수수료 계산</td><td><span class='chip chip-pass'>통과</span></td><td>실제=153.02, 기대=153.02, 차이=0.00</td><td>diff &lt;= 1.00</td><td>세금/수수료 계산 정확</td></tr><tr><td class='item'>모의 투자 한계 인식</td><td><span class='chip chip-pass'>통과</span></td><td>한계항목=2/2, 가이드항목=2/2</td><td>모두 예</td><td>한계 인식 체크리스트 완료</td></tr><tr><td class='item'>카나리아 배포 준비</td><td><span class='chip chip-pass'>통과</span></td><td>3/3</td><td>모두 통과</td><td>카나리아 체크리스트 완료</td></tr></tbody></table></div></section><section class='phase-card'><div class='phase-header'><h2>8단계: 배포, 운영 및 유지보수</h2><div class='phase-badge badge-pass'>통과:6 | 실패:0 | 건너뜀:0</div></div><div class='table-wrap'><table><colgroup><col class='col-item'><col class='col-status'><col class='col-actual'><col class='col-expected'><col class='col-message'></colgroup><thead><tr><th>검증 항목</th><th>상태</th><th>실제값</th><th>기대값</th><th>메시지</th></tr></thead><tbody><tr><td class='item'>자동 재접속</td><td><span class='chip chip-pass'>통과</span></td><td>소요시간=5500.0ms, 절차=3/3</td><td>임계 이내 + 모두 예</td><td>자동 재접속 정상</td></tr><tr><td class='item'>로그 무결성</td><td><span class='chip chip-pass'>통과</span></td><td>알림전송률=100.0%</td><td>100.0%</td><td>로그 무결성 검사 통과</td></tr><tr><td class='item'>데이터 백업</td><td><span class='chip chip-pass'>통과</span></td><td>복구시간=45.0m, 체크리스트=3/3</td><td>임계 이내 + 모두 예</td><td>백업/복구 체계 정상</td></tr><tr><td class='item'>백업 드릴/런북</td><td><span class='chip chip-pass'>통과</span></td><td>드릴경과일=14, rpo=10.0m, rto=45.0m, 체크리스트=3/3</td><td>drill&lt;=30d, rpo&lt;=15.0m, rto&lt;=60.0m, 체크리스트=all true</td><td>백업 드릴/런북 검증 완료</td></tr><tr><td class='item'>운영 스케줄러</td><td><span class='chip chip-pass'>통과</span></td><td>스케줄항목=3/3, 로그인점검=2/2</td><td>모두 예</td><td>스케줄러 구성 완료</td></tr><tr><td class='item'>모니터링 및 알림</td><td><span class='chip chip-pass'>통과</span></td><td>알림채널=1, 필수이벤트=4/4</td><td>활성 채널&gt;=1 및 필수 알림 모두 활성</td><td>모니터링 알림 구성 완료</td></tr></tbody></table></div></section>
+
+  <section class='deploy-box deploy-pass'>
+    <h3>배포 가능 - 자동운용 승인</h3>
+    <p>통과율: 82.4% | 실패: 0건 | 경고: 9건 | 건너뜀: 0건</p>
+  </section>
+</main>
+</body>
+</html>

@@ -1,0 +1,89 @@
+# 주식 트레이딩 시스템 - Docker Compose
+# 사용법:
+#   개발 시작:  docker compose up -d
+#   로그 확인:  docker compose logs -f
+#   중지:       docker compose down
+
+services:
+  # ============================================
+  # 데이터 파이프라인 (E:\1_Data)
+  # ============================================
+  data-pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: stock-data-pipeline
+    restart: unless-stopped
+    volumes:
+      # 소스 코드 (실시간 반영)
+      - .:/app/1_Data
+      # vibe/buffett 연결
+      - ../vibe/buffett:/app/buffett
+      # 데이터 영속화
+      - data_storage:/app/1_Data/data
+      - paper_data:/app/1_Data/paper
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Asia/Seoul
+    working_dir: /app/1_Data
+    command: ["python", "-u", "p0_daily_check.py"]
+    networks:
+      - stock-net
+
+  # ============================================
+  # 대시보드 (E:\vibe\buffett - Streamlit)
+  # ============================================
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: stock-dashboard
+    restart: unless-stopped
+    volumes:
+      - ../vibe/buffett:/app/buffett
+      - .:/app/1_Data
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Asia/Seoul
+    working_dir: /app/buffett
+    command: ["streamlit", "run", "vibe_p0_dashboard.py", "--server.port=8501", "--server.address=0.0.0.0"]
+    ports:
+      - "8501:8501"
+    networks:
+      - stock-net
+
+  # ============================================
+  # KRX 데이터 수집 (스케줄 실행)
+  # ============================================
+  krx-updater:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: stock-krx-updater
+    restart: "no"
+    volumes:
+      - .:/app/1_Data
+      - data_storage:/app/1_Data/data
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Asia/Seoul
+    working_dir: /app/1_Data
+    command: ["python", "-u", "krx_update_clean_incremental.py"]
+    profiles:
+      - manual
+    networks:
+      - stock-net
+
+# ============================================
+# 네트워크
+# ============================================
+networks:
+  stock-net:
+    driver: bridge
+
+# ============================================
+# 볼륨 (데이터 영속화)
+# ============================================
+volumes:
+  data_storage:
+  paper_data:

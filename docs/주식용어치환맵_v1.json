@@ -1,0 +1,92 @@
+﻿{
+  "version": "stock_terms_v1",
+  "source_glossary": "E:/1_Data/docs/주식용어표준_v1.txt",
+  "rules": [
+    {
+      "mode": "literal",
+      "from": "SSOT 기준일",
+      "to": "기준일(SSOT)"
+    },
+    {
+      "mode": "literal",
+      "from": "현재 레짐",
+      "to": "시장 국면(HMM)"
+    },
+    {
+      "mode": "literal",
+      "from": "미체결 주문",
+      "to": "미체결 주문수"
+    },
+    {
+      "mode": "literal",
+      "from": "Observer",
+      "to": "시그널 감지"
+    },
+    {
+      "mode": "literal",
+      "from": "Candidate",
+      "to": "매수 후보군"
+    },
+    {
+      "mode": "literal",
+      "from": "Apply",
+      "to": "편입"
+    },
+    {
+      "mode": "literal",
+      "from": "Orders (data/orders)",
+      "to": "주문(생성/제출) (data/orders)"
+    },
+    {
+      "mode": "literal",
+      "from": "Ledger (data/ledger)",
+      "to": "포지션/잔고 (data/ledger)"
+    },
+    {
+      "mode": "literal",
+      "from": "Stats 상태 (data/stats)",
+      "to": "성과 지표 상태 (data/stats)"
+    },
+    {
+      "mode": "regex",
+      "from": "\\bSharpe Ratio\\b",
+      "to": "샤프지수"
+    },
+    {
+      "mode": "regex",
+      "from": "\\bWin Rate\\b",
+      "to": "승률"
+    },
+    {
+      "mode": "regex",
+      "from": "\\bMDD\\b(?!\\()",
+      "to": "MDD(최대낙폭)"
+    },
+    {
+      "mode": "literal",
+      "from": "st.metric(\"mode\", head.mode or \"-\")",
+      "to": "st.metric(\"운용 모드\", head.mode or \"-\")"
+    },
+    {
+      "mode": "literal",
+      "from": "st.metric(\"stop\", \"TRIGGERED\" if head.stop_triggered else \"OK\")",
+      "to": "st.metric(\"중단 상태\", \"발동\" if head.stop_triggered else \"정상\")"
+    },
+    {
+      "mode": "literal",
+      "from": "st.caption(f\"reason: {head.stop_reason}\")",
+      "to": "st.caption(f\"사유: {head.stop_reason}\")"
+    },
+    {
+      "mode": "literal",
+      "from": "st.write(\"run_log\")",
+      "to": "st.write(\"실행 로그\")"
+    },
+    {
+      "mode": "literal",
+      "from": "as_of=",
+      "to": "기준일="
+    }
+  ]
+}
+

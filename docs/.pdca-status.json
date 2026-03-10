@@ -1,0 +1,73 @@
+{
+  "version": "2.0",
+  "lastUpdated": "2026-02-19T07:54:57.786Z",
+  "activeFeatures": [
+    "lotto",
+    "1_Data"
+  ],
+  "primaryFeature": "lotto",
+  "features": {
+    "lotto": {
+      "phase": "do",
+      "phaseNumber": 3,
+      "matchRate": null,
+      "iterationCount": 0,
+      "requirements": [],
+      "documents": {},
+      "timestamps": {
+        "started": "2026-02-13T07:00:56.420Z",
+        "lastUpdated": "2026-02-13T07:01:08.078Z"
+      },
+      "lastFile": "C:\\Users\\jjtop\\OneDrive\\Desktop\\12_25_개별자료정리\\lotto\\lotto_master.py"
+    },
+    "1_Data": {
+      "phase": "do",
+      "phaseNumber": 3,
+      "matchRate": null,
+      "iterationCount": 0,
+      "requirements": [],
+      "documents": {},
+      "timestamps": {
+        "started": "2026-02-19T07:49:09.764Z",
+        "lastUpdated": "2026-02-19T07:54:57.786Z"
+      },
+      "lastFile": "E:\\1_Data\\generate_smartfarm_pdf.py"
+    }
+  },
+  "pipeline": {
+    "currentPhase": 1,
+    "level": "Dynamic",
+    "phaseHistory": []
+  },
+  "session": {
+    "startedAt": "2026-02-13T06:37:32.921Z",
+    "onboardingCompleted": false,
+    "lastActivity": "2026-02-19T07:54:57.786Z"
+  },
+  "history": [
+    {
+      "timestamp": "2026-02-13T07:00:56.420Z",
+      "feature": "lotto",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-02-13T07:01:08.078Z",
+      "feature": "lotto",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-02-19T07:49:09.764Z",
+      "feature": "1_Data",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-02-19T07:54:57.786Z",
+      "feature": "1_Data",
+      "phase": "do",
+      "action": "updated"
+    }
+  ]
+}

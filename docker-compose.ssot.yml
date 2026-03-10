@@ -1,0 +1,16 @@
+# 주식 트레이딩 시스템 - Docker Compose
+# 사용법:
+#   개발 시작:  docker compose up -d
+#   로그 확인:  docker compose logs -f
+#   중지:       docker compose down
+
+services:
+  # ============================================
+  # 데이터 파이프라인 (E:\1_Data)
+  # ============================================
+  data-pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: stock-data-pipeline
+    restart: unless-stopped
