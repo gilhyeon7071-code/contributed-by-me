@@ -1,0 +1,92 @@
+name: Codex LLM Review Advisory
+
+on:
+  workflow_dispatch:
+    inputs:
+      diff_ref:
+        description: "Optional git diff ref, for example origin/main...HEAD"
+        required: false
+        default: ""
+      max_diff_chars:
+        description: "Maximum diff characters to include"
+        required: false
+        default: "60000"
+      max_context_file_chars:
+        description: "Maximum characters per context file"
+        required: false
+        default: "40000"
+
+permissions:
+  contents: read
+
+jobs:
+  build-review-context:
+    name: Build advisory review context
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build review context
+        shell: pwsh
+        run: |
+          $args = @(
+            "tools\ci\build_codex_review_context.py",
+            "--max-diff-chars",
+            "${{ inputs.max_diff_chars }}",
+            "--max-context-file-chars",
+            "${{ inputs.max_context_file_chars }}"
+          )
+          if ("${{ inputs.diff_ref }}") {
+            $args += "--diff-ref"
+            $args += "${{ inputs.diff_ref }}"
+          }
+          python @args | Out-File -FilePath codex_review_context.md -Encoding utf8
+
+      - name: Validate parser with advisory sample
+        shell: pwsh
+        run: |
+          $sampleLines = @(
+            "Findings",
+            "- Severity: WARN",
+            "  File/line: .github/workflows/codex-llm-review-advisory.yml:1",
+            "  Fact: This workflow only builds context and validates parser behavior.",
+            "  Risk: No LLM API call or PR comment is configured yet.",
+            "  Required action: Keep advisory until explicit approval.",
+            "  Code change required: no",
+            "",
+            "Facts",
+            "- Manual workflow generated review context.",
+            "",
+            "Interpretation",
+            "- This is a CI scaffold, not a complete LLM review integration.",
+            "",
+            "Validation matrix",
+            "| Item | Status | Evidence |",
+            "| --- | --- | --- |",
+            "| Functional validation | PASS | Parser sample |",
+            "| Consistency validation | PASS | Machine result JSON |",
+            "| Operational reflection validation | NA | No operational output |",
+            "| Policy validation | PASS | Advisory only |",
+            "| FAIL-CLOSED validation | PASS | Parser handles machine result |",
+            "| Regression validation | NA | No operational path |",
+            "",
+            "Untested areas",
+            "- Real LLM response",
+            "- PR comment writer",
+            "",
+            "Machine result",
+            '```json',
+            '{"result":"WARN","findings_count":1}',
+            '```'
+          )
+          Set-Content -Path codex_review_sample.md -Value $sampleLines -Encoding utf8
+          python tools\ci\parse_codex_review_result.py codex_review_sample.md
+
+      - name: Upload advisory artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-review-advisory
+          path: |
+            codex_review_context.md
+            codex_review_sample.md

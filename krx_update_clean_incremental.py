@@ -1,45 +1,42 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import argparse
-from pathlib import Path
 from datetime import datetime, timedelta
-from typing import List, Optional, Tuple
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
-# --- PATCH: default requests timeout to avoid hangs ---
+# Default network timeout guard for requests-based dependencies.
 try:
     import requests
+
     _orig_request = requests.sessions.Session.request
+
     def _request_with_timeout(self, method, url, **kwargs):
-        if kwargs.get("timeout", None) is None:
-            kwargs["timeout"] = (5, 30)  # (connect, read) seconds
+        if kwargs.get("timeout") is None:
+            kwargs["timeout"] = (5, 30)
         return _orig_request(self, method, url, **kwargs)
+
     requests.sessions.Session.request = _request_with_timeout
 except Exception:
     pass
-# --- END PATCH ---
 
-
-# ---- deps (fail fast) --------------------------------------------------------
 try:
     from pykrx import stock
-except Exception as e:  # pragma: no cover
+except Exception as e:
     raise SystemExit(f"[FATAL] pykrx import failed: {type(e).__name__}: {e}")
 
-# ---- helpers -----------------------------------------------------------------
+
 BASE_DIR = Path(__file__).resolve().parent
-
-KOREAN_COL_MAP = {
-    "시가": "open",
-    "고가": "high",
-    "저가": "low",
-    "종가": "close",
-    "거래량": "volume",
-    "등락률": "change_rate",
-}
-
 MARKETS = ["KOSPI", "KOSDAQ"]
+
+K_OPEN = "\uc2dc\uac00"
+K_HIGH = "\uace0\uac00"
+K_LOW = "\uc800\uac00"
+K_CLOSE = "\uc885\uac00"
+K_VOLUME = "\uac70\ub798\ub7c9"
+K_CHANGE_RATE = "\ub4f1\ub77d\ub960"
 
 
 def _yyyymmdd(s: str) -> str:
@@ -47,8 +44,6 @@ def _yyyymmdd(s: str) -> str:
 
 
 def _default_end_yyyymmdd() -> str:
-    """Default end date = prev weekday/session of today (KRX)."""
-    # Prefer exchange_calendars if available
     try:
         import exchange_calendars as xc
         import pandas as _pd
@@ -58,11 +53,9 @@ def _default_end_yyyymmdd() -> str:
         prev = cal.date_to_session(today, direction="previous")
         return prev.strftime("%Y%m%d")
     except Exception:
-        d = datetime.now().date()
-        # prev weekday (Mon-Fri)
-        d = d - timedelta(days=1)
+        d = datetime.now().date() - timedelta(days=1)
         while d.weekday() >= 5:
-            d = d - timedelta(days=1)
+            d -= timedelta(days=1)
         return d.strftime("%Y%m%d")
 
 
@@ -71,7 +64,6 @@ def _find_clean_parquets(root: Path) -> List[Path]:
 
 
 def _parquet_schema_cols(p: Path) -> Tuple[List[str], str]:
-    """Return (schema_cols, date_type_hint)."""
     try:
         import pyarrow.parquet as pq  # type: ignore
 
@@ -92,21 +84,40 @@ def _parquet_schema_cols(p: Path) -> Tuple[List[str], str]:
 
 
 def _parquet_date_max(p: Path) -> Optional[str]:
-    """Compute date_max(YYYYMMDD) from parquet's date column."""
     try:
         df = pd.read_parquet(p, columns=["date"])
     except Exception:
         return None
-    if df is None or df.empty or "date" not in df.columns:
+    if df.empty or "date" not in df.columns:
         return None
-    s = df["date"].astype(str).str.replace("-", "").str[:8]
-    if s.empty:
-        return None
-    return str(s.max())
+    s = df["date"].astype(str).str.replace("-", "", regex=False).str[:8]
+    return str(s.max()) if not s.empty else None
+
+
+def _series_from_candidates(df: pd.DataFrame, names: List[str]) -> pd.Series:
+    for n in names:
+        if n in df.columns:
+            return df[n]
+    norm = {str(c).strip(): c for c in df.columns}
+    for n in names:
+        c = norm.get(str(n).strip())
+        if c is not None:
+            return df[c]
+    return pd.Series([pd.NA] * len(df), index=df.index)
+
+
+def _row_from_candidates(row: pd.Series, names: List[str], default=pd.NA):
+    idx = {str(k).strip(): k for k in row.index}
+    for n in names:
+        if n in row.index:
+            return row[n]
+        key = idx.get(str(n).strip())
+        if key is not None:
+            return row[key]
+    return default
 
 
 def _normalize_by_ticker_df(ymd: str, mkt: str, df: pd.DataFrame) -> pd.DataFrame:
-    """Normalize output of stock.get_market_ohlcv_by_ticker()."""
     if df is None or df.empty:
         return pd.DataFrame()
 
@@ -115,31 +126,33 @@ def _normalize_by_ticker_df(ymd: str, mkt: str, df: pd.DataFrame) -> pd.DataFram
     x["market"] = mkt
     x["date"] = ymd
 
-    # map Korean columns
-    for k, v in KOREAN_COL_MAP.items():
-        if k in x.columns and v not in x.columns:
-            x[v] = x[k]
-
-    if "change_rate" not in x.columns:
-        if "change" in x.columns:
-            x["change_rate"] = x["change"]
-        else:
-            x["change_rate"] = pd.NA
-
-    if "volume" not in x.columns:
-        x["volume"] = 0
-
-    x["value"] = pd.to_numeric(x.get("close", pd.NA), errors="coerce") * pd.to_numeric(
-        x.get("volume", 0), errors="coerce"
+    x["open"] = _series_from_candidates(x, ["open", "Open", K_OPEN])
+    x["high"] = _series_from_candidates(x, ["high", "High", K_HIGH])
+    x["low"] = _series_from_candidates(x, ["low", "Low", K_LOW])
+    x["close"] = _series_from_candidates(x, ["close", "Close", K_CLOSE])
+    x["volume"] = _series_from_candidates(x, ["volume", "Volume", K_VOLUME])
+    x["change_rate"] = _series_from_candidates(
+        x, ["change_rate", "change", "Change", K_CHANGE_RATE]
     )
 
-    keep = ["date", "code", "market", "open", "high", "low", "close", "volume", "value", "change_rate"]
-    for c in keep:
-        if c not in x.columns:
-            x[c] = pd.NA
+    x["value"] = pd.to_numeric(x["close"], errors="coerce") * pd.to_numeric(
+        x["volume"], errors="coerce"
+    )
 
+    keep = [
+        "date",
+        "code",
+        "market",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "value",
+        "change_rate",
+    ]
     out = x[keep].copy()
-    out["date"] = out["date"].astype(str).str.replace("-", "").str[:8]
+    out["date"] = out["date"].astype(str).str.replace("-", "", regex=False).str[:8]
     out["code"] = out["code"].astype(str).str.zfill(6)
 
     for c in ["open", "high", "low", "close", "volume", "value", "change_rate"]:
@@ -149,64 +162,61 @@ def _normalize_by_ticker_df(ymd: str, mkt: str, df: pd.DataFrame) -> pd.DataFram
     return out
 
 
-def _fetch_day_by_date_probe(ymd: str, mkt: str, probe_codes: List[str]) -> pd.DataFrame:
-    """
-    Fallback when by_ticker() is empty.
-    Uses by_date() for a small probe list (fast + stable enough to advance date_max).
-    """
+def _fetch_day_by_date_codes(ymd: str, mkt: str, codes: List[str]) -> pd.DataFrame:
+    if not codes:
+        return pd.DataFrame()
+
     recs = []
-    i = 0
-    n = len(probe_codes)
-    for code in probe_codes:
-        i += 1
-        if (i == 1) or ((i % 50) == 0):
-            print("[PROBE] {} {} {}/{} ok={}".format(ymd, mkt, i, n, len(recs)), flush=True)
+    n = len(codes)
+    for i, code in enumerate(codes, start=1):
+        if i == 1 or i % 50 == 0 or i == n:
+            print(f"[PROBE] {ymd} {mkt} {i}/{n} ok={len(recs)}", flush=True)
+
         code6 = str(code).zfill(6)
         try:
             dft = stock.get_market_ohlcv_by_date(ymd, ymd, code6)
         except Exception:
             continue
-        if dft is None or len(dft) == 0:
+        if dft is None or dft.empty:
             continue
 
         row = dft.iloc[-1]
-        rec = {
-            "date": ymd,
-            "code": code6,
-            "market": mkt,
-            "open": row.get("시가", row.get("open", pd.NA)),
-            "high": row.get("고가", row.get("high", pd.NA)),
-            "low": row.get("저가", row.get("low", pd.NA)),
-            "close": row.get("종가", row.get("close", pd.NA)),
-            "volume": row.get("거래량", row.get("volume", 0)),
-            "change_rate": row.get("등락률", row.get("change_rate", pd.NA)),
-        }
-        recs.append(rec)
+        recs.append(
+            {
+                "date": ymd,
+                "code": code6,
+                "market": mkt,
+                "open": _row_from_candidates(row, ["open", "Open", K_OPEN]),
+                "high": _row_from_candidates(row, ["high", "High", K_HIGH]),
+                "low": _row_from_candidates(row, ["low", "Low", K_LOW]),
+                "close": _row_from_candidates(row, ["close", "Close", K_CLOSE]),
+                "volume": _row_from_candidates(row, ["volume", "Volume", K_VOLUME], 0),
+                "change_rate": _row_from_candidates(
+                    row, ["change_rate", "change", "Change", K_CHANGE_RATE]
+                ),
+            }
+        )
 
     if not recs:
         return pd.DataFrame()
 
     out = pd.DataFrame.from_records(recs)
-    out["date"] = out["date"].astype(str).str.replace("-", "").str[:8]
+    out["date"] = out["date"].astype(str).str.replace("-", "", regex=False).str[:8]
     out["code"] = out["code"].astype(str).str.zfill(6)
     for c in ["open", "high", "low", "close", "volume", "change_rate"]:
         out[c] = pd.to_numeric(out[c], errors="coerce")
-    out["value"] = pd.to_numeric(out.get("close", pd.NA), errors="coerce") * pd.to_numeric(
-        out.get("volume", 0), errors="coerce"
+    out["value"] = pd.to_numeric(out["close"], errors="coerce") * pd.to_numeric(
+        out["volume"], errors="coerce"
     )
     out = out.dropna(subset=["date", "code", "open", "high", "low", "close"])
     return out
 
 
 def _build_to_schema(df: pd.DataFrame, schema_cols: List[str], date_type_hint: str) -> pd.DataFrame:
-    """
-    df(standard columns) -> fit schema_cols. Missing columns become NA.
-    If schema wants 'change_rate' but df has 'change', map it.
-    """
     out = pd.DataFrame()
 
     if "date" in schema_cols:
-        if "timestamp" in (date_type_hint or "").lower() or "date" in (date_type_hint or "").lower():
+        if "timestamp" in date_type_hint.lower() or "date" in date_type_hint.lower():
             out["date"] = pd.to_datetime(df["date"].astype(str), format="%Y%m%d", errors="coerce")
         else:
             out["date"] = df["date"].astype(str)
@@ -224,44 +234,49 @@ def _build_to_schema(df: pd.DataFrame, schema_cols: List[str], date_type_hint: s
     return out
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(
-        description="Incrementally add missing KRX daily data into a new *_clean.parquet."
-    )
-    ap.add_argument(
-        "--base", "--base-dir",
-        default=str(BASE_DIR),
-        help="Base directory to search krx_daily_*_clean.parquet (default: script dir)",
-    )
-    ap.add_argument(
-        "--end",
-        default=None,
-        help="Target end date yyyymmdd (default: prev weekday/session of today)",
-    )
-    ap.add_argument(
-        "--out-dir",
-        default=None,
-        help="Output directory (default: latest clean parquet's parent)",
-    )
-    ap.add_argument(
-        "--probe-cap",
-        type=int,
-        default=50,
-        help="Max probe codes to try per market if by_ticker() is empty (default: 50)",
-    )
+def _fallback_caps(total: int, seed: int) -> List[int]:
+    if total <= 0:
+        return []
+    seed = max(1, int(seed))
+    ramp = [seed, 300, 700, 1200, 1800, total]
+    caps: List[int] = []
+    for x in ramp:
+        c = min(total, int(x))
+        if c not in caps:
+            caps.append(c)
+    caps.sort()
+    return caps
 
-    ap.add_argument(
-        "--min-uni",
-        type=int,
-        default=2000,
-        help="Fail-closed if fetched day's universe (unique codes) is below this threshold (default: 2000)",
-    )
-    ap.add_argument(
-        "--coverage",
-        type=float,
-        default=0.90,
-        help="Required coverage ratio for by_date_probe fallback (default: 0.90)",
-    )
+
+def _market_code_pool(latest: Path, latest_ymd: str) -> Dict[str, List[str]]:
+    slim = pd.read_parquet(latest, columns=["date", "code", "market"])
+    d = pd.to_datetime(slim["date"], errors="coerce")
+    mx = datetime.strptime(latest_ymd, "%Y%m%d").date()
+    mask = d.dt.date == mx
+    sl = slim.loc[mask, ["code", "market"]].copy()
+
+    out: Dict[str, List[str]] = {}
+    for mkt in MARKETS:
+        codes = (
+            sl.loc[sl["market"].astype(str) == mkt, "code"]
+            .astype(str)
+            .str.zfill(6)
+            .dropna()
+            .drop_duplicates()
+            .tolist()
+        )
+        out[mkt] = codes
+    return out
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Incrementally add missing KRX daily data into a new *_clean.parquet.")
+    ap.add_argument("--base", "--base-dir", default=str(BASE_DIR))
+    ap.add_argument("--end", default=None)
+    ap.add_argument("--out-dir", default=None)
+    ap.add_argument("--probe-cap", type=int, default=50)
+    ap.add_argument("--min-uni", type=int, default=2000)
+    ap.add_argument("--coverage", type=float, default=0.90)
     args = ap.parse_args()
 
     base = Path(args.base)
@@ -269,57 +284,51 @@ def main() -> int:
         raise SystemExit(f"[FATAL] base not found: {base}")
 
     end_ymd = _yyyymmdd(args.end) if args.end else _default_end_yyyymmdd()
+    min_uni = max(1, int(args.min_uni))
 
     clean_files = _find_clean_parquets(base)
     if not clean_files:
         raise SystemExit(f"[FATAL] no krx_daily_*_clean.parquet under base={base}")
 
-    # pick best clean parquet by (date_max, ncode) with universe guard
-    MIN_UNI = 2000
     cand = []
-    for _p in clean_files:
-        _dm = _parquet_date_max(_p)
-        if not _dm:
+    for p in clean_files:
+        dm = _parquet_date_max(p)
+        if not dm:
             continue
-        _n = 0
+        n = 0
         try:
-            _sl = pd.read_parquet(_p, columns=["date","code"])
-            _d = pd.to_datetime(_sl["date"], errors="coerce")
-            if len(_sl) > 0 and (not _d.isna().all()):
-                _mx = _d.max()
-                _n = int(_sl.loc[_d==_mx,"code"].astype(str).nunique())
+            sl = pd.read_parquet(p, columns=["date", "code"])
+            d = pd.to_datetime(sl["date"], errors="coerce")
+            if len(sl) > 0 and not d.isna().all():
+                mx = d.max()
+                n = int(sl.loc[d == mx, "code"].astype(str).nunique())
         except Exception:
-            _n = 0
-        cand.append((_p, _dm, _n, _p.stat().st_mtime))
+            n = 0
+        cand.append((p, dm, n, p.stat().st_mtime))
+
     if not cand:
         raise SystemExit(f"[FATAL] cannot read date_max from any clean parquet under base={base}")
-    good = [t for t in cand if t[2] >= MIN_UNI]
-    pick = max(good, key=lambda t:(t[1],t[2],t[3])) if good else max(cand, key=lambda t:(t[1],t[2],t[3]))
+
+    good = [t for t in cand if t[2] >= min_uni]
+    pick = max(good, key=lambda t: (t[1], t[2], t[3])) if good else max(cand, key=lambda t: (t[1], t[2], t[3]))
     latest, prev_max, prev_ncode, _ = pick
-    if prev_ncode < MIN_UNI:
-        raise SystemExit(f"[FATAL] latest clean universe degraded (ncode={prev_ncode} < MIN_UNI={MIN_UNI}). abort to avoid partial update. latest={latest}")
+
+    if prev_ncode < min_uni:
+        raise SystemExit(
+            f"[FATAL] latest clean universe degraded (ncode={prev_ncode} < MIN_UNI={min_uni}). "
+            f"abort to avoid partial update. latest={latest}"
+        )
 
     schema_cols, date_type_hint = _parquet_schema_cols(latest)
+    codes_by_market = _market_code_pool(latest, prev_max)
 
-    # probe codes from latest parquet (deterministic + small)
-    probe_by_market = {}
-    try:
-        slim = pd.read_parquet(latest, columns=["code", "market"])
-        for mkt in MARKETS:
-            codes = (
-                slim[slim["market"].astype(str) == mkt]["code"]
-                .astype(str)
-                .str.zfill(6)
-                .dropna()
-                .unique()
-                .tolist()
-            )
-            # user-verified: 005930 by_date works at least for 2026-01-07~09
-            if mkt == "KOSPI" and "005930" not in codes:
-                codes = ["005930"] + codes
-            probe_by_market[mkt] = codes[: max(1, int(args.probe_cap))]
-    except Exception:
-        probe_by_market = {m: (["005930"] if m == "KOSPI" else []) for m in MARKETS}
+    total_prev_codes = max(1, sum(len(v) for v in codes_by_market.values()))
+    market_min: Dict[str, int] = {}
+    for mkt in MARKETS:
+        cnt = len(codes_by_market.get(mkt, []))
+        ratio = cnt / total_prev_codes if total_prev_codes else 0
+        need = max(1, int(min_uni * ratio * 0.85))
+        market_min[mkt] = min(need, cnt) if cnt > 0 else 0
 
     start_dt = datetime.strptime(prev_max, "%Y%m%d").date() + timedelta(days=1)
     end_dt = datetime.strptime(end_ymd, "%Y%m%d").date()
@@ -327,22 +336,22 @@ def main() -> int:
         print(f"[OK] nothing to do (prev_max={prev_max} >= end={end_ymd})")
         return 0
 
-    all_frames = []
-    fetched_days: List[str] = []
-
-    # SSOT: trading sessions (XKRX). If unavailable, treat as unknown.
     cal = None
     try:
         import exchange_calendars as xc  # type: ignore
+
         cal = xc.get_calendar("XKRX")
     except Exception:
         cal = None
+
+    all_frames = []
+    fetched_days: List[str] = []
     skipped_non_session: List[str] = []
 
     cur = start_dt
     while cur <= end_dt:
         ymd = cur.strftime("%Y%m%d")
-        # holiday/non-session: empty is normal (SKIP at date-loop level)
+
         if cal is not None:
             try:
                 if not cal.is_session(ymd):
@@ -352,6 +361,7 @@ def main() -> int:
                     continue
             except Exception:
                 pass
+
         day_frames = []
         used_fallback = False
 
@@ -361,33 +371,52 @@ def main() -> int:
                 df = stock.get_market_ohlcv_by_ticker(ymd, market=mkt)
             except Exception as e:
                 print(f"[WARN] pykrx by_ticker failed {ymd} {mkt}: {type(e).__name__}: {e}")
-                df = None
 
             norm = _normalize_by_ticker_df(ymd, mkt, df) if df is not None else pd.DataFrame()
 
             if norm.empty:
-                # Non-session day: empty is normal (defensive; should have been skipped above)
                 if cal is not None:
                     try:
                         if not cal.is_session(ymd):
                             continue
                     except Exception:
                         pass
-                # Trading session: empty means upstream endpoint is unhealthy -> abort (avoid degraded universe)
-                # Trading session인데 by_ticker empty → by_date로 전체(=probe_cap만큼) 수집 시도
-                fb = _fetch_day_by_date_probe(ymd, mkt, probe_by_market.get(mkt, []))
-                if fb is None or fb.empty:
-                    raise SystemExit(f"[FATAL] pykrx by_ticker empty for {ymd} {mkt} and by_date_probe empty. abort.")
-                try:
-                    n_fb = int(fb['code'].astype(str).nunique()) if 'code' in fb.columns else 0
-                except Exception:
-                    n_fb = 0
-                exp = len(probe_by_market.get(mkt, []))
-                min_ok = max(1, int(exp * float(args.coverage)))
-                if n_fb < min_ok:
-                    raise SystemExit(f"[FATAL] by_date_probe coverage low (ok={n_fb} < min_ok={min_ok}, exp={exp}) for {ymd} {mkt}. abort.")
-                used_fallback = True
-                norm = fb
+
+                pool = codes_by_market.get(mkt, [])
+                if not pool:
+                    raise SystemExit(f"[FATAL] empty code pool for {mkt}. cannot fallback on {ymd}.")
+
+                best_df = pd.DataFrame()
+                best_n = 0
+                best_cap = 0
+                target_market = max(1, market_min.get(mkt, 1))
+
+                for cap in _fallback_caps(len(pool), int(args.probe_cap)):
+                    subset = pool[:cap]
+                    fb = _fetch_day_by_date_codes(ymd, mkt, subset)
+                    n_fb = int(fb["code"].astype(str).nunique()) if (fb is not None and not fb.empty and "code" in fb.columns) else 0
+                    min_cov = max(1, int(cap * float(args.coverage)))
+
+                    print(
+                        f"[FALLBACK] {ymd} {mkt} cap={cap} ok={n_fb} min_cov={min_cov} market_need={target_market}",
+                        flush=True,
+                    )
+
+                    if n_fb > best_n:
+                        best_df = fb
+                        best_n = n_fb
+                        best_cap = cap
+
+                    if n_fb >= min_cov and n_fb >= target_market:
+                        norm = fb
+                        used_fallback = True
+                        break
+
+                if norm.empty:
+                    raise SystemExit(
+                        f"[FATAL] by_ticker unavailable and fallback insufficient for {ymd} {mkt}. "
+                        f"best_ok={best_n} best_cap={best_cap} market_need={target_market}. abort."
+                    )
 
             if not norm.empty:
                 day_frames.append(norm)
@@ -398,12 +427,13 @@ def main() -> int:
             continue
 
         day_df = pd.concat(day_frames, ignore_index=True)
-        try:
-            n_day = int(day_df["code"].astype(str).nunique()) if "code" in day_df.columns else 0
-        except Exception:
-            n_day = 0
-        if n_day < MIN_UNI:
-            raise SystemExit(f"[FATAL] universe degraded on {ymd} (ncode={n_day} < MIN_UNI={MIN_UNI}). abort (fail-closed, no write).")
+        n_day = int(day_df["code"].astype(str).nunique()) if "code" in day_df.columns else 0
+        if n_day < min_uni:
+            raise SystemExit(
+                f"[FATAL] universe degraded on {ymd} (ncode={n_day} < MIN_UNI={min_uni}). "
+                "abort (fail-closed, no write)."
+            )
+
         all_frames.append(day_df)
         fetched_days.append(ymd)
         print(f"[OK] {ymd} fetched (fallback=by_date_probe)" if used_fallback else f"[OK] {ymd} fetched")
@@ -418,7 +448,7 @@ def main() -> int:
             return 0
         raise SystemExit(
             f"[FATAL] fetched nothing between {start_dt.strftime('%Y%m%d')} and {end_ymd}. "
-            f"If today is a holiday/early run, try --end with an earlier yyyymmdd."
+            "If today is a holiday/early run, try --end with an earlier yyyymmdd."
         )
 
     out_df = pd.concat(all_frames, ignore_index=True)

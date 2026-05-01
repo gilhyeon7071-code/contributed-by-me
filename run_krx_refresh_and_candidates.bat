@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
 chcp 65001 >nul
@@ -38,7 +38,7 @@ echo [1.5/2] Refresh DART fundamental snapshot (optional)
 set "DART_KEY_FILE=%~dp0_cache\dart_api_key.txt"
 if "%DART_API_KEY%"=="" (
   if exist "%DART_KEY_FILE%" (
-    echo [INFO] DART_API_KEY empty -> using key file
+    echo [INFO] DART_API_KEY empty : using key file
     "%PY%" tools\build_dart_fundamental_snapshot.py --api-key-file "%DART_KEY_FILE%" --max-codes 300
     if errorlevel 1 (
       echo [WARN] DART refresh failed - continue with cached snapshot
@@ -47,7 +47,7 @@ if "%DART_API_KEY%"=="" (
     echo [INFO] DART refresh skipped (no DART_API_KEY / dart_api_key.txt)
   )
 ) else (
-  echo [INFO] DART_API_KEY detected -> refresh snapshot
+  echo [INFO] DART_API_KEY detected : refresh snapshot
   "%PY%" tools\build_dart_fundamental_snapshot.py --max-codes 300
   if errorlevel 1 (
     echo [WARN] DART refresh failed - continue with cached snapshot
@@ -63,8 +63,10 @@ if errorlevel 1 (
 )
 
 echo.
-echo [OK] KRX clean & candidates refreshed
+echo [OK] KRX clean ^& candidates refreshed
 exit /b 0
+
+
 
 
 

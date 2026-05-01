@@ -1,18 +1,18 @@
-#!/usr/bin/env python
+﻿#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
 p0_daily_check.py
 
-P0 일일 점검(추정 없이 '파일에 있는 사실'만으로 판정)
-- prices(paper/prices/ohlcv_paper.parquet) 최신일/행수/코드수
-- candidates 메타(2_Logs/candidates_latest_meta.json) 최신일/시장국면
-- risk_off: 가격데이터 최신일이 후보메타 최신일보다 뒤쳐지면 True
-- paper open_positions_count: paper/trades.csv의 exit_* 컬럼이 비어있는 행 수로 계산 (None 금지)
-- max_hold_days: paper/paper_engine_config.json에서 읽음
+P0 ?쇱씪 ?먭?(異붿젙 ?놁씠 '?뚯씪???덈뒗 ?ъ떎'留뚯쑝濡??먯젙)
+- prices(paper/prices/ohlcv_paper.parquet) 理쒖떊???됱닔/肄붾뱶??
+- candidates 硫뷀?(2_Logs/candidates_latest_meta.json) 理쒖떊???쒖옣援?㈃
+- risk_off: 媛寃⑸뜲?댄꽣 理쒖떊?쇱씠 ?꾨낫硫뷀? 理쒖떊?쇰낫???ㅼ퀜吏硫?True
+- paper open_positions_count: paper/trades.csv??exit_* 而щ읆??鍮꾩뼱?덈뒗 ???섎줈 怨꾩궛 (None 湲덉?)
+- max_hold_days: paper/paper_engine_config.json?먯꽌 ?쎌쓬
 
-출력:
+異쒕젰:
 - 2_Logs/p0_daily_check_YYYYMMDD_HHMMSS.json
-- 콘솔 4줄 요약
+- 肄섏넄 4以??붿빟
 """
 
 from __future__ import annotations
@@ -20,8 +20,8 @@ import utils.common as ucommon
 
 def _krx_clean_ncode(base_dir, date_max_yyyymmdd):
     """
-    krx_daily_*_clean.parquet (해당 date_max)에서 code 유니크 개수 산출.
-    실패 시 None 반환(상위 try/except에서 krx_clean_ncode_fail로 표기).
+    krx_daily_*_clean.parquet (?대떦 date_max)?먯꽌 code ?좊땲??媛쒖닔 ?곗텧.
+    ?ㅽ뙣 ??None 諛섑솚(?곸쐞 try/except?먯꽌 krx_clean_ncode_fail濡??쒓린).
     """
     try:
         ymd = str(date_max_yyyymmdd or "").strip()
@@ -75,7 +75,7 @@ import pandas as pd
 
 import time
 
-# 공통 유틸리티 모듈 import
+# 怨듯넻 ?좏떥由ы떚 紐⑤뱢 import
 from utils.common import (
     now_tag,
     prev_weekday,
@@ -87,7 +87,7 @@ from utils.common import (
 )
 
 # ============================================================================
-# 로깅 설정 (에러 추적 개선)
+# 濡쒓퉭 ?ㅼ젙 (?먮윭 異붿쟻 媛쒖꽑)
 # ============================================================================
 logging.basicConfig(
     level=logging.INFO,
@@ -105,9 +105,9 @@ def cleanup_old_logs(
     keep_last: int = 50,
     patterns: list[str] | None = None,
 ) -> dict:
-    """2_Logs 정리(화이트리스트 기반).
-    - 기본: enabled=False (삭제하지 않고 'would_delete'만 산출)
-    - 안전장치: 패턴별 최신 keep_last개는 보존
+    """2_Logs ?뺣━(?붿씠?몃━?ㅽ듃 湲곕컲).
+    - 湲곕낯: enabled=False (??젣?섏? ?딄퀬 'would_delete'留??곗텧)
+    - ?덉쟾?μ튂: ?⑦꽩蹂?理쒖떊 keep_last媛쒕뒗 蹂댁〈
     """
     now = time.time()
     cutoff = now - (int(days) * 86400)
@@ -134,7 +134,7 @@ def cleanup_old_logs(
             if not files:
                 continue
 
-            # 최신 keep_last개 보호
+            # 理쒖떊 keep_last媛?蹂댄샇
             protected = set(files[-int(keep_last):]) if keep_last and len(files) > keep_last else set()
 
             for f in files:
@@ -167,21 +167,21 @@ def cleanup_old_logs(
         "deleted_sample": deleted[:20],
         "errors": errors[:20],
     }
-# now_tag, prev_weekday -> utils.common으로 이동됨
+# now_tag, prev_weekday -> utils.common?쇰줈 ?대룞??
 
 
-# _parquet_date_max_via_stats -> utils.common.read_parquet_date_max로 이동됨
+# _parquet_date_max_via_stats -> utils.common.read_parquet_date_max濡??대룞??
 
 
 def _krx_clean_date_max(base_dir: Path, flags: list[str]) -> str | None:
-    """krx_daily_*_clean.parquet들의 date_max(YYYYMMDD) 중 최댓값."""
+    """krx_daily_*_clean.parquet?ㅼ쓽 date_max(YYYYMMDD) 以?理쒕뙎媛?"""
     files = list(base_dir.rglob("krx_daily_*_clean.parquet"))
     if not files:
         flags.append("krx_clean_not_found")
         return None
     mx = None
     for p in files:
-        d = read_parquet_date_max(p, "date")  # ✅ utils.common 사용
+        d = read_parquet_date_max(p, "date")  # ??utils.common ?ъ슜
         if d is None:
             flags.append(f"krx_clean_no_stats:{p}")
             continue
@@ -192,10 +192,10 @@ def _krx_clean_date_max(base_dir: Path, flags: list[str]) -> str | None:
     return mx
 
 
-# latest_file -> utils.common.latest_file로 이동됨
+# latest_file -> utils.common.latest_file濡??대룞??
 
 def _dup_trades_count(trades_csv: Path, flags: list[str]) -> int:
-    """동일 trade가 중복으로 누적되는 경우를 탐지(키 컬럼 기반)."""
+    """?숈씪 trade媛 以묐났?쇰줈 ?꾩쟻?섎뒗 寃쎌슦瑜??먯?(??而щ읆 湲곕컲)."""
     if not trades_csv.exists():
         return 0
     try:
@@ -214,8 +214,8 @@ def _dup_trades_count(trades_csv: Path, flags: list[str]) -> int:
         return 0
 
 
-# read_json -> utils.common.read_json로 이동됨
-# parse_yyyymmdd -> utils.common.parse_yyyymmdd로 이동됨
+# read_json -> utils.common.read_json濡??대룞??
+# parse_yyyymmdd -> utils.common.parse_yyyymmdd濡??대룞??
 
 
 def _read_prices_stats(prices_parquet: Path, flags: list[str]) -> Dict[str, Any]:
@@ -233,7 +233,7 @@ def _read_prices_stats(prices_parquet: Path, flags: list[str]) -> Dict[str, Any]
         flags.append(f'prices_parquet_read_fail:{type(e).__name__}')
         return out
 
-    # code 컬럼이 있으면 codes 계산
+    # code 而щ읆???덉쑝硫?codes 怨꾩궛
     try:
         df = pd.read_parquet(prices_parquet)
         code_col = None
@@ -266,7 +266,7 @@ def _build_self_adaptive_gap(prev_weekday_ymd: str, prices_date_max: str, krx_cl
       G<=1: NORMAL
       G==2: WARN
       G>=3: DANGER
-    NOTE: v1은 YYYYMMDD 정수 차. (영업일 갭은 v1.1에서 교체)
+    NOTE: v1? YYYYMMDD ?뺤닔 李? (?곸뾽??媛?? v1.1?먯꽌 援먯껜)
     """
     def _gap(prev, d):
         try:
@@ -306,7 +306,7 @@ def _build_self_adaptive_gap(prev_weekday_ymd: str, prices_date_max: str, krx_cl
 
 
 def _crash_local_proxy_metrics(as_of_ymd: str, window_days: int) -> dict:
-    """Fallback crash metrics from local paper prices (market proxy = daily mean close)."""
+    """Fallback crash metrics using market-wide proxy from krx_clean first, then paper prices."""
     out = {
         "ok": False,
         "status": None,
@@ -317,18 +317,14 @@ def _crash_local_proxy_metrics(as_of_ymd: str, window_days: int) -> dict:
         "error": None,
         "source": "local_prices_proxy",
     }
-    try:
-        base_dir = Path(__file__).resolve().parent
-        px_path = base_dir / "paper" / "prices" / "ohlcv_paper.parquet"
-        if not px_path.exists():
-            out["status"] = "error_fallback_prices_missing"
-            out["error"] = str(px_path)
-            return out
 
-        df = pd.read_parquet(px_path, columns=["date", "close"])
+    def _build_idx_from_parquet(px_path: Path, source_tag: str) -> Optional[pd.Series]:
+        try:
+            df = pd.read_parquet(px_path, columns=["date", "close"])
+        except Exception:
+            return None
         if df is None or len(df) == 0:
-            out["status"] = "error_fallback_prices_empty"
-            return out
+            return None
 
         d8 = df["date"].astype(str).str.replace("-", "", regex=False).str[:8]
         close = pd.to_numeric(df["close"], errors="coerce")
@@ -336,12 +332,47 @@ def _crash_local_proxy_metrics(as_of_ymd: str, window_days: int) -> dict:
         mdf = mdf[mdf["close"] > 0]
         mdf = mdf[mdf["date8"] <= str(as_of_ymd)]
         if mdf.empty:
-            out["status"] = "error_fallback_no_rows_upto_asof"
-            return out
+            return None
 
-        # market proxy: cross-sectional mean close by date
         idx = mdf.groupby("date8", as_index=True)["close"].mean().sort_index()
-        if idx.empty:
+        if idx is None or len(idx) < 2:
+            return None
+
+        out["source"] = source_tag
+        return idx
+
+    try:
+        base_dir = Path(__file__).resolve().parent
+
+        # 1) Prefer market-wide krx_clean proxy (full universe) to avoid candidate-only bias.
+        krx_candidates = []
+        for p in base_dir.rglob("krx_daily_*_clean.parquet"):
+            d = read_parquet_date_max(p, "date")
+            d8 = parse_yyyymmdd(d) if d is not None else None
+            if not d8:
+                continue
+            if d8 > str(as_of_ymd):
+                continue
+            krx_candidates.append((str(d8), float(p.stat().st_mtime), p))
+
+        krx_candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
+
+        idx = None
+        for _, __, kp in krx_candidates:
+            idx = _build_idx_from_parquet(kp, "krx_clean_proxy")
+            if idx is not None and not idx.empty:
+                break
+
+        # 2) Fallback to paper prices proxy only when krx_clean proxy is unavailable.
+        if idx is None:
+            px_path = base_dir / "paper" / "prices" / "ohlcv_paper.parquet"
+            if not px_path.exists():
+                out["status"] = "error_fallback_prices_missing"
+                out["error"] = str(px_path)
+                return out
+            idx = _build_idx_from_parquet(px_path, "paper_prices_proxy")
+
+        if idx is None or idx.empty:
             out["status"] = "error_fallback_index_empty"
             return out
 
@@ -360,7 +391,6 @@ def _crash_local_proxy_metrics(as_of_ymd: str, window_days: int) -> dict:
         out["status"] = f"error_fallback_calc:{type(e).__name__}"
         out["error"] = str(e)[:200]
         return out
-
 
 def _default_index_code_for_market(index_market: str, index_name_contains: str) -> str:
     """Best-effort default KRX index code when config is missing or malformed."""
@@ -515,12 +545,13 @@ def _eval_crash_risk_off(as_of_ymd: str, cfg: dict) -> dict:
                 out["metrics"]["fallback_error"] = str(fb.get("error"))[:200]
             return False
 
-        out["source"] = "local_prices_proxy"
+        out["source"] = str(fb.get("source") or "local_prices_proxy")
         out["metrics"]["rows"] = int(fb.get("rows") or 0)
         out["metrics"]["used_rows"] = int(fb.get("used_rows") or 0)
         out["metrics"]["max_dd"] = float(fb.get("max_dd"))
         out["metrics"]["day_ret"] = float(fb.get("day_ret"))
-        out["metrics"]["status"] = "ok_fallback_local_proxy"
+        _src = str(out.get("source") or "local_prices_proxy").strip().lower()
+        out["metrics"]["status"] = f"ok_fallback_{_src}"
         _apply_trigger_from_metrics(use_fallback_limits=True)
         return True
 
@@ -564,7 +595,13 @@ def _eval_crash_risk_off(as_of_ymd: str, cfg: dict) -> dict:
         try:
             if _prev_level <= logging.INFO:
                 _root_logger.setLevel(logging.WARNING)
-            df = stock.get_index_ohlcv_by_date(start, end, index_code)
+            # pykrx in some environments fails when resolving ticker display name
+            # (internal get_index_ticker_name key mismatch). Keep raw OHLCV retrieval only.
+            try:
+                df = stock.get_index_ohlcv_by_date(start, end, index_code, name_display=False)
+            except TypeError:
+                # Backward compatibility for older pykrx without name_display param.
+                df = stock.get_index_ohlcv_by_date(start, end, index_code)
         finally:
             _root_logger.setLevel(_prev_level)
         if df is None or len(df) == 0:
@@ -606,7 +643,7 @@ def _eval_crash_risk_off(as_of_ymd: str, cfg: dict) -> dict:
 
 
 def _compute_open_positions_from_trades(trades_csv: Path, flags: list[str]) -> int:
-    """exit_* 컬럼이 모두 비어있는 행 수를 오픈 포지션으로 계산."""
+    """exit_* 而щ읆??紐⑤몢 鍮꾩뼱?덈뒗 ???섎? ?ㅽ뵂 ?ъ??섏쑝濡?怨꾩궛."""
     if not trades_csv.exists():
         return 0
     try:
@@ -701,7 +738,7 @@ def main() -> None:
 
     krx_clean_date_max = _krx_clean_date_max(base_dir, flags)
     prev_weekday = ucommon.prev_weekday(dt.date.today())
-    # krx_clean_ncode: krx_clean_date_max 날짜에 해당하는 parquet의 유니버스(code) 수(최대값)
+    # krx_clean_ncode: krx_clean_date_max ?좎쭨???대떦?섎뒗 parquet???좊땲踰꾩뒪(code) ??理쒕?媛?
 
     krx_clean_ncode = _krx_clean_ncode(base_dir, krx_clean_date_max) if krx_clean_date_max else None
     try:
@@ -728,21 +765,21 @@ def main() -> None:
     except Exception as e:
         flags.append(f"krx_clean_ncode_refine_fail:{type(e).__name__}")
         # keep previously computed krx_clean_ncode (do not overwrite to None)
-    # risk_off: 최소 규칙만 (거래/판단을 막아야 하는 케이스만)
-    # NOTE: candidates meta의 latest_date가 직전 평일보다 과거여도, gate를 막지 않음(로그로만 확인)
+    # risk_off: 理쒖냼 洹쒖튃留?(嫄곕옒/?먮떒??留됱븘???섎뒗 耳?댁뒪留?
+    # NOTE: candidates meta??latest_date媛 吏곸쟾 ?됱씪蹂대떎 怨쇨굅?щ룄, gate瑜?留됱? ?딆쓬(濡쒓렇濡쒕쭔 ?뺤씤)
     risk_off = {"enabled": True, "reasons": ["INIT_FAIL_CLOSED"]}
     kill_switch = {"triggered": False, "reasons": [], "source": ""}  # default
     crash_risk_off = {"triggered": False, "reasons": []}  # default
 
     try:
-        # 1) paper 가격 데이터가 후보(신호) 기준일보다 뒤쳐진 경우
+        # 1) paper 媛寃??곗씠?곌? ?꾨낫(?좏샇) 湲곗??쇰낫???ㅼ퀜吏?寃쎌슦
         if md and date_max:
             md_yyyymmdd = re.sub(r"[^0-9]", "", str(md))  # '2025-12-24' -> '20251224'
             if md_yyyymmdd and (str(date_max) < md_yyyymmdd):
                 risk_off["enabled"] = True
                 risk_off["reasons"].append(f"prices_date_max({date_max}) < meta_latest_date({md_yyyymmdd})")
 
-        # 1.1) candidates meta가 '직전 평일'보다 과거면(스테일), 신규진입을 막아야 함
+        # 1.1) candidates meta媛 '吏곸쟾 ?됱씪'蹂대떎 怨쇨굅硫??ㅽ뀒??, ?좉퇋吏꾩엯??留됱븘????
         md_yyyymmdd2 = re.sub(r"[^0-9]", "", str(md)) if md else ""
         md_yyyymmdd2 = md_yyyymmdd2[:8]
         # [GATE_RELAX] cand_latest_date: allow lag-1 => SOFT flag, lag-2+ => risk_off
@@ -761,7 +798,7 @@ def main() -> None:
                 risk_off["reasons"].append(f"cand_latest_date({md_yyyymmdd2}) < prev_weekday_lag1({prev_weekday_lag1})")
             elif md_yyyymmdd2 < prev_weekday:
                 flags.append(f"SOFT_GATE cand_latest_date({md_yyyymmdd2}) < prev_weekday({prev_weekday})")
-        # 1.2) krx clean 유니버스가 MIN_UNI(=2000) 미만이면(부분 데이터), 신규진입을 막아야 함
+        # 1.2) krx clean ?좊땲踰꾩뒪媛 MIN_UNI(=2000) 誘몃쭔?대㈃(遺遺??곗씠??, ?좉퇋吏꾩엯??留됱븘????
         if (krx_clean_ncode is not None) and (int(krx_clean_ncode) < 2000):
             risk_off["enabled"] = True
             risk_off["reasons"].append(f"krx_clean_universe_degraded(ncode={int(krx_clean_ncode)} < MIN_UNI=2000)")
@@ -777,7 +814,7 @@ def main() -> None:
         except Exception:
             ks_day_lim = 0.08
         try:
-            window_days = int(kill_cfg.get("window_days", 60) or 60)  # 최근 exit_date N개(일) 기준
+            window_days = int(kill_cfg.get("window_days", 60) or 60)  # 理쒓렐 exit_date N媛??? 湲곗?
         except Exception:
             window_days = 60
         ks_mode = str(kill_cfg.get("mode", "BLOCK")).upper()
@@ -801,7 +838,7 @@ def main() -> None:
             "input_trades_mtime": None,
         }
 
-        # A안: paper_pnl_summary_last.json(=equity 포함, 스키마 안정) 우선 사용
+        # A?? paper_pnl_summary_last.json(=equity ?ы븿, ?ㅽ궎留??덉젙) ?곗꽑 ?ъ슜
         pnl_sum_path = None
         try:
             _last = logs_dir / "paper_pnl_summary_last.json"
@@ -819,7 +856,7 @@ def main() -> None:
         if pnl_sum_path is None:
             pnl_sum_path = None
         try:
-            # (B) equity 포함 summary 중 "최신"을 선택 (없으면 last.json fallback)
+            # (B) equity ?ы븿 summary 以?"理쒖떊"???좏깮 (?놁쑝硫?last.json fallback)
             best = None
             best_mtime = -1.0
 
@@ -855,7 +892,7 @@ def main() -> None:
         except Exception:
             pnl_sum_path = None
 
-        # 최종 fallback (fail-closed): last.json -> 최신 summary_*.json
+        # 理쒖쥌 fallback (fail-closed): last.json -> 理쒖떊 summary_*.json
         if pnl_sum_path is None:
             _lp = logs_dir / "paper_pnl_summary_last.json"
             pnl_sum_path = _lp if _lp.exists() else latest_file(logs_dir, "paper_pnl_summary_*.json")
@@ -911,9 +948,9 @@ def main() -> None:
                 _d = _df[(_df["exit_date"].str.len() == 8) & (~_df[_ret_col].isna())]
                 if len(_d) > 0:
                     # rolling (SSOT for kill_switch decision): portfolio-style return per exit_date
-                    # - MEAN: 동일비중 슬롯 가정 (USED/SSOT)
-                    # - SUM : 참고
-                    # - PROD: 참고(day-comp)
+                    # - MEAN: ?숈씪鍮꾩쨷 ?щ’ 媛??(USED/SSOT)
+                    # - SUM : 李멸퀬
+                    # - PROD: 李멸퀬(day-comp)
                     _g_all_sum  = _d.groupby("exit_date")[_ret_col].sum().sort_index()
                     _g_all_mean = _d.groupby("exit_date")[_ret_col].mean().sort_index()
                     # debug alt: PRODUCT comp per exit_date (same method as paper_pnl_report._equity_metrics/day_comp)
@@ -1285,8 +1322,8 @@ def main() -> None:
             risk_off["reasons"].append("crash_risk_off")
 
 
-# 2) KRX clean parquet가 '직전 평일' 기준으로 오래된 경우(신호가 과거 데이터 기반)
-        #    - 월요일 오전엔 직전 금요일까지 있어야 정상
+# 2) KRX clean parquet媛 '吏곸쟾 ?됱씪' 湲곗??쇰줈 ?ㅻ옒??寃쎌슦(?좏샇媛 怨쇨굅 ?곗씠??湲곕컲)
+        #    - ?붿슂???ㅼ쟾??吏곸쟾 湲덉슂?쇨퉴吏 ?덉뼱???뺤긽
         # [GATE_RELAX] krx_clean_date_max: allow lag-1 => SOFT flag, lag-2+ => risk_off
         prev_weekday_lag1 = None
         try:
@@ -1304,12 +1341,12 @@ def main() -> None:
             elif krx_clean_date_max < prev_weekday:
                 flags.append(f"SOFT_GATE krx_clean_date_max({krx_clean_date_max}) < prev_weekday({prev_weekday})")
 
-        # Fail-Closed release: 차단 사유가 INIT만 남아있으면 허용으로 해제
+        # Fail-Closed release: 李⑤떒 ?ъ쑀媛 INIT留??⑥븘?덉쑝硫??덉슜?쇰줈 ?댁젣
         if (risk_off.get("reasons") == ["INIT_FAIL_CLOSED"]) or (not risk_off.get("reasons")):
             risk_off["enabled"] = False
             risk_off["reasons"] = []
     except Exception as e:
-        # Fail-Closed: 평가 예외 시 신규 진입 차단 유지
+        # Fail-Closed: ?됯? ?덉쇅 ???좉퇋 吏꾩엯 李⑤떒 ?좎?
         risk_off['enabled'] = True
         rr = risk_off.get('reasons') or []
         rr = [x for x in rr if x and x != 'INIT_FAIL_CLOSED']
@@ -1407,3 +1444,8 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
+
+
+
+
+
