@@ -17,6 +17,7 @@ __all__ = [
     '_t2_record_buy_cash',
     '_t2_record_sell_pending',
     '_write_t2_settlement_status',
+    '_record_sell_pending_and_write_t2_status',
 ]
 
 import json
@@ -24,7 +25,7 @@ import math
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from paper_engine.common import _norm_ymd_text, _to_float, now_ts, _position_cost_basis, _get_dict, _get_list
+from paper_engine.common import _extract_ymd_from_ts_text, _norm_ymd_text, _to_float, now_ts, _position_cost_basis, _get_dict, _get_list
 from paper_engine.io import T2_SETTLEMENT_CASH_STATUS_PATH, _json_safe
 from utils.common import norm_code, now_ymd
 
@@ -306,3 +307,40 @@ def _write_t2_settlement_status(state: Dict[str, Any], cfg: Dict[str, Any], runt
     T2_SETTLEMENT_CASH_STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
     T2_SETTLEMENT_CASH_STATUS_PATH.write_text(json.dumps(_json_safe(payload), ensure_ascii=False, indent=2), encoding="utf-8")
     return payload
+
+def _record_sell_pending_and_write_t2_status(
+    *,
+    state: Dict[str, Any],
+    cfg: Dict[str, Any],
+    schema: str,
+    fills_new: List[Any],
+    runtime_ymd: str,
+    t2_cash_checks: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    for row in fills_new:
+        try:
+            if schema == "legacy":
+                if len(row) < 6 or str(row[2]).strip().upper() != "SELL":
+                    continue
+                trade_date, code, qty, price, order_id = _extract_ymd_from_ts_text(row[0]), row[1], row[3], row[4], row[5]
+                amount = float(_to_float(qty, 0.0) or 0.0) * float(_to_float(price, 0.0) or 0.0)
+            else:
+                if len(row) < 10 or str(row[4]).strip().upper() != "SELL":
+                    continue
+                trade_date, code, qty, price, fee, slp, order_id = row[1], row[2], row[5], row[6], row[7], row[8], row[9]
+                amount = (
+                    float(_to_float(qty, 0.0) or 0.0) * float(_to_float(price, 0.0) or 0.0)
+                    - float(_to_float(fee, 0.0) or 0.0)
+                    - float(_to_float(slp, 0.0) or 0.0)
+                )
+            _t2_record_sell_pending(
+                state,
+                cfg,
+                code=str(code),
+                trade_date=str(trade_date),
+                order_id=str(order_id),
+                amount=float(max(0.0, amount)),
+            )
+        except Exception:
+            continue
+    return _write_t2_settlement_status(state, cfg, runtime_ymd, t2_cash_checks)

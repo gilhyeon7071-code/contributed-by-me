@@ -35,12 +35,14 @@ __all__ = [
     '_restore_backup_file',
     '_sync_new_fills_to_live_bridge',
     '_append_fills_trades_with_rollback',
+    '_finalize_written_fills_runtime_state',
     '_compute_current_open_notional',
     '_count_open_position_slots',
     '_recalculate_open_notional_and_alert',
     '_apply_sector_rebalance',
     '_prioritize_open_positions_for_sell',
     '_process_position_rows',
+    '_run_open_positions_rebalance_runtime',
     '_process_open_positions_and_rebalance',
 ]
 
@@ -86,6 +88,7 @@ from paper_engine.common import (
     resolve_slip_pct,
     calc_net_ret,
     now_ts,
+    _paper_engine_phase_trace,
 )
 from paper_engine.io import (
     FILLS,
@@ -2372,6 +2375,65 @@ def _append_fills_trades_with_rollback(
         return result
     return result
 
+def _finalize_written_fills_runtime_state(
+    *,
+    schema: str,
+    fills_path: Path,
+    fills_new: List[List[Any]],
+    still_open: List[Dict[str, Any]],
+    stop_loss: float,
+    take_profit: Any,
+    trail_pct: Any,
+    ops_alert: Dict[str, Any],
+    prices_df: pd.DataFrame,
+    current_open_notional: float,
+    gross_cap_krw: Optional[float],
+    ops_enabled: bool,
+) -> Dict[str, Any]:
+    if schema == "legacy":
+        df_fills_after = read_csv_safe(fills_path)
+        still_open, reconcile_open_summary = _reconcile_open_positions_with_fills(
+            open_positions=still_open,
+            fills_df=df_fills_after if isinstance(df_fills_after, pd.DataFrame) else pd.DataFrame(),
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+            trail_pct=trail_pct,
+        )
+        if (
+            reconcile_open_summary.get("added_codes")
+            or reconcile_open_summary.get("removed_codes")
+            or reconcile_open_summary.get("qty_adjusted_codes")
+        ):
+            print(
+                "[RECOVER] post-write open_positions reconciled "
+                f"after={reconcile_open_summary.get('state_open_after', 0)} "
+                f"fills_open_codes={reconcile_open_summary.get('fills_open_codes', 0)}"
+            )
+
+    entry_fill_rows_final = len(
+        [
+            row
+            for row in fills_new
+            if len(row) >= 3 and str(row[2] if schema == "legacy" else row[4]).strip().upper() == "BUY"
+        ]
+    )
+    ops_alert["filled"] = int(entry_fill_rows_final)
+    ops_alert["slo_pass"] = bool(int(entry_fill_rows_final) >= int(ops_alert.get("expected_min_fills", 0) or 0))
+    current_open_notional = _recalculate_open_notional_and_alert(
+        still_open=still_open,
+        prices_df=prices_df,
+        current_open_notional=float(current_open_notional),
+        gross_cap_krw=gross_cap_krw,
+        ops_alert=ops_alert,
+        ops_enabled=bool(ops_enabled),
+    )
+    return {
+        "still_open": still_open,
+        "ops_alert": ops_alert,
+        "entry_fill_rows_final": int(entry_fill_rows_final),
+        "current_open_notional": float(current_open_notional),
+    }
+
 def _compute_current_open_notional(open_pos: List[Dict[str, Any]], px: pd.DataFrame) -> float:
     if not open_pos or px is None or px.empty:
         return 0.0
@@ -2821,3 +2883,10 @@ def _process_open_positions_and_rebalance(
         "still_open": still_open,
         "next_seq": int(next_seq),
     }
+
+def _run_open_positions_rebalance_runtime(**kwargs: Any) -> Dict[str, Any]:
+    open_pos = kwargs.get("open_pos", [])
+    _paper_engine_phase_trace("open_positions_rebalance_before", open_positions=len(open_pos) if isinstance(open_pos, list) else -1)
+    result = _process_open_positions_and_rebalance(**kwargs)
+    _paper_engine_phase_trace("open_positions_rebalance_after")
+    return result

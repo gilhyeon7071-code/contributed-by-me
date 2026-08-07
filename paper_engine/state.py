@@ -48,6 +48,7 @@ __all__ = [
     '_run_replay_consistency_remediation',
     '_replay_consistency_remediation_hints',
     '_refresh_replay_consistency',
+    '_run_replay_runtime_refresh',
     '_build_ops_alert_and_carryover',
     '_build_entry_runtime_ops_summary',
     '_persist_state_and_runtime_status',
@@ -1788,6 +1789,42 @@ def _refresh_replay_consistency(
         "replay_queue_status": replay_queue_status,
         "recovery_status_doc": recovery_status_doc,
     }
+
+def _run_replay_runtime_refresh(
+    *,
+    ops_enabled: bool,
+    carry_max_age: int,
+    open_order_replay_used_count: int,
+    replay_recovery_summary: Dict[str, Any],
+    replay_queue_scan: Dict[str, Any],
+    replay_quarantine_status: Dict[str, Any],
+    replay_prune_status: Dict[str, Any],
+    replay_consistency_status: Dict[str, Any],
+    replay_consistency_remediation: Dict[str, Any],
+    recovered_open_pos: List[Dict[str, Any]],
+    recovery_status_doc: Dict[str, Any],
+) -> Dict[str, Any]:
+    _paper_engine_phase_trace("replay_queue_status_before", ops_enabled=bool(ops_enabled))
+    replay_queue_status = _write_replay_queue_status(carry_max_age, open_order_replay_used_count) if ops_enabled else {}
+    _paper_engine_phase_trace("replay_queue_status_after")
+    _paper_engine_phase_trace("replay_consistency_before")
+    replay_sync_result = _refresh_replay_consistency(
+        ops_enabled=bool(ops_enabled),
+        replay_queue_status=replay_queue_status,
+        replay_recovery_summary=replay_recovery_summary,
+        replay_queue_scan=replay_queue_scan,
+        replay_quarantine_status=replay_quarantine_status,
+        replay_prune_status=replay_prune_status,
+        replay_consistency_status=replay_consistency_status,
+        replay_consistency_remediation=replay_consistency_remediation,
+        carry_max_age=int(carry_max_age),
+        recovered_open_pos=recovered_open_pos,
+        open_order_replay_used_count=int(open_order_replay_used_count),
+        recovery_status_doc=recovery_status_doc,
+    )
+    _paper_engine_phase_trace("replay_consistency_after")
+    return replay_sync_result
+
 def _build_ops_alert_and_carryover(
     *,
     ops_enabled: bool,

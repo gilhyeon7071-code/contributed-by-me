@@ -45,6 +45,7 @@ __all__ = [
     '_dedupe_sell_trades_by_lifecycle_signature_legacy',
     '_write_intraday_residual_overnight_guard_shadow',
     '_apply_intraday_residual_overnight_guard_exits',
+    '_run_intraday_residual_overnight_runtime',
 ]
 
 import json
@@ -94,6 +95,7 @@ from paper_engine.common import (
     calc_net_ret,
     get_ohlc,
     now_ts,
+    _paper_engine_phase_trace,
     resolve_slip_pct,
 )
 from paper_engine.drawdown import _ddm_forced_sell_ratio_pct, _ddm_pos_key
@@ -2898,4 +2900,68 @@ def _apply_intraday_residual_overnight_guard_exits(
         "policy_effect": True,
         "records": applied_rows,
         "skipped": skipped_rows,
+    }
+
+def _run_intraday_residual_overnight_runtime(
+    *,
+    config: Dict[str, Any],
+    schema: str,
+    prices_df: pd.DataFrame,
+    still_open: List[Dict[str, Any]],
+    runtime_ymd: str,
+    fee_pct: float,
+    slip_pct: float,
+    sell_tax_pct: float,
+    fills_new: List[Any],
+    trades_new: List[Any],
+    existing_fill_order_ids: Set[str],
+    existing_trade_sigs: Set[str],
+    next_seq_start: int,
+) -> Dict[str, Any]:
+    _paper_engine_phase_trace("residual_overnight_shadow_before", still_open=len(still_open) if isinstance(still_open, list) else -1)
+    residual_guard_shadow = _write_intraday_residual_overnight_guard_shadow(
+        config=config,
+        schema=str(schema),
+        trades_new=trades_new,
+        still_open=still_open,
+        runtime_ymd=str(runtime_ymd),
+    )
+    _paper_engine_phase_trace("residual_overnight_shadow_after")
+    print(
+        "[INTRADAY_RESIDUAL_OVERNIGHT_GUARD_SHADOW] "
+        f"status={residual_guard_shadow.get('status')} "
+        f"candidates={residual_guard_shadow.get('candidates')} "
+        f"trading_effect={residual_guard_shadow.get('trading_effect')}"
+    )
+    _paper_engine_phase_trace("residual_overnight_exit_before")
+    residual_guard_exit = _apply_intraday_residual_overnight_guard_exits(
+        config=config,
+        schema=str(schema),
+        prices_df=prices_df,
+        still_open=still_open,
+        shadow_payload=residual_guard_shadow,
+        runtime_ymd=str(runtime_ymd),
+        fee_pct=float(fee_pct),
+        slip_pct=float(slip_pct),
+        sell_tax_pct=float(sell_tax_pct),
+        fills_new=fills_new,
+        trades_new=trades_new,
+        existing_fill_order_ids=existing_fill_order_ids,
+        existing_trade_sigs=existing_trade_sigs,
+        next_seq_start=int(next_seq_start),
+    )
+    _paper_engine_phase_trace("residual_overnight_exit_after")
+    print(
+        "[INTRADAY_RESIDUAL_OVERNIGHT_GUARD_EXIT] "
+        f"status={residual_guard_exit.get('status')} "
+        f"active={residual_guard_exit.get('active')} "
+        f"applied={residual_guard_exit.get('applied_count')} "
+        f"skipped={residual_guard_exit.get('skipped_count')} "
+        f"trading_effect={residual_guard_exit.get('trading_effect')}"
+    )
+    return {
+        "residual_guard_shadow": residual_guard_shadow,
+        "residual_guard_exit": residual_guard_exit,
+        "still_open": residual_guard_exit["still_open"],
+        "next_seq": int(residual_guard_exit["next_seq"]),
     }

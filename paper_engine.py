@@ -137,17 +137,15 @@ def _inject_surge_immediate_candidates(*args: Any, **kwargs: Any):
 
 from paper_engine.exit import (
     _get_sell_rules,
-    _write_intraday_residual_overnight_guard_shadow,
-    _apply_intraday_residual_overnight_guard_exits,
+    _run_intraday_residual_overnight_runtime,
 )
 from paper_engine.positions import (
     _append_fills_trades_with_rollback,
-    _reconcile_open_positions_with_fills,
+    _finalize_written_fills_runtime_state,
     _recover_open_positions,
     _compute_current_open_notional,
     _count_open_position_slots,
-    _recalculate_open_notional_and_alert,
-    _process_open_positions_and_rebalance,
+    _run_open_positions_rebalance_runtime,
 )
 from paper_engine.regime import (
     resolve_market_regime,
@@ -163,8 +161,7 @@ from paper_engine.risk_orchestration import (
 )
 from paper_engine.settlement import (
     _merge_last_t2_state_fields,
-    _t2_record_sell_pending,
-    _write_t2_settlement_status,
+    _record_sell_pending_and_write_t2_status,
 )
 from paper_engine.state import (
     _build_risk_reason_details,
@@ -174,9 +171,8 @@ from paper_engine.state import (
     _align_p0_snapshot_with_latest_pnl_for_ddm,
     load_latest_macro_snapshot,
     _build_trend_overlay_2026_context,
-    _write_replay_queue_status,
     _write_recovery_status,
-    _refresh_replay_consistency,
+    _run_replay_runtime_refresh,
     _build_entry_runtime_ops_summary,
     _persist_state_and_runtime_status,
 )
@@ -2048,25 +2044,19 @@ def main() -> int:
     entry_fill_rows_runtime = int(ops_runtime["entry_fill_rows_runtime"])
     expected_min_fills = int(ops_runtime["expected_min_fills"])
     ops_alert = dict(ops_runtime.get("ops_alert") or {})
-    _paper_engine_phase_trace("replay_queue_status_before", ops_enabled=bool(ops_enabled))
-    replay_queue_status = _write_replay_queue_status(carry_max_age, open_order_replay_used_count) if ops_enabled else {}
-    _paper_engine_phase_trace("replay_queue_status_after")
-    _paper_engine_phase_trace("replay_consistency_before")
-    replay_sync_result = _refresh_replay_consistency(
+    replay_sync_result = _run_replay_runtime_refresh(
         ops_enabled=bool(ops_enabled),
-        replay_queue_status=replay_queue_status,
+        carry_max_age=int(carry_max_age),
+        open_order_replay_used_count=int(open_order_replay_used_count),
         replay_recovery_summary=replay_recovery_summary,
         replay_queue_scan=replay_queue_scan,
         replay_quarantine_status=replay_quarantine_status,
         replay_prune_status=replay_prune_status,
         replay_consistency_status=replay_consistency_status,
         replay_consistency_remediation=replay_consistency_remediation,
-        carry_max_age=int(carry_max_age),
         recovered_open_pos=recovered_open_pos,
-        open_order_replay_used_count=int(open_order_replay_used_count),
         recovery_status_doc=recovery_status_doc,
     )
-    _paper_engine_phase_trace("replay_consistency_after")
     replay_summary_sync_status = replay_sync_result["replay_summary_sync_status"]
     replay_consistency_status = replay_sync_result["replay_consistency_status"]
     replay_consistency_remediation = replay_sync_result["replay_consistency_remediation"]
@@ -2076,8 +2066,7 @@ def main() -> int:
     replay_prune_status = replay_sync_result["replay_prune_status"]
     replay_queue_status = replay_sync_result["replay_queue_status"]
     recovery_status_doc = replay_sync_result["recovery_status_doc"]
-    _paper_engine_phase_trace("open_positions_rebalance_before", open_positions=len(open_pos) if isinstance(open_pos, list) else -1)
-    position_result = _process_open_positions_and_rebalance(
+    position_result = _run_open_positions_rebalance_runtime(
         config=cfg,
         schema=str(schema),
         prices_df=px,
@@ -2109,31 +2098,13 @@ def main() -> int:
         market_regime=str(market_regime or ""),
         candidate_df=cdf,
     )
-    _paper_engine_phase_trace("open_positions_rebalance_after")
     still_open = position_result["still_open"]
     next_seq = int(position_result["next_seq"])
-    _paper_engine_phase_trace("residual_overnight_shadow_before", still_open=len(still_open) if isinstance(still_open, list) else -1)
-    residual_guard_shadow = _write_intraday_residual_overnight_guard_shadow(
-        config=cfg,
-        schema=str(schema),
-        trades_new=trades_new,
-        still_open=still_open,
-        runtime_ymd=str(today_ymd),
-    )
-    _paper_engine_phase_trace("residual_overnight_shadow_after")
-    print(
-        "[INTRADAY_RESIDUAL_OVERNIGHT_GUARD_SHADOW] "
-        f"status={residual_guard_shadow.get('status')} "
-        f"candidates={residual_guard_shadow.get('candidates')} "
-        f"trading_effect={residual_guard_shadow.get('trading_effect')}"
-    )
-    _paper_engine_phase_trace("residual_overnight_exit_before")
-    residual_guard_exit = _apply_intraday_residual_overnight_guard_exits(
+    residual_runtime = _run_intraday_residual_overnight_runtime(
         config=cfg,
         schema=str(schema),
         prices_df=px,
         still_open=still_open,
-        shadow_payload=residual_guard_shadow,
         runtime_ymd=str(today_ymd),
         fee_pct=float(fee_pct),
         slip_pct=float(slip_pct),
@@ -2144,17 +2115,10 @@ def main() -> int:
         existing_trade_sigs=existing_trade_sigs,
         next_seq_start=int(next_seq),
     )
-    _paper_engine_phase_trace("residual_overnight_exit_after")
-    still_open = residual_guard_exit["still_open"]
-    next_seq = int(residual_guard_exit["next_seq"])
-    print(
-        "[INTRADAY_RESIDUAL_OVERNIGHT_GUARD_EXIT] "
-        f"status={residual_guard_exit.get('status')} "
-        f"active={residual_guard_exit.get('active')} "
-        f"applied={residual_guard_exit.get('applied_count')} "
-        f"skipped={residual_guard_exit.get('skipped_count')} "
-        f"trading_effect={residual_guard_exit.get('trading_effect')}"
-    )
+    residual_guard_shadow = residual_runtime["residual_guard_shadow"]
+    residual_guard_exit = residual_runtime["residual_guard_exit"]
+    still_open = residual_runtime["still_open"]
+    next_seq = int(residual_runtime["next_seq"])
 
     if (not exit_only_mode) and max_positions_blocked and max_positions > 0 and len(still_open) < max_positions and len(cdf) > 0 and new_count < max_new:
         slots_after_exit = max(0, int(max_positions) - int(len(still_open)))
@@ -2285,32 +2249,23 @@ def main() -> int:
               f"{TRADES.parent / 'trades_dashboard_compat.csv'}")
     if int(write_txn_result.get("return_code", 0) or 0) != 0:
         return 2
-    if schema == "legacy":
-        # Final fail-safe: keep state open_positions aligned with persisted fills net.
-        df_fills_after = read_csv_safe(FILLS)
-        still_open, reconcile_open_summary = _reconcile_open_positions_with_fills(
-            open_positions=still_open,
-            fills_df=df_fills_after if isinstance(df_fills_after, pd.DataFrame) else pd.DataFrame(),
-            stop_loss=stop_loss,
-            take_profit=take_profit,
-            trail_pct=trail_pct,
-        )
-        if reconcile_open_summary.get("added_codes") or reconcile_open_summary.get("removed_codes") or reconcile_open_summary.get("qty_adjusted_codes"):
-            print(
-                "[RECOVER] post-write open_positions reconciled "
-                f"after={reconcile_open_summary.get('state_open_after', 0)} "
-                f"fills_open_codes={reconcile_open_summary.get('fills_open_codes', 0)}"
-            )
-
-    entry_fill_rows_final = len(
-        [
-            row
-            for row in fills_new
-            if len(row) >= 3 and str(row[2] if schema == "legacy" else row[4]).strip().upper() == "BUY"
-        ]
+    written_finalize = _finalize_written_fills_runtime_state(
+        schema=str(schema),
+        fills_path=FILLS,
+        fills_new=fills_new,
+        still_open=still_open,
+        stop_loss=float(stop_loss),
+        take_profit=take_profit,
+        trail_pct=trail_pct,
+        ops_alert=ops_alert,
+        prices_df=px,
+        current_open_notional=float(current_open_notional),
+        gross_cap_krw=gross_cap_krw,
+        ops_enabled=bool(ops_enabled),
     )
-    ops_alert["filled"] = int(entry_fill_rows_final)
-    ops_alert["slo_pass"] = bool(int(entry_fill_rows_final) >= int(ops_alert.get("expected_min_fills", 0) or 0))
+    still_open = cast(List[Dict[str, Any]], written_finalize["still_open"])
+    ops_alert = dict(written_finalize.get("ops_alert") or {})
+    current_open_notional = float(written_finalize.get("current_open_notional", current_open_notional))
     log_pipeline_event(
         stage="paper_engine_main",
         batch_label="[7/9]",
@@ -2329,42 +2284,13 @@ def main() -> int:
         status="PASS",
     )
 
-    for row in fills_new:
-        try:
-            if schema == "legacy":
-                if len(row) < 6 or str(row[2]).strip().upper() != "SELL":
-                    continue
-                _trade_date, _code, _qty, _price, _order_id = _extract_ymd_from_ts_text(row[0]), row[1], row[3], row[4], row[5]
-                _amount = float(_to_float(_qty, 0.0) or 0.0) * float(_to_float(_price, 0.0) or 0.0)
-            else:
-                if len(row) < 10 or str(row[4]).strip().upper() != "SELL":
-                    continue
-                _trade_date, _code, _qty, _price, _fee, _slp, _order_id = row[1], row[2], row[5], row[6], row[7], row[8], row[9]
-                _amount = (
-                    float(_to_float(_qty, 0.0) or 0.0) * float(_to_float(_price, 0.0) or 0.0)
-                    - float(_to_float(_fee, 0.0) or 0.0)
-                    - float(_to_float(_slp, 0.0) or 0.0)
-                )
-            _t2_record_sell_pending(
-                state,
-                cfg,
-                code=str(_code),
-                trade_date=str(_trade_date),
-                order_id=str(_order_id),
-                amount=float(max(0.0, _amount)),
-            )
-        except Exception:
-            continue
-    _write_t2_settlement_status(state, cfg, now_ymd(), t2_cash_checks)
-
-    # gross_cap 재계산: 부분/전체 청산 반영 후 현재가(마지막 종가) 기준으로 다시 계산
-    current_open_notional = _recalculate_open_notional_and_alert(
-        still_open=still_open,
-        prices_df=px,
-        current_open_notional=float(current_open_notional),
-        gross_cap_krw=gross_cap_krw,
-        ops_alert=ops_alert,
-        ops_enabled=bool(ops_enabled),
+    _record_sell_pending_and_write_t2_status(
+        state=state,
+        cfg=cfg,
+        schema=str(schema),
+        fills_new=fills_new,
+        runtime_ymd=now_ymd(),
+        t2_cash_checks=t2_cash_checks,
     )
 
     _persist_state_and_runtime_status(
