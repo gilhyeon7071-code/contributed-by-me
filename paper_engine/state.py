@@ -52,6 +52,7 @@ __all__ = [
     '_build_ops_alert_and_carryover',
     '_build_entry_runtime_ops_summary',
     '_persist_state_and_runtime_status',
+    '_finalize_paper_engine_runtime',
     'read_latest_stable_params',
     '_stable_params_usable',
     '_max_date8_from_candidates',
@@ -66,7 +67,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, cast
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, cast
 
 import pandas as pd
 
@@ -2395,6 +2396,29 @@ def _persist_state_and_runtime_status(
             entry_decision_rows=(entry_decisions if isinstance(entry_decisions, list) else []),
             max_age_days=carry_max_age,
         )
+
+
+def _finalize_paper_engine_runtime(
+    *,
+    maybe_run_pnl_report_func: Callable[[], None],
+    summary_schema: str,
+    fills_new: List[Any],
+    trades_new: List[Any],
+    still_open: List[Dict[str, Any]],
+    stop_loss: float,
+    take_profit: Any,
+    trail_pct: Any,
+    persist_kwargs: Dict[str, Any],
+) -> None:
+    _persist_state_and_runtime_status(**persist_kwargs)
+    maybe_run_pnl_report_func()
+    print("============================================================")
+    print(f"[PAPER_ENGINE] ts={now_ts()} schema={summary_schema}")
+    print(f"[PAPER_ENGINE] new_fills={len(fills_new)} new_trades={len(trades_new)} open_positions={len(still_open)}")
+    print(f"[PAPER_ENGINE] stop_loss={stop_loss} take_profit={take_profit} trail_pct={trail_pct}")
+    print("[PAPER_ENGINE] dashboard state refreshes via E:/vibe/buffett/tools/vibe_dashboard_state_hourly.ps1 (max 1h delay)")
+    print("[PAPER_ENGINE] for immediate refresh run: python E:/vibe/buffett/tools/build_dashboard_state_v2.py")
+    print("============================================================")
 
 
 def read_latest_stable_params() -> Dict[str, Any]:
