@@ -1,21 +1,22 @@
-﻿from __future__ import annotations
+# ruff: noqa: E402
+from __future__ import annotations
 
-import csv
+import argparse
 import json
 import logging
 import math
 import os
-import re
 import sys
-import subprocess
-from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, cast
 
 import pandas as pd
+from pricing_engine import (
+    build_cost_profile,
+)
 
-# ???????????????????????
+# Logging setup.
 logging.basicConfig(
     level=logging.INFO,
     format='[%(levelname)s] %(asctime)s - %(message)s',
@@ -23,1010 +24,222 @@ logging.basicConfig(
 )
 logger = logging.getLogger("paper_engine")
 
-# ???????????????????????????????????????????????????????????????????????????????????????????????import
+__version__ = "1.0.0"
+
+# Ensure utils import works regardless of cwd.
+ROOT = Path(os.environ.get("STOC_BASE_DIR", r"E:\1_Data"))
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+if __name__ == "paper_engine":
+    __path__ = [str(ROOT / "paper_engine")]
+
+# Shared helpers.
 from utils.common import (
+    is_daily_loss_reason,
     norm_code,
     now_ymd,
-    latest_file,
     read_csv_safe,
-    read_json,
+)
+from utils.pipeline_audit import log_pipeline_event, count_rows
+from tools.fill_idempotency import IdempotencyConflict, filter_new_fill_rows, rebuild_state_from_existing_rows
+from paper_engine.config import load_config, _path_from_env, _deep_merge_dict
+from paper_engine.io import (
+    detect_schema,
+    ensure_csv,
+    _migrate_legacy_trades_header_if_needed,
+    load_state,
+    FILLS,
+    TRADES,
+    TRADES_CALC,
+    STATE_PATH,
+    LOG_DIR,
+    _derive_d_from_fills_path,
+    LEGACY_FILLS_HEADER,
+    LEGACY_TRADES_HEADER,
+    V411_FILLS_HEADER,
+    V411_TRADES_HEADER,
+    ROOTB_REPLAY_REGEN_SCRIPT,
+    SURGE_REALTIME_STATUS_PATH,
+    SURGE_ACTIVE_RESPONSE_LAYER_CSV_PATH,
+    SURGE_LIVE_READINESS_AUDIT_CSV_PATH,
+    _write_dashboard_compat_csv,
+)
+from paper_engine.drawdown import (
+    _ddm_to_float,
+    _ddm_pct01,
+    calc_max_new,
+    _ddm_extract_vix_proxy,
+    _ddm_select_action,
+    _ddm_forced_sell_ratio_pct,
+    _ddm_count_consecutive_loss_days,
+)
+from paper_engine.common import (
+    _to_float,
+    _to_int,
+    _truthy,
+    _pct01_from_config,
+    now_ts,
+    _extract_ymd_from_ts_text,
+    _load_fundamentals_db,
+    _concat_drop_all_na_columns,
+    RUN_LABEL,
+    PAPER_SESSION_ID,
+    _ops_policy,
+    compute_dynamic_probe_floor,
+    _is_hard_block_reason,
+    _safe_gate_float,
+    _safe_gate_int,
+    _load_sector_db,
+    _paper_engine_phase_trace,
+    _get_dict,
+    _get_list,
+)
+from paper_engine.entry import (
+    BASE_DIR,
+    _apply_entry_selection_policy,
+    _apply_horizon_entry_policy,
+    _apply_runtime_caps_and_filters,
+    _build_entry_risk_basis,
+    _build_signal_tracking_context,
+    _evaluate_entry_guards,
+    _init_entry_loop_state,
+    _minimum_quantity_verification_cfg,
+    _prepare_entry_candidate_pool,
+    _prepare_pretrade_runtime,
+    _process_entry_rows,
+    _write_entry_decision_layers_snapshot,
+    _write_entry_signal_snapshot,
+    _write_normal_entry_fill_quality_report,
+    _write_p1_gate_status,
+    apply_p1_entry_controls,
+    final_entry_decision,
+    load_prices_for_codes,
+    maybe_run_pnl_report,
+    derive_fx_entry_status,
+    apply_fx_filter,
+    load_candidates_chosen_level,
+    parse_relax_level_num,
+    pick_candidates,
+    _LAST_CARRYOVER_REVALIDATE_SUMMARY,
+)
+from paper_engine.surge import (
+    _write_surge_realtime_shadow_runtime_snapshot,
+    _inject_surge_immediate_candidates as _surge_inject_surge_immediate_candidates,
+    _compute_dynamic_max_new_surge,
+)
+from paper_engine import surge as _surge_module
+
+
+def _inject_surge_immediate_candidates(*args: Any, **kwargs: Any):
+    _surge_module.SURGE_REALTIME_STATUS_PATH = SURGE_REALTIME_STATUS_PATH
+    _surge_module.SURGE_ACTIVE_RESPONSE_LAYER_CSV_PATH = SURGE_ACTIVE_RESPONSE_LAYER_CSV_PATH
+    _surge_module.SURGE_LIVE_READINESS_AUDIT_CSV_PATH = SURGE_LIVE_READINESS_AUDIT_CSV_PATH
+    return _surge_inject_surge_immediate_candidates(*args, **kwargs)
+
+from paper_engine.exit import (
+    _get_sell_rules,
+    _write_intraday_residual_overnight_guard_shadow,
+    _apply_intraday_residual_overnight_guard_exits,
+)
+from paper_engine.positions import (
+    _append_rows_atomic,
+    _restore_backup_file,
+    _sync_new_fills_to_live_bridge,
+    _reconcile_open_positions_with_fills,
+    _recover_open_positions,
+    _compute_current_open_notional,
+    _count_open_position_slots,
+    _recalculate_open_notional_and_alert,
+    _process_open_positions_and_rebalance,
+)
+from paper_engine.regime import (
+    resolve_market_regime,
+    load_latest_gate_snapshot,
+    resolve_bear_sizing_confirmation,
+)
+from paper_engine.guards import (
+    count_kill_switch_streak_days,
+    compute_adaptive_kill_cap,
+)
+from paper_engine.risk_orchestration import (
+    _compute_risk_orch_scale,
+)
+from paper_engine.settlement import (
+    _merge_last_t2_state_fields,
+    _t2_record_sell_pending,
+    _write_t2_settlement_status,
+)
+from paper_engine.state import (
+    _build_risk_reason_details,
+    load_latest_p0_snapshot,
+    read_latest_stable_params,
+    _stable_params_usable,
+    _align_p0_snapshot_with_latest_pnl_for_ddm,
+    load_latest_macro_snapshot,
+    _build_trend_overlay_2026_context,
+    _write_replay_queue_status,
+    _write_recovery_status,
+    _refresh_replay_consistency,
+    _build_ops_alert_and_carryover,
+    _persist_state_and_runtime_status,
 )
 
-BASE_DIR = Path(__file__).resolve().parent
-LOG_DIR = BASE_DIR / "2_Logs"
-RISK_DIR = BASE_DIR / "12_Risk_Controlled"
 PAPER_DIR = BASE_DIR / "paper"
 
-FILLS = PAPER_DIR / "fills.csv"
-TRADES = PAPER_DIR / "trades.csv"
-STATE_PATH = PAPER_DIR / "paper_state.json"
-CONFIG_PATH = PAPER_DIR / "paper_engine_config.json"
-PENDING_SIGNALS_PATH = LOG_DIR / "pending_entry_signals_latest.csv"
-OPS_ALERT_LATEST_PATH = LOG_DIR / "market_ops_alert_latest.json"
-PENDING_STATUS_LATEST_PATH = LOG_DIR / "pending_entry_status_latest.json"
+DDM_STATUS_PATH = _path_from_env(
+    "PAPER_DDM_STATUS_PATH",
+    LOG_DIR / "paper_ddm_status_latest.json",
+)
+BACKTEST_DEFERRED_VALIDATION_STATUS_PATH = _path_from_env(
+    "PAPER_BACKTEST_DEFERRED_VALIDATION_STATUS_PATH",
+    LOG_DIR / "backtest_deferred_validation_status_latest.json",
+)
 
-# Legacy schema (?????????????????????熬곣뫖利당춯??쎾퐲???????????????????꿔꺂?㏘틠??怨몄젦????????????????????????거??????????????????????泥???????????????????????????????????????????????????????????paper ?????????????????????????????????????
-LEGACY_FILLS_HEADER = ["datetime", "code", "side", "qty", "price", "order_id", "note"]
-LEGACY_TRADES_HEADER = ["trade_id", "code", "entry_date", "entry_price", "exit_date", "exit_price", "pnl_pct", "pnl_krw", "exit_reason", "note"]
+# Shared helper aliases are imported from utils.common.
 
-# v41.1 schema (?????????????????????????????????? ?????????????????????熬곣뫖利당춯??쎾퐲???????????????????꿔꺂?㏘틠??怨몄젦????????????????????????거??????????????????????泥??????????????????????????????????????????????????????????????????????????
-V411_FILLS_HEADER = ["ts","date","code","name","side","qty","price","fee","slippage","order_id","note"]
-V411_TRADES_HEADER = ["trade_id","entry_ts","exit_ts","code","name","side","qty","entry_price","exit_price",
-                      "gross_ret","net_ret","fee","slippage","stop_hit","take_profit_hit","trail_hit","note"]
 
-DEFAULT_CONFIG: Dict[str, Any] = {
-    "max_new_trades_per_day": 3,
-    "fixed_qty": 1,
-    "max_hold_days": 10,                 # exit ???????????????????????????????????????濾????????????????곕춴???????븐뼐?????????嶺뚮∥?????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????TIME??????
-    "allow_same_code_reentry": False,
-    "gap_up_max_pct": 0.0,               # 0 = disabled; >0 = T?????????? ????T+1??? ?????????????????????????????????????????????????????????????⑤벡??????????????????????????????????????
-    "entry_gap_down_stop_pct": 0.0,      # 0 = disabled; >0 = T?? ?? T+1?? ???(??) ??
+# latest_file helper is imported from utils.common.
 
-    # ??????????????????????????꾩룆梨띰쭕?뚢뵾??????????????嶺뚮죭?댁젘??????????????????????釉먮폁???????????????????살몝?????????????????????????????????????????????????????????????????????????????????????????????? ??????????????????????????????????????????
-    "fee_pct": 0.005,
-    "slippage_pct": 0.001,
+# read_csv_safe helper is imported from utils.common.
 
-    # tax (optional, default 0)
-    "sell_tax_pct": 0.0,
-
-    # ?????????????????????熬곣뫖利당춯??쎾퐲???????????????????꿔꺂?㏘틠??怨몄젦????????????????????????거??????????????????????泥???????????????????????????????????????????????????????????
-    "candidates_latest_data": str(LOG_DIR / "candidates_latest_data.csv"),
-
-    # parquet ?????
-    "parquet_root": str(BASE_DIR),
-    "parquet_top_n_recent": 120,
-    "parquet_max_open_files": 30,
-    "max_gross_exposure_pct": 1.0,       # 0~1 (or 0~100); cap on open+new notional / capital_total
-    "max_daily_new_exposure_pct": 1.0,   # 0~1 (or 0~100); cap on same-day newly deployed notional
-    "max_per_sector": 0,
-    "max_per_symbol_exposure_pct": 0.0,
-    # Adaptive operations policy:
-    # avoid permanent all-stop by scaling entry allowance from live risk metrics.
-    "adaptive_entry_control": {
-        "enabled": True,
-        "kill_switch_override_block": True,   # allow dynamic REDUCE even if kill_switch.mode=BLOCK
-        "dd_ratio_soft": 1.00,                # |dd| / limit threshold
-        "dd_ratio_mid": 1.10,
-        "dd_ratio_hard": 1.25,
-        "reduce_soft": 0.50,                  # applied to base max_new
-        "reduce_mid": 0.30,
-        "reduce_hard": 0.15,
-        "probe_min_new": 1,                   # never zero for non-hard-data kill_switch day
-        "relief_after_streak_days": 3,        # if blocked/reduced for N consecutive days
-        "relief_min_new": 1,                  # keep small participation alive
-        "dynamic_relax_l5_factor": 0.10,      # L5 cap scales with base max_new
-        "kill_switch_block_fallback_reduce": True, # if ks mode=BLOCK and adaptive unavailable, keep minimal probe
-    },
-    # Regime policy:
-    # - NORMAL: default behavior
-    # - RALLY: allow small probe even under kill_switch BLOCK (non-hard-data only)
-    # - CRASH: optional hard block (disabled by default; kill_switch remains hard guard)
-    "regime_entry_policy": {
-        "enabled": True,
-        "rally_day_ret_min": 0.025,
-        "crash_day_ret_max": -0.025,
-        "allow_rally_on_macro_volatile": True,
-        "allow_rally_when_macro_risk_off": True,
-        "rally_probe_under_kill_switch_block": True,
-        "rally_probe_max_new": 1,
-        "rally_max_per_sector": 1,
-        "rally_max_gross_exposure_pct": 0.60,
-        "rally_max_daily_new_exposure_pct": 0.15,
-        "rally_gap_up_max_pct": 0.015,
-        "rally_entry_gap_down_stop_pct": 0.03,
-        "crash_force_block": True,
-        "macro_hard_block_enabled": False,
-    },
-    "market_ops_policy": {
-        "enabled": True,
-        "slo_normal": 0.10,
-        "slo_rally_base": 0.20,
-        "slo_rally_per_ret": 2.0,
-        "slo_rally_cap": 0.50,
-        "slo_crash_base": 0.05,
-        "slo_crash_per_ret": 0.8,
-        "slo_crash_cap": 0.20,
-        "probe_rally_min": 1,
-        "probe_rally_ratio_base": 0.10,
-        "probe_rally_ratio_per_ret": 2.0,
-        "probe_rally_ratio_cap": 0.35,
-        "probe_crash_min": 0,
-        "probe_crash_ratio_base": 0.03,
-        "probe_crash_ratio_per_ret": 0.8,
-        "probe_crash_ratio_cap": 0.10,
-        "universe_shrink_min_candidates": 8,
-        "universe_shrink_min_price_codes": 200,
-        "universe_shrink_disable_signal_cap": True,
-        "universe_shrink_disable_sector_cap": True,
-        "universe_shrink_probe_uplift": 0.05,
-        "carryover_no_next_day_enabled": True,
-        "carryover_max_age_days": 2,
-    },
-}
-
-@dataclass
-class ColMap:
-    date: str
-    code: str
-    open: str
-    high: str
-    low: str
-    close: str
-    name: Optional[str] = None
-
-def now_ts() -> str:
-    return datetime.now().isoformat(timespec="seconds")
-
-
-# norm_code -> utils.common.norm_code????????
-# ymd_now -> utils.common.now_ymd????????
-
-def ensure_dirs() -> None:
-    PAPER_DIR.mkdir(parents=True, exist_ok=True)
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-
-
-def calc_qty(entry_price: float, cfg: Dict[str, Any], fee_pct: float, slip_pct: float) -> int:
-    """Return order quantity based on a single sizing policy.
-
-    Supported modes (cfg['sizing_mode']):
-      - 'fixed_qty'      : use cfg['fixed_qty']
-      - 'fixed_cash'     : use cfg['cash_per_trade'] (KRW)
-      - 'capital_slots'  : use cfg['capital_total'] / cfg['max_positions'] (KRW)
-
-    If qty < cfg['min_qty'] or entry_price<=0, returns 0 (skip).
-    """
-    try:
-        mode = str(cfg.get("sizing_mode", "fixed_qty")).strip().lower()
-    except Exception:
-        mode = "fixed_qty"
-
-    min_qty = int(cfg.get("min_qty", 1) or 1)
-
-    if entry_price <= 0:
-        return 0
-
-    if mode == "fixed_qty":
-        qty = int(cfg.get("fixed_qty", 1) or 1)
-        return qty if qty >= min_qty else 0
-
-    if mode == "fixed_cash":
-        cash = float(cfg.get("cash_per_trade", 0) or 0)
-    elif mode == "capital_slots":
-        cap = float(cfg.get("capital_total", 0) or 0)
-        slots = float(cfg.get("max_positions", 0) or 0)
-        cash = (cap / slots) if (cap > 0 and slots > 0) else 0.0
-    else:
-        # unknown -> fallback to fixed_qty
-        qty = int(cfg.get("fixed_qty", 1) or 1)
-        return qty if qty >= min_qty else 0
-
-    if cash <= 0:
-        return 0
-
-    # Conservative: ignore fees/slippage in qty calc for simplicity & reproducibility.
-    qty = int(cash // float(entry_price))
-    return qty if qty >= min_qty else 0
-
-
-def load_config() -> Dict[str, Any]:
-    """
-    - ??????????????????????????????????????????????????????????????DEFAULT_CONFIG ??????????????????????諛몃마嶺뚮?????????????硫λ젒????????????????????遺얘턁??????얜Ŧ堉??????⑤뜪?????????????????????????癲????????????????????????????????????
-    - ????????????????????????????????????????熬곣뫖利당춯??쎾퐲???????????????????꿔꺂?㏘틠??怨몄젦????????????????????????거??????????????????????泥???????????????????????????????????????????????????????????????????????????????????DEFAULT_CONFIG?????????????????????????????????⑤벡????????????????????????KeyError ?????????????????????꾩룆梨띰쭕?뚢뵾??????????????嶺뚮죭?댁젘??????????????????????釉먮폁???????????????????살몝???????????????????????????????????????????????????????????????????????????????????)
-    """
-    ensure_dirs()
-    if not CONFIG_PATH.exists():
-        CONFIG_PATH.write_text(json.dumps(DEFAULT_CONFIG, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"[CONFIG] wrote default: {CONFIG_PATH}")
-        return dict(DEFAULT_CONFIG)
-
-    loaded = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    cfg = dict(DEFAULT_CONFIG)
-    cfg.update(loaded)
-
-    # Keep defaults in-memory only; do not mutate config on runtime.
-    # Config file changes must go through tools/paper_engine_config_lock.py.
-    missing = [k for k in DEFAULT_CONFIG.keys() if k not in loaded]
-    if missing:
-        print(f"[CONFIG] missing keys defaulted in-memory only: {missing}")
-    return cfg
-
-def read_header(path: Path) -> Optional[List[str]]:
-    if not path.exists():
-        return None
-    for enc in ("utf-8-sig", "utf-8"):
-        try:
-            with path.open("r", encoding=enc, newline="") as f:
-                r = csv.reader(f)
-                return next(r, None)
-        except Exception:
-            continue
-
-    return None
-
-def detect_schema() -> str:
-    hf = read_header(FILLS)
-    ht = read_header(TRADES)
-    if hf is None and ht is None:
-        return "legacy"
-
-    if hf == LEGACY_FILLS_HEADER and ht == LEGACY_TRADES_HEADER:
-        return "legacy"
-    if hf == V411_FILLS_HEADER and ht == V411_TRADES_HEADER:
-        return "v41.1"
-
-    raise SystemExit(
-        "[FATAL] paper schema mismatch.\n"
-        f"  fills_header={hf}\n"
-        f"  trades_header={ht}\n"
-        "Fix: make both legacy OR both v41.1 consistently."
-    )
-
-def ensure_csv(path: Path, header: List[str]) -> None:
-    if path.exists() and path.stat().st_size > 0:
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="", encoding="utf-8-sig") as f:
-        csv.writer(f).writerow(header)
-
-def load_state() -> Dict[str, Any]:
-    """
-    paper_state.json
-      - open_positions: ?????????????????????熬곣뫖利당춯??쎾퐲???????????????????꿔꺂?㏘틠??怨몄젦????????????????????????거??????????????????????泥?????????????????????????????????????????????????????????????????????????????????꾩룆梨띰쭕???????????
-      - next_trade_seq: ????????????????trade_id ?????????????????????????밸븶筌믩끃??獄???????멥렑???????????????????耀붾굝?????臾먮뼁?????쇨덫?????????
-      - processed_signals: "CODE:YYYYMMDD" (signal_date) ???????????????????????????????????????釉먮폁????????꿔꺂???癰귥옖留???????????????????????????????????????????????????????????????꾩룆梨띰쭕?뚢뵾??????????????嶺뚮죭?댁젘??????????????????????釉먮폁???????????????????살몝??????????????????????????????????????????????????????????????????????????????????? ??
-    """
-    if not STATE_PATH.exists():
-        return {"open_positions": [], "next_trade_seq": 1, "processed_signals": []}
-    try:
-        st = json.loads(STATE_PATH.read_text(encoding="utf-8"))
-        if "processed_signals" not in st:
-            st["processed_signals"] = []
-        if "open_positions" not in st:
-            st["open_positions"] = []
-        if "next_trade_seq" not in st:
-            st["next_trade_seq"] = 1
-        return st
-    except Exception:
-        return {"open_positions": [], "next_trade_seq": 1, "processed_signals": []}
-
-def save_state(state: Dict[str, Any]) -> None:
-    tmp = STATE_PATH.with_suffix(STATE_PATH.suffix + ".tmp")
-    payload = json.dumps(state, ensure_ascii=False, indent=2)
-    tmp.write_text(payload, encoding="utf-8")
-    # atomic-ish on Windows: replace existing file
-    tmp.replace(STATE_PATH)
-
-# latest_json_in -> utils.common.latest_file????????
-
-def load_latest_p0_risk_off(log_dir: Path) -> tuple[bool, list[str]]:
-    """Return (enabled, reasons) from the latest p0_daily_check_*.json in log_dir.
-
-    If missing or unreadable, returns (False, []).
-    """
-    try:
-        p0p = latest_file(log_dir, 'p0_daily_check_*.json')  # ??utils.common ????
-        if not p0p:
-            return False, []
-        obj = json.loads(p0p.read_text(encoding='utf-8'))
-        ro = obj.get('risk_off') if isinstance(obj.get('risk_off'), dict) else {}
-        enabled = bool(ro.get('enabled'))
-        reasons = ro.get('reasons') if isinstance(ro.get('reasons'), list) else []
-        reasons = [str(x) for x in reasons]
-        return enabled, reasons
-    except Exception:
-        return False, []
-
-
-
-def _is_hard_block_reason(reason: str) -> bool:
-    r = str(reason or "")
-    return (
-        r.startswith("cand_latest_date(")
-        or r.startswith("krx_clean_universe_degraded(")
-        or r.startswith("prices_date_max(")
-        or r.startswith("krx_clean_date_max(")
-    )
-
-
-def load_latest_p0_snapshot(log_dir: Path) -> Dict[str, Any]:
-    """Load the latest p0_daily_check snapshot for adaptive entry policy."""
-    out: Dict[str, Any] = {
-        "path": None,
-        "as_of_ymd": None,
-        "risk_off_enabled": False,
-        "risk_off_reasons": [],
-        "kill_switch": {},
-        "crash_risk_off": {},
-    }
-    try:
-        p0p = latest_file(log_dir, "p0_daily_check_*.json")
-        if not p0p:
-            return out
-        obj = json.loads(p0p.read_text(encoding="utf-8"))
-        ro = obj.get("risk_off") if isinstance(obj.get("risk_off"), dict) else {}
-        out["path"] = str(p0p)
-        out["as_of_ymd"] = str(obj.get("as_of_ymd") or "") or None
-        out["risk_off_enabled"] = bool(ro.get("enabled"))
-        rr = ro.get("reasons") if isinstance(ro.get("reasons"), list) else []
-        out["risk_off_reasons"] = [str(x) for x in rr]
-        ks = obj.get("kill_switch") if isinstance(obj.get("kill_switch"), dict) else {}
-        out["kill_switch"] = ks
-        cro = obj.get("crash_risk_off") if isinstance(obj.get("crash_risk_off"), dict) else {}
-        out["crash_risk_off"] = cro
-        return out
-    except Exception:
-        return out
-
-
-
-def load_latest_macro_snapshot(log_dir: Path) -> Dict[str, Any]:
-    out: Dict[str, Any] = {
-        "path": None,
-        "as_of_ymd": None,
-        "regime": None,
-        "risk_on": None,
-        "crash_prob": None,
-        "market_metrics": {},
-    }
-    try:
-        p = latest_file(log_dir, "macro_signal_latest.json")
-        if not p:
-            return out
-        obj = json.loads(p.read_text(encoding="utf-8"))
-        out["path"] = str(p)
-        out["as_of_ymd"] = str(obj.get("as_of_ymd") or "") or None
-        out["regime"] = str(obj.get("regime") or "") or None
-        out["risk_on"] = bool(obj.get("risk_on")) if ("risk_on" in obj) else None
-        out["crash_prob"] = obj.get("crash_prob")
-        mm = obj.get("market_metrics") if isinstance(obj.get("market_metrics"), dict) else {}
-        out["market_metrics"] = mm
-        return out
-    except Exception:
-        return out
-
-
-def resolve_market_regime(cfg: Dict[str, Any], p0_snapshot: Dict[str, Any], macro_snapshot: Dict[str, Any]) -> Dict[str, Any]:
-    pol = cfg.get("regime_entry_policy") if isinstance(cfg, dict) else {}
-    if not isinstance(pol, dict):
-        pol = {}
-
-    enabled = bool(pol.get("enabled", False))
-    out: Dict[str, Any] = {
-        "enabled": enabled,
-        "regime": "NORMAL",
-        "day_ret": None,
-        "macro_regime": str(macro_snapshot.get("regime") or "").upper(),
-        "macro_risk_on": macro_snapshot.get("risk_on"),
-        "reasons": [],
-    }
-    if not enabled:
-        out["reasons"].append("policy_disabled")
-        return out
-
-    def _f(v: Any, d: float) -> float:
-        try:
-            return float(v)
-        except Exception:
-            return float(d)
-
-    rally_day_ret_min = _f(pol.get("rally_day_ret_min", 0.025), 0.025)
-    crash_day_ret_max = _f(pol.get("crash_day_ret_max", -0.025), -0.025)
-    allow_rally_on_volatile = bool(pol.get("allow_rally_on_macro_volatile", True))
-    allow_rally_when_macro_risk_off = bool(pol.get("allow_rally_when_macro_risk_off", True))
-
-    day_ret = None
-    # Prefer macro ret1 (market-level) over p0 crash fallback proxy.
-    try:
-        mm = macro_snapshot.get("market_metrics") if isinstance(macro_snapshot.get("market_metrics"), dict) else {}
-        if "ret1" in mm:
-            day_ret = float(mm.get("ret1"))
-    except Exception:
-        day_ret = None
-    if day_ret is None:
-        try:
-            cro = p0_snapshot.get("crash_risk_off") if isinstance(p0_snapshot.get("crash_risk_off"), dict) else {}
-            metrics = cro.get("metrics") if isinstance(cro.get("metrics"), dict) else {}
-            if "day_ret" in metrics:
-                day_ret = float(metrics.get("day_ret"))
-        except Exception:
-            day_ret = None
-    out["day_ret"] = day_ret
-
-    macro_regime = out["macro_regime"]
-    macro_risk_on = out["macro_risk_on"]
-
-    is_macro_crash = macro_regime in {"CRASH", "RATE_HIKE_FEAR"}
-    is_macro_volatile = macro_regime == "VOLATILE"
-
-    if is_macro_crash or (day_ret is not None and day_ret <= crash_day_ret_max):
-        out["regime"] = "CRASH"
-        out["reasons"].append("macro_or_dayret_crash")
-        return out
-
-    if day_ret is not None and day_ret >= rally_day_ret_min:
-        if macro_risk_on is False and (not allow_rally_when_macro_risk_off):
-            out["reasons"].append("macro_risk_off_blocks_rally")
-        elif is_macro_volatile and not allow_rally_on_volatile:
-            out["reasons"].append("macro_volatile_blocks_rally")
-        else:
-            out["regime"] = "RALLY"
-            out["reasons"].append("dayret_rally")
-            return out
-
-    out["reasons"].append("normal_by_default")
-    return out
-
-def count_kill_switch_streak_days(log_dir: Path, max_scan_days: int = 30) -> int:
-    """Count consecutive days where risk_off was enabled by kill_switch (non-hard-data reasons)."""
-    files = sorted(log_dir.glob("p0_daily_check_*.json"), key=lambda p: p.name, reverse=True)
-    seen_days: set[str] = set()
-    streak = 0
-    for p in files:
-        m = re.search(r"p0_daily_check_(\d{8})_", p.name)
-        if not m:
-            continue
-        ymd = m.group(1)
-        if ymd in seen_days:
-            continue
-        seen_days.add(ymd)
-        try:
-            obj = json.loads(p.read_text(encoding="utf-8"))
-        except Exception:
-            break
-        ro = obj.get("risk_off") if isinstance(obj.get("risk_off"), dict) else {}
-        enabled = bool(ro.get("enabled"))
-        reasons = ro.get("reasons") if isinstance(ro.get("reasons"), list) else []
-        reasons = [str(x) for x in reasons]
-        has_kill = "kill_switch" in reasons
-        hard = any(_is_hard_block_reason(r) for r in reasons)
-        if enabled and has_kill and not hard:
-            streak += 1
-            if streak >= int(max_scan_days):
-                break
-            continue
-        break
-    return int(streak)
-
-
-def compute_adaptive_kill_cap(base_max_new: int, cfg: Dict[str, Any], p0_snapshot: Dict[str, Any], streak_days: int) -> Optional[Tuple[int, str]]:
-    aec = cfg.get("adaptive_entry_control", {}) if isinstance(cfg, dict) else {}
-    if not isinstance(aec, dict) or not bool(aec.get("enabled", False)):
-        return None
-
-    def _f(v: Any, d: float) -> float:
-        try:
-            return float(v)
-        except Exception:
-            return float(d)
-
-    def _i(v: Any, d: int) -> int:
-        try:
-            return int(v)
-        except Exception:
-            return int(d)
-
-    ks = p0_snapshot.get("kill_switch") if isinstance(p0_snapshot, dict) else {}
-    metrics = ks.get("metrics") if isinstance(ks, dict) and isinstance(ks.get("metrics"), dict) else {}
-    limits = ks.get("limits") if isinstance(ks, dict) and isinstance(ks.get("limits"), dict) else {}
-
-    dd = abs(_f(metrics.get("max_drawdown_pct"), 0.0))
-    dd_lim = abs(_f(limits.get("max_drawdown_pct"), 0.25))
-    if dd_lim <= 0:
-        return None
-    dd_ratio = dd / dd_lim
-
-    r_soft = _f(aec.get("dd_ratio_soft"), 1.00)
-    r_mid = _f(aec.get("dd_ratio_mid"), 1.10)
-    r_hard = _f(aec.get("dd_ratio_hard"), 1.25)
-    f_soft = _f(aec.get("reduce_soft"), 0.50)
-    f_mid = _f(aec.get("reduce_mid"), 0.30)
-    f_hard = _f(aec.get("reduce_hard"), 0.15)
-    probe_min = max(1, _i(aec.get("probe_min_new"), 1))
-    relief_after = max(1, _i(aec.get("relief_after_streak_days"), 3))
-    relief_min = max(1, _i(aec.get("relief_min_new"), 1))
-
-    if dd_ratio >= r_hard:
-        factor = f_hard
-        band = "HARD"
-    elif dd_ratio >= r_mid:
-        factor = f_mid
-        band = "MID"
-    elif dd_ratio >= r_soft:
-        factor = f_soft
-        band = "SOFT"
-    else:
-        factor = min(1.0, max(f_soft, 0.0))
-        band = "BELOW_SOFT"
-
-    base = max(0, int(base_max_new))
-    if base <= 0:
-        return 0, "base_max_new=0"
-    cap = int(math.floor(base * max(0.0, min(1.0, factor))))
-    cap = max(probe_min, cap)
-    if int(streak_days) >= relief_after:
-        cap = max(cap, relief_min)
-    cap = min(base, cap)
-    detail = f"dd_ratio={dd_ratio:.3f} band={band} factor={factor:.2f} streak={int(streak_days)}"
-    return int(cap), detail
-
-
-def load_candidates_chosen_level(log_dir: Path) -> Optional[str]:
-    """Return chosen_level from candidates_latest_meta.json, if available."""
-    p = log_dir / "candidates_latest_meta.json"
-    if not p.exists():
-        return None
-    try:
-        obj = json.loads(p.read_text(encoding="utf-8"))
-    except Exception:
-        try:
-            obj = json.loads(p.read_text(encoding="utf-8-sig"))
-        except Exception:
-            return None
-    if not isinstance(obj, dict):
-        return None
-    lv = obj.get("chosen_level")
-    if lv is None:
-        return None
-    s = str(lv).strip().upper()
-    return s if s else None
-
-_RELAX_LEVEL_RE = re.compile(r"^L(\d+)$")
-
-def parse_relax_level_num(chosen_level: Optional[str]) -> Optional[int]:
-    if not chosen_level:
-        return None
-    m = _RELAX_LEVEL_RE.match(str(chosen_level).strip().upper())
-    if not m:
-        return None
-    try:
-        return int(m.group(1))
-    except Exception:
-        return None
-
-def _ops_policy(cfg: Dict[str, Any]) -> Dict[str, Any]:
-    op = cfg.get("market_ops_policy", {}) if isinstance(cfg, dict) else {}
-    return op if isinstance(op, dict) else {}
-
-
-def _to_float(v: Any, d: float) -> float:
-    try:
-        return float(v)
-    except Exception:
-        return float(d)
-
-
-def _to_int(v: Any, d: int) -> int:
-    try:
-        return int(v)
-    except Exception:
-        return int(d)
-
-
-def _clamp01(x: float) -> float:
-    return max(0.0, min(1.0, float(x)))
-
-
-def _load_pending_signals(max_age_days: int) -> pd.DataFrame:
-    if not PENDING_SIGNALS_PATH.exists():
-        return pd.DataFrame()
-    try:
-        p = pd.read_csv(PENDING_SIGNALS_PATH)
-    except Exception:
-        return pd.DataFrame()
-    if p.empty:
-        return p
-    if "signal_date" not in p.columns or "code" not in p.columns:
-        return pd.DataFrame()
-
-    p["signal_date"] = p["signal_date"].astype(str).str.replace(r"[^0-9]", "", regex=True).str[:8]
-    p["code"] = p["code"].astype(str).str.zfill(6)
-    p = p[(p["signal_date"].str.len() == 8) & (p["code"].str.len() == 6)].copy()
-
-    if max_age_days > 0:
-        today = datetime.strptime(now_ymd(), "%Y%m%d")
-        min_day = (today - timedelta(days=max_age_days)).strftime("%Y%m%d")
-        p = p[p["signal_date"] >= min_day].copy()
-
-    if p.empty:
-        return p
-    p = p.sort_values(["signal_date", "code"], ascending=[False, True]).drop_duplicates(["code", "signal_date"], keep="first")
-    return p
-
-
-def _save_pending_signals(rows: List[Dict[str, Any]], max_age_days: int) -> None:
-    if not rows:
-        return
-    cur = _load_pending_signals(max_age_days=max_age_days)
-    add = pd.DataFrame(rows)
-    if add.empty:
-        return
-    all_df = pd.concat([cur, add], ignore_index=True)
-    all_df["signal_date"] = all_df["signal_date"].astype(str).str.replace(r"[^0-9]", "", regex=True).str[:8]
-    all_df["code"] = all_df["code"].astype(str).str.zfill(6)
-    all_df = all_df[(all_df["signal_date"].str.len() == 8) & (all_df["code"].str.len() == 6)].copy()
-
-    if max_age_days > 0:
-        today = datetime.strptime(now_ymd(), "%Y%m%d")
-        min_day = (today - timedelta(days=max_age_days)).strftime("%Y%m%d")
-        all_df = all_df[all_df["signal_date"] >= min_day].copy()
-
-    if all_df.empty:
-        try:
-            if PENDING_SIGNALS_PATH.exists():
-                PENDING_SIGNALS_PATH.unlink()
-        except Exception:
-            pass
-        return
-
-    all_df = all_df.sort_values(["signal_date", "code"], ascending=[False, True]).drop_duplicates(["code", "signal_date"], keep="first")
-    all_df.to_csv(PENDING_SIGNALS_PATH, index=False, encoding="utf-8-sig")
-
-
-def compute_dynamic_probe_floor(base_max_new: int, market_regime: str, regime_info: Dict[str, Any], cfg: Dict[str, Any], risk_off_hard: bool, universe_shrink: bool) -> int:
-    op = _ops_policy(cfg)
-    if not bool(op.get("enabled", False)):
-        return 0
-    if risk_off_hard:
-        return 0
-
-    day_ret_abs = abs(_to_float((regime_info or {}).get("day_ret"), 0.0))
-    base = max(0, int(base_max_new))
-    if base <= 0:
-        return 0
-
-    reg = str(market_regime or "NORMAL").upper()
-    if reg == "RALLY":
-        min_n = max(1, _to_int(op.get("probe_rally_min", 1), 1))
-        ratio = _to_float(op.get("probe_rally_ratio_base", 0.10), 0.10) + day_ret_abs * _to_float(op.get("probe_rally_ratio_per_ret", 2.0), 2.0)
-        ratio = min(_to_float(op.get("probe_rally_ratio_cap", 0.35), 0.35), ratio)
-        if universe_shrink:
-            ratio += _to_float(op.get("universe_shrink_probe_uplift", 0.05), 0.05)
-        ratio = _clamp01(ratio)
-        return min(base, max(min_n, int(math.ceil(base * ratio))))
-
-    if reg == "CRASH":
-        min_n = max(0, _to_int(op.get("probe_crash_min", 0), 0))
-        ratio = _to_float(op.get("probe_crash_ratio_base", 0.03), 0.03) + day_ret_abs * _to_float(op.get("probe_crash_ratio_per_ret", 0.8), 0.8)
-        ratio = min(_to_float(op.get("probe_crash_ratio_cap", 0.10), 0.10), ratio)
-        ratio = _clamp01(ratio)
-        return min(base, max(min_n, int(math.ceil(base * ratio))))
-
-    return 0
-
-
-def compute_participation_slo(market_regime: str, regime_info: Dict[str, Any], cfg: Dict[str, Any]) -> float:
-    op = _ops_policy(cfg)
-    if not bool(op.get("enabled", False)):
-        return 0.0
-    reg = str(market_regime or "NORMAL").upper()
-    day_ret_abs = abs(_to_float((regime_info or {}).get("day_ret"), 0.0))
-
-    if reg == "RALLY":
-        x = _to_float(op.get("slo_rally_base", 0.20), 0.20) + day_ret_abs * _to_float(op.get("slo_rally_per_ret", 2.0), 2.0)
-        return _clamp01(min(_to_float(op.get("slo_rally_cap", 0.50), 0.50), x))
-    if reg == "CRASH":
-        x = _to_float(op.get("slo_crash_base", 0.05), 0.05) + day_ret_abs * _to_float(op.get("slo_crash_per_ret", 0.8), 0.8)
-        return _clamp01(min(_to_float(op.get("slo_crash_cap", 0.20), 0.20), x))
-    return _clamp01(_to_float(op.get("slo_normal", 0.10), 0.10))
-
-
-def _write_ops_alert(payload: Dict[str, Any]) -> None:
-    try:
-        OPS_ALERT_LATEST_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    except Exception:
-        pass
-
-
-def _write_pending_status(payload: Dict[str, Any]) -> None:
-    try:
-        PENDING_STATUS_LATEST_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    except Exception:
-        pass
-def read_latest_stable_params() -> Dict[str, Any]:
-    p = latest_file(RISK_DIR, "stable_params_v*.json")  # ??utils.common ????
-    if not p:
-        return {}
-    try:
-        return json.loads(p.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-
-def _max_date8_from_candidates(x: pd.DataFrame) -> str:
-    if "date_yyyymmdd" in x.columns:
-        ss = x["date_yyyymmdd"].astype(str)
-    elif "date" in x.columns:
-        ss = x["date"].astype(str).str.replace("-", "", regex=False).str[:8]
-    elif "signal_date" in x.columns:
-        ss = x["signal_date"].astype(str)
-    else:
-        return ""
-    ss = ss.str.replace(r"[^0-9]", "", regex=True).str[:8]
-    ss = ss[ss.str.len() == 8]
-    return str(ss.max()) if len(ss) else ""
-
-
-def pick_candidates(cfg: Dict[str, Any]) -> pd.DataFrame:
-    cpath = Path(cfg["candidates_latest_data"])
-    if not cpath.exists():
-        raise SystemExit(f"[FATAL] missing candidates file: {cpath}")
-    df = pd.read_csv(cpath)
-
-    # Prefer enriched sidecars in priority order.
-    # This keeps base candidates immutable while allowing fail-soft fallbacks.
-    d_base = _max_date8_from_candidates(df)
-    sidecar_suffixes = [
-        ".with_final_score.csv",
-        ".with_news_score.csv",
-        ".with_sector_score.csv",
-    ]
-    sidecar_paths: List[Path] = []
-    for suffix in sidecar_suffixes:
-        sidecar_paths.append(cpath.with_name(cpath.stem + suffix))
-        canonical = LOG_DIR / ("candidates_latest_data" + suffix)
-        if canonical not in sidecar_paths:
-            sidecar_paths.append(canonical)
-
-    for sidecar in sidecar_paths:
-        if not sidecar.exists():
-            continue
-        try:
-            sdf = pd.read_csv(sidecar)
-        except Exception as e:
-            print(f"[CAND] sidecar read failed: {sidecar.name} {type(e).__name__}: {e}")
-            continue
-        if "code" not in sdf.columns:
-            print(f"[CAND] sidecar ignored (no code column): {sidecar.name}")
-            continue
-        d_side = _max_date8_from_candidates(sdf)
-        if d_base and d_side and d_base != d_side:
-            print(f"[CAND] sidecar stale: {sidecar.name} base={d_base} sidecar={d_side}")
-            continue
-        df = sdf
-        print(f"[CAND] using sidecar: {sidecar.name} (date={d_side or d_base or 'n/a'})")
-        break
-
-    if "code" not in df.columns:
-        raise SystemExit(f"[FATAL] candidates has no 'code' column: cols={df.columns.tolist()}")
-
-    if "date_yyyymmdd" in df.columns:
-        df["signal_date"] = df["date_yyyymmdd"].astype(str).str.replace(r"[^0-9]", "", regex=True).str[:8]
-    elif "date" in df.columns:
-        df["signal_date"] = df["date"].astype(str).str.replace("-", "").str[:8]
-    elif "signal_date" in df.columns:
-        df["signal_date"] = df["signal_date"].astype(str).str.replace(r"[^0-9]", "", regex=True).str[:8]
-    else:
-        df["signal_date"] = now_ymd()
-
-    if "name" not in df.columns:
-        df["name"] = ""
-
-    df["code"] = df["code"].astype(str).str.zfill(6)
-
-    op = _ops_policy(cfg)
-    if bool(op.get("enabled", False)) and bool(op.get("carryover_no_next_day_enabled", True)):
-        max_age = max(1, _to_int(op.get("carryover_max_age_days", 2), 2))
-        pending = _load_pending_signals(max_age_days=max_age)
-        if len(pending) > 0:
-            pending["_carryover"] = 1
-            if "_carryover" not in df.columns:
-                df["_carryover"] = 0
-            for c in df.columns:
-                if c not in pending.columns:
-                    pending[c] = pd.NA
-            for c in pending.columns:
-                if c not in df.columns:
-                    df[c] = pd.NA
-            df = pd.concat([df, pending[df.columns]], ignore_index=True)
-            print(f"[CAND] carryover merged: +{len(pending)} rows from {PENDING_SIGNALS_PATH.name}")
-
-    if len(df) > 0:
-        if "_carryover" not in df.columns:
-            df["_carryover"] = 0
-        score_col = "final_score" if "final_score" in df.columns else ("score" if "score" in df.columns else None)
-        if score_col:
-            df["_score_dedup"] = pd.to_numeric(df[score_col], errors="coerce").fillna(-1e18)
-            df = df.sort_values(["signal_date", "code", "_carryover", "_score_dedup"], ascending=[False, True, True, False])
-        else:
-            df = df.sort_values(["signal_date", "code", "_carryover"], ascending=[False, True, True])
-        df = df.drop_duplicates(["code", "signal_date"], keep="first").copy()
-
-    return df
-
-def discover_recent_parquets(cfg: Dict[str, Any]) -> List[Path]:
-    root = Path(cfg["parquet_root"]).resolve()
-    top_n = int(cfg.get("parquet_top_n_recent", 120))
-
-    cand: List[Tuple[float, Path]] = []
-    for dirpath, _, filenames in os.walk(root):
-        for fn in filenames:
-            if not fn.lower().endswith(".parquet"):
-                continue
-            p = Path(dirpath) / fn
-            try:
-                mt = p.stat().st_mtime
-            except Exception:
-                continue
-            cand.append((mt, p))
-            if len(cand) > top_n * 4:
-                cand.sort(key=lambda x: x[0], reverse=True)
-                cand = cand[:top_n]
-    cand.sort(key=lambda x: x[0], reverse=True)
-    return [p for _, p in cand[:top_n]]
-
-def infer_colmap(cols: List[str]) -> Optional[ColMap]:
-    lc = {c.lower(): c for c in cols}
-
-    def pick(keys: List[str]) -> Optional[str]:
-        for k in keys:
-            if k in lc:
-                return lc[k]
-        return None
-
-    date = pick(["date", "dt", "trade_date", "yyyymmdd", "ymd"])
-    code = pick(["code", "ticker", "symbol"])
-    o = pick(["open", "???"])
-    h = pick(["high", "???????"])
-    l = pick(["low", "?????????????"])
-    c = pick(["close", "??????????"])
-    name = pick(["name", "name_kor"])
-    if not (date and code and o and h and l and c):
-        return None
-    return ColMap(date=date, code=code, open=o, high=h, low=l, close=c, name=name)
-
-def load_prices_for_codes(cfg: Dict[str, Any], codes: List[str]) -> pd.DataFrame:
-    """???????????????????????????????????????????(Parquet ??????????????????????????.
-
-    ?????????????????????????????????????????
-    - PyArrow??????????????????????????????????????????????????????????????????????????? ???????????????????????????????????????????????????⑤벡?????????됰Ŧ???????????꿔꺂?????????????????????????????????(I/O 50% ?????????????
-    - ?????????????????????熬곣뫖利당춯??쎾퐲???????????????????꿔꺂?㏘틠??怨몄젦????????????????????????거??????????????????????泥???????????????????????????????????????????????????????????????????????????????????????????????????⑤벡?????????됰Ŧ???????????꿔꺂?????????????????????????????????????????????????????????????????????????????????????????????????????ш끽維뽳쭩?뱀땡???얩맪?????????
-    """
-    import pyarrow.parquet as pq
-
-    recent = discover_recent_parquets(cfg)
-    if not recent:
-        raise SystemExit("[FATAL] no parquet found under parquet_root")
-
-    max_open = int(cfg.get("parquet_max_open_files", 30))
-    frames: List[pd.DataFrame] = []
-    opened = 0
-
-    for p in recent:
-        if opened >= max_open:
-            break
-        try:
-            # ????????????????????? ????????????????????????????????????????????????????????????????????????????????????ш끽維뽳쭩?뱀땡???얩맪?????????- ????????????????????????????????????????????
-            pf = pq.ParquetFile(str(p))
-            schema_cols = list(pf.schema_arrow.names)
-
-            cm = infer_colmap(schema_cols)
-            if not cm:
-                continue
-
-            # ?????????????????????熬곣뫖利당춯??쎾퐲???????????????????꿔꺂?㏘틠??怨몄젦????????????????????????거??????????????????????泥???????????????????????????????????????????????????????????????????????????????????????????????????⑤벡?????????됰Ŧ???????????꿔꺂??????????????????????????????????????????????????????????????????????諛몃마嶺뚮?????????????硫λ젒????????????????????遺얘턁??????얜Ŧ堉??????⑤뜪?????????????????????????癲?????????????????????????????1???????????????????????????????ш끽維뽳쭩?뱀땡???얩맪?????????
-            cols = [cm.date, cm.code, cm.open, cm.high, cm.low, cm.close] + ([cm.name] if cm.name else [])
-            df = pd.read_parquet(p, columns=cols, engine="pyarrow")
-
-            ren = {cm.date: "date", cm.code: "code", cm.open: "open", cm.high: "high", cm.low: "low", cm.close: "close"}
-            if cm.name:
-                ren[cm.name] = "name"
-            df = df.rename(columns=ren)
-            frames.append(df)
-            opened += 1
-        except Exception as e:
-            # ????????????????????????????????????????산뭐???????
-            print(f"[WARN] parquet load skip: {p.name} - {type(e).__name__}")
-            continue
-
-    if not frames:
-        raise SystemExit("[FATAL] parquet found but none matched OHLC schema (need date/code/open/high/low/close)")
-
-    px = pd.concat(frames, ignore_index=True)
-    px["code"] = px["code"].astype(str).str.zfill(6)
-
-    if pd.api.types.is_datetime64_any_dtype(px["date"]):
-        px["date"] = px["date"].dt.strftime("%Y%m%d")
-    else:
-        px["date"] = px["date"].astype(str).str.replace("-", "").str[:8]
-
-    for col in ["open", "high", "low", "close"]:
-        px[col] = pd.to_numeric(px[col], errors="coerce")
-
-    codes_set = set(norm_code(c) for c in codes if norm_code(c))
-    if codes_set:
-        px = px[px["code"].isin(codes_set)]
-    else:
-        # candidates may be empty on some days; keep all codes to avoid fatal
-        print("[WARN] empty codes list; using all codes in price table")
-    px = px.dropna(subset=["date", "open", "high", "low", "close"])
-
-    # ?????????????????? 0??OHLC(?????????????????????????????????????????????⑤벡?????????????????????????????????????????????????????????⑤벡?????????됰Ŧ???????????꿔꺂??????????????)?????????????????
-    px = px[(px["open"] > 0) & (px["high"] > 0) & (px["low"] > 0) & (px["close"] > 0)]
-
-    if px.empty:
-        raise SystemExit("[FATAL] price table empty after code filtering")
-
-    # ?????????????????????????????⑤벡???????(code,date) ???????????????????釉먮폁????????꿔꺂???癰귥옖留????????????????????????????????????????????????????????? close ???????????????????????????????????????????????????????????????????????close) ???????????????
-    px = px.sort_values(["code", "date", "close"]).drop_duplicates(["code", "date"], keep="last")
-    px = px.sort_values(["code", "date"]).reset_index(drop=True)
-    return px
-
-def next_trading_date(px: pd.DataFrame, code: str, after_ymd: str) -> Optional[str]:
-    # ???????????????????????????????⑤벡?????????? close>0 (?????????????????????????????????????????????⑤벡?????????????????????????????????????????????????????????⑤벡?????????됰Ŧ???????????꿔꺂?????????????? 0???????????????????????????????????????袁⑸즴筌?씛彛???돗??????????????癲ル슢二??곸젞???????????????????????됰Ŧ?????????????????????대첐?????????????????????????????????????????????????????????????????????????????????????산뭐??????? ??????????????????????????????
-    d = px.loc[(px["code"] == code) & (px["date"] > after_ymd) & (px["close"] > 0), "date"]
-    if d.empty:
-        return None
-    return str(d.iloc[0])
-
-def get_ohlc(px: pd.DataFrame, code: str, day: str) -> Optional[Dict[str, float]]:
-    r = px[(px["code"] == code) & (px["date"] == day)]
-    if r.empty:
-        return None
-    x = r.iloc[0]
-    return {"open": float(x["open"]), "high": float(x["high"]), "low": float(x["low"]), "close": float(x["close"])}
-
-def calc_net_ret(entry: float, exit: float, fee_pct: float, slip_pct: float, sell_tax_pct: float = 0.0) -> float:
-    # legacy SSOT (matches paper/trades.csv pnl_pct)
-    # gross - ((entry+exit)/entry) * (fee+slip)
-    if entry <= 0:
-        return 0.0
-    gross = (exit - entry) / entry
-    cost = ((entry + exit) / entry) * (fee_pct + slip_pct)
-    return gross - cost - float(sell_tax_pct or 0.0)
-
-def append_rows(path: Path, rows: List[List[Any]]) -> None:
-    # Best-effort durability: reduce chance of torn/partial rows on crash.
-    # (Not a perfect transactional guarantee, but materially safer than buffered append.)
-    import os
-    with path.open("a", newline="", encoding="utf-8-sig") as f:
-        w = csv.writer(f)
-        for r in rows:
-            w.writerow(r)
-        f.flush()
-        os.fsync(f.fileno())
-
-def maybe_run_pnl_report() -> None:
-    pnl = BASE_DIR / "paper_pnl_report.py"
-    if pnl.exists():
-        try:
-            subprocess.run([sys.executable, str(pnl)], cwd=str(BASE_DIR))
-        except Exception:
-            pass
-
-# read_csv_safe -> utils.common.read_csv_safe????????
-
-def _sig_float(x: Any) -> str:
-    try:
-        v = float(x)
-        return f"{v:.8f}"
-    except Exception:
-        return str(x)
-
-def _legacy_trade_sig(row: pd.Series) -> str:
-    # trade_id?????????????????????????????????????????룸챷援???????????????????????????????????????????????????????????????????????????????????????
-    return "|".join([
-        str(row.get("code", "")),
-        str(row.get("entry_date", "")),
-        _sig_float(row.get("entry_price", "")),
-        str(row.get("exit_date", "")),
-        _sig_float(row.get("exit_price", "")),
-        _sig_float(row.get("pnl_pct", "")),
-        str(row.get("exit_reason", "")),
-        str(row.get("note", "")),
-    ])
-
-_SIGNAL_RE = re.compile(r"signal_date=(\d{8})")
-
-def _extract_signal_date(note: Any) -> Optional[str]:
-    if note is None:
-        return None
-    s = str(note)
-    m = _SIGNAL_RE.search(s)
-    return m.group(1) if m else None
 
 def main() -> int:
+    parser = argparse.ArgumentParser(
+        prog="paper_engine",
+        description="Paper trading engine for v41_1 strategy execution.",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+        help="Show version and exit.",
+    )
+    _args = parser.parse_args()
+
     cfg = load_config()
+    _audit_ymd = now_ymd() or datetime.now().strftime("%Y%m%d")
+    log_pipeline_event(
+        stage="paper_engine_main",
+        batch_label="[7/9]",
+        event="START",
+        date=_audit_ymd,
+        input_files={
+            "fills": str(FILLS),
+            "trades": str(TRADES),
+            "state": str(STATE_PATH),
+        },
+    )
+    max_positions_config_value = _to_int(cfg.get("max_positions"), 0)
+    max_positions_stable_value = None
+    max_positions_intraday_value = None
+    max_positions_source = "config"
+    _migrate_legacy_trades_header_if_needed(TRADES)
     schema = detect_schema()
+    if schema == "v41.1":
+        print("[PAPER_ENGINE] WARNING: v41.1 schema active. dashboard_stock_v2.py expects legacy columns; "
+              "legacy compat copies will be written to paper/fills_dashboard_compat.csv and "
+              "paper/trades_dashboard_compat.csv")
+    print("[PAPER_ENGINE] run_label=%s fills=%s trades=%s state=%s" % (RUN_LABEL, FILLS, TRADES, STATE_PATH))
 
     # ensure files exist with detected schema
     if schema == "legacy":
@@ -1037,23 +250,183 @@ def main() -> int:
         ensure_csv(TRADES, V411_TRADES_HEADER)
 
     stable = read_latest_stable_params()
-    stop_loss = float(stable.get("stop_loss", -0.05))
-    take_profit = stable.get("take_profit", None)
-    trail_pct = stable.get("trail_pct", None)
+    stop_loss = float(_to_float(cfg.get("stop_loss_pct"), -0.05))
+    take_profit = cfg.get("take_profit_pct", None)
+    trail_pct = cfg.get("trail_pct", None)
+    budget_policy_cfg = _get_dict(cfg, "capital_budget_policy")
+    budget_target_positions = (
+        _to_int(budget_policy_cfg.get("basic_target_positions"), 0)
+        if bool(budget_policy_cfg.get("enabled", False))
+        else 0
+    )
+    stable_ok, stable_reason = _stable_params_usable(stable, cfg)
+    if stable_ok:
+        stop_loss = float(stable.get("stop_loss", stop_loss))
+        take_profit = stable.get("take_profit", take_profit)
+        trail_pct = stable.get("trail_pct", trail_pct)
+        stable_max_pos = _to_int(stable.get("max_pos"), 0)
+        stable_hold_days = _to_int(stable.get("hold"), 0)
+        if stable_max_pos > 0:
+            max_positions_stable_value = int(stable_max_pos)
+            if budget_target_positions <= 0:
+                cfg["max_positions"] = int(stable_max_pos)
+                max_positions_source = "stable_params"
+        if stable_hold_days > 0:
+            cfg["max_hold_days"] = int(stable_hold_days)
+        if stable_max_pos > 0 or stable_hold_days > 0:
+            print(
+                f"[CFG_STABLE_APPLIED] max_positions={cfg.get('max_positions')} "
+                f"max_hold_days={cfg.get('max_hold_days')}"
+            )
+    else:
+        print(f"[CFG_STABLE_SKIPPED] reason={stable_reason}")
+    if budget_target_positions > 0:
+        cfg["max_positions"] = int(budget_target_positions)
+        max_positions_source = "capital_budget_policy"
+        print(f"[CFG_BUDGET_APPLIED] max_positions={cfg.get('max_positions')}")
+    intraday_max_pos = _to_int(os.getenv("PAPER_INTRADAY_MAX_POSITIONS", ""), 0)
+    if intraday_max_pos > 0:
+        cfg["max_positions"] = int(intraday_max_pos)
+        max_positions_intraday_value = int(intraday_max_pos)
+        max_positions_source = "intraday_env"
+        print(f"[CFG_INTRADAY_OVERRIDE] max_positions={cfg.get('max_positions')}")
+    sell_rules = _get_sell_rules(cfg)
+    sell_rules_enabled = bool(sell_rules.get("enabled", False))
+    fundamentals_db = _load_fundamentals_db(sell_rules if sell_rules_enabled else {})
+    sector_db = _load_sector_db()
 
-    fee_pct = float(cfg.get("fee_pct", 0.005))
-    slip_pct = float(cfg.get("slippage_pct", 0.001))
-    sell_tax_pct = float(cfg.get("sell_tax_pct", 0.0) or 0.0)
+    cost_profile_name = str(os.getenv("PAPER_COST_PROFILE", "paper") or "paper").strip().lower()
+    cost_profile = build_cost_profile(cfg, profile_name=cost_profile_name)
+    fee_pct = float(cost_profile.fee_pct)
+    slip_pct = float(cost_profile.slippage_pct)
+    sell_tax_pct = float(cost_profile.sell_tax_pct)
+    print(
+        f"[COST_PROFILE] name={cost_profile_name} "
+        f"fee_pct={fee_pct:.6f} slippage_pct={slip_pct:.6f} sell_tax_pct={sell_tax_pct:.6f}"
+    )
 
-    p0_snapshot = load_latest_p0_snapshot(LOG_DIR)
+    p0_snapshot = _align_p0_snapshot_with_latest_pnl_for_ddm(load_latest_p0_snapshot(LOG_DIR), LOG_DIR)
     macro_snapshot = load_latest_macro_snapshot(LOG_DIR)
-    regime_info = resolve_market_regime(cfg, p0_snapshot, macro_snapshot)
+    trend_overlay_ctx = _build_trend_overlay_2026_context(
+        cfg=cfg,
+        macro_snapshot=macro_snapshot,
+        today_ymd=now_ymd(),
+    )
+    if bool(trend_overlay_ctx.get("enabled", False)):
+        print(
+            f"[TREND_2026] enabled=1 cutting_active={bool(trend_overlay_ctx.get('cutting_active', False))} "
+            f"rate_hawkish={trend_overlay_ctx.get('rate_hawkish')} "
+            f"seasonal_multiplier={float(_to_float(trend_overlay_ctx.get('seasonal_multiplier'), 1.0)):.3f}"
+        )
+    rpol = cfg.get("regime_entry_policy", {}) if isinstance(cfg, dict) else {}
+    if not isinstance(rpol, dict):
+        rpol = {}
+    try:
+        gate_max_age_days = int(float(rpol.get("gate_daily_max_age_days", 2) or 2))
+    except Exception:
+        gate_max_age_days = 2
+    p0_snapshot_path = Path(str(p0_snapshot.get("path") or "")) if str(p0_snapshot.get("path") or "").strip() else None
+    gate_snapshot = load_latest_gate_snapshot(LOG_DIR, max_age_days=max(0, gate_max_age_days), latest_p0_path=p0_snapshot_path)
+    if gate_snapshot.get("p0_aligned") is False:
+        print(
+            "[GATE_DAILY_ALIGN] BLOCK stale gate_daily "
+            f"gate_p0={gate_snapshot.get('p0_daily_check')} latest_p0={p0_snapshot.get('path')} "
+            f"reason={gate_snapshot.get('p0_alignment_reason')}"
+        )
+    regime_info = resolve_market_regime(cfg, p0_snapshot, macro_snapshot, gate_snapshot=gate_snapshot)
     market_regime = str(regime_info.get("regime") or "NORMAL").upper()
+    regime_overrides = cfg.get("regime_overrides", {}) if isinstance(cfg, dict) else {}
+    bear_sizing_confirmation = resolve_bear_sizing_confirmation(LOG_DIR, market_regime)
+    regime_override_key = market_regime
+    if market_regime == "BEAR" and not bear_sizing_confirmation.get("confirmed"):
+        regime_override_key = "NORMAL"
+        print(
+            f"[REGIME_OVERRIDE] BEAR sizing not confirmed reason={bear_sizing_confirmation.get('reason')} "
+            f"entry_gate={bear_sizing_confirmation.get('entry_gate_decision')} "
+            f"risk_orch_scale={bear_sizing_confirmation.get('risk_orch_scale')} -> using NORMAL override"
+        )
+    if isinstance(regime_overrides, dict):
+        regime_override = regime_overrides.get(regime_override_key)
+        if isinstance(regime_override, dict):
+            _deep_merge_dict(cfg, regime_override)
+            print(
+                f"[REGIME_OVERRIDE] applied={regime_override_key} (market_regime={market_regime}) "
+                f"keys={','.join(sorted(str(k) for k in regime_override.keys()))}"
+            )
+            stop_loss = float(_to_float(cfg.get("stop_loss_pct"), stop_loss) or stop_loss)
+            take_profit = cfg.get("take_profit_pct", take_profit)
+            trail_pct = cfg.get("trail_pct", trail_pct)
+            budget_policy_cfg = _get_dict(cfg, "capital_budget_policy")
+            budget_target_positions = (
+                _to_int(budget_policy_cfg.get("basic_target_positions"), 0)
+                if bool(budget_policy_cfg.get("enabled", False))
+                else 0
+            )
+            if budget_target_positions > 0 and max_positions_intraday_value is None:
+                cfg["max_positions"] = int(budget_target_positions)
+                max_positions_source = "capital_budget_policy:regime_override"
+                print(f"[REGIME_OVERRIDE] max_positions={cfg.get('max_positions')} source={max_positions_source}")
+            sell_rules = _get_sell_rules(cfg)
+            sell_rules_enabled = bool(sell_rules.get("enabled", False))
+            fundamentals_db = _load_fundamentals_db(sell_rules if sell_rules_enabled else {})
+            cost_profile = build_cost_profile(cfg, profile_name=cost_profile_name)
+            fee_pct = float(cost_profile.fee_pct)
+            slip_pct = float(cost_profile.slippage_pct)
+            sell_tax_pct = float(cost_profile.sell_tax_pct)
+            print(
+                f"[REGIME_OVERRIDE] recalculated stop_loss={stop_loss} "
+                f"take_profit={take_profit} trail_pct={trail_pct} "
+                f"sell_rules_enabled={sell_rules_enabled} "
+                f"fee_pct={fee_pct:.6f} slippage_pct={slip_pct:.6f} sell_tax_pct={sell_tax_pct:.6f}"
+            )
     regime_policy = cfg.get("regime_entry_policy", {}) if isinstance(cfg, dict) else {}
     if not isinstance(regime_policy, dict):
         regime_policy = {}
     ops_policy = _ops_policy(cfg)
     ops_enabled = bool(ops_policy.get("enabled", False))
+    state = load_state()
+    recovered_open_pos, recovery_summary = _recover_open_positions(state, cfg)
+    state["open_positions"] = recovered_open_pos
+    replay_recovery_summary: Dict[str, Any] = {
+        "eligible_rows": 0,
+        "resume_rows": 0,
+        "discard_rows": 0,
+        "discard_codes": [],
+        "discard_source_order_ids": [],
+        "manual_review_rows": 0,
+        "manual_review_codes": [],
+        "queue_guard_reason": "",
+        "queue_guard_rows": 0,
+        "discard_details": [],
+        "manual_review_details": [],
+        "manual_review_snapshot_rows": [],
+        "resume_details": [],
+    }
+    replay_regen_result: Dict[str, Any] = {
+        "attempted": False,
+        "ok": False,
+        "trigger_reason": "",
+        "script_path": str(ROOTB_REPLAY_REGEN_SCRIPT),
+        "started_at": "",
+        "finished_at": "",
+        "returncode": None,
+        "stdout": "",
+        "stderr": "",
+    }
+    replay_queue_scan: Dict[str, Any] = {}
+    replay_quarantine_status: Dict[str, Any] = {}
+    replay_prune_status: Dict[str, Any] = {}
+    replay_consistency_status: Dict[str, Any] = {}
+    replay_consistency_remediation: Dict[str, Any] = {}
+    recovery_status_doc = _write_recovery_status(
+        recovery_summary,
+        replay_recovery_summary,
+        replay_queue_scan,
+        replay_quarantine_status,
+        replay_prune_status,
+        replay_consistency_status,
+        replay_consistency_remediation,
+    )
     print(f"[REGIME] regime={market_regime} info={regime_info}")
     risk_off_enabled = bool(p0_snapshot.get("risk_off_enabled", False))
     risk_off_reasons = list(p0_snapshot.get("risk_off_reasons") or [])
@@ -1062,44 +435,136 @@ def main() -> int:
 
     base_max_new = int(cfg.get("max_new_trades_per_day", 3))
     max_new = base_max_new
+    surge_policy = cfg.get("surge_entry_policy", {}) if isinstance(cfg.get("surge_entry_policy"), dict) else {}
+    max_new_surge = max(0, _to_int(surge_policy.get("max_new_surge", 2), 2))
+    exit_only_mode = str(os.getenv("PAPER_EXIT_ONLY", "") or os.getenv("PAPER_NO_ENTRY", "") or "").strip().lower() in {"1", "true", "yes", "on"}
+    dynamic_max_new_surge_meta: Dict[str, Any] = {"enabled": False, "reason": "not_evaluated"}
+    max_new_zero_reason = ""
+    def _capture_max_new_zero(stage: str) -> None:
+        nonlocal max_new_zero_reason
+        if int(max_new) <= 0 and not str(max_new_zero_reason or "").strip():
+            max_new_zero_reason = str(stage or "unknown")
+
+    if exit_only_mode:
+        max_new = 0
+        max_new_surge = 0
+        dynamic_max_new_surge_meta = {"enabled": False, "reason": "exit_only_mode"}
+        _capture_max_new_zero("exit_only_mode")
+        print("[ENTRY_EXIT_ONLY] PAPER_EXIT_ONLY active -> max_new=0 max_new_surge=0")
 
     aec = cfg.get("adaptive_entry_control", {}) if isinstance(cfg, dict) else {}
     adaptive_enabled = bool(isinstance(aec, dict) and aec.get("enabled", False))
 
     ks_cfg = cfg.get("kill_switch", {}) if isinstance(cfg, dict) else {}
-    ks_mode = str(ks_cfg.get("mode", "REDUCE")).upper()
-    try:
-        ks_reduce_factor = float(ks_cfg.get("reduce_factor", 0.5) or 0.5)
-    except Exception:
-        ks_reduce_factor = 0.5
-    try:
-        ks_min_new = int(ks_cfg.get("min_new_trades_per_day", 1) or 1)
-    except Exception:
-        ks_min_new = 1
+    ks_mode = str(ks_cfg.get("mode", "BLOCK")).upper()
+    if ks_mode not in {"BLOCK", "REDUCE"}:
+        print(f"[RISK_GATE_CFG_WARN] kill_switch.mode invalid={ks_mode} -> BLOCK")
+        ks_mode = "BLOCK"
+    ks_reduce_factor, ks_reduce_factor_fb = _safe_gate_float(
+        ks_cfg.get("reduce_factor", 0.5),
+        0.5,
+        min_v=0.0,
+        max_v=1.0,
+    )
+    ks_min_new, ks_min_new_fb = _safe_gate_int(
+        ks_cfg.get("min_new_trades_per_day", 1),
+        1,
+        min_v=0,
+    )
 
     crash_cfg = cfg.get("crash_risk_off", {}) if isinstance(cfg, dict) else {}
     crash_mode = str(crash_cfg.get("mode", "BLOCK")).upper()
-    try:
-        crash_reduce_factor = float(crash_cfg.get("reduce_factor", 0.5) or 0.5)
-    except Exception:
-        crash_reduce_factor = 0.5
-    try:
-        crash_min_new = int(crash_cfg.get("min_new_trades_per_day", 1) or 1)
-    except Exception:
-        crash_min_new = 1
+    if crash_mode not in {"BLOCK", "REDUCE"}:
+        print(f"[RISK_GATE_CFG_WARN] crash_risk_off.mode invalid={crash_mode} -> BLOCK")
+        crash_mode = "BLOCK"
+    crash_reduce_factor, crash_reduce_factor_fb = _safe_gate_float(
+        crash_cfg.get("reduce_factor", 0.5),
+        0.5,
+        min_v=0.0,
+        max_v=1.0,
+    )
+    crash_min_new, crash_min_new_fb = _safe_gate_int(
+        crash_cfg.get("min_new_trades_per_day", 1),
+        1,
+        min_v=0,
+    )
+
+    ks_snap = _get_dict(p0_snapshot, "kill_switch")
+    ks_limits = _get_dict(ks_snap, "limits")
+    cr_snap = _get_dict(p0_snapshot, "crash_risk_off")
+    cr_limits = _get_dict(cr_snap, "limits")
+    print(
+        "[RISK_GATE_CFG] "
+        f"risk_off_enabled={bool(risk_off_enabled)} "
+        f"kill_switch.enabled={bool(ks_snap.get('enabled', False))} "
+        f"kill_switch.triggered={bool(ks_snap.get('triggered', False))} "
+        f"kill_switch.mode={ks_mode} "
+        f"kill_switch.reduce_factor={ks_reduce_factor:.4f} "
+        f"kill_switch.min_new={int(ks_min_new)} "
+        f"kill_switch.limit.max_dd={ks_limits.get('max_drawdown_pct')} "
+        f"kill_switch.limit.max_daily_loss={ks_limits.get('max_daily_loss_pct')} "
+        f"crash.enabled={bool(cr_snap.get('enabled', False))} "
+        f"crash.triggered={bool(cr_snap.get('triggered', False))} "
+        f"crash.mode={crash_mode} "
+        f"crash.reduce_factor={crash_reduce_factor:.4f} "
+        f"crash.min_new={int(crash_min_new)} "
+        f"crash.limit.trigger_max_dd={cr_limits.get('trigger_max_dd_pct')} "
+        f"crash.limit.trigger_day_ret={cr_limits.get('trigger_day_ret_pct')} "
+        f"fallback_used={{'ks_reduce_factor':{bool(ks_reduce_factor_fb)},'ks_min_new':{bool(ks_min_new_fb)},"
+        f"'crash_reduce_factor':{bool(crash_reduce_factor_fb)},'crash_min_new':{bool(crash_min_new_fb)}}}"
+    )
 
     kill_streak_days = count_kill_switch_streak_days(LOG_DIR, max_scan_days=30)
     risk_off_hard = False
     risk_off_has_kill = False
+    daily_loss_relief_active = False
+    risk_off_zero_stage = "risk_off"
+    risk_reason_details: List[Dict[str, Any]] = _build_risk_reason_details(list(risk_off_reasons or []), p0_snapshot)
     if risk_off_enabled:
         reasons = list(risk_off_reasons or [])
         msg = "; ".join(reasons) if reasons else "(no reasons)"
+        for rd in risk_reason_details:
+            print(
+                "[RISK_GATE_REASON] "
+                f"reason={rd.get('reason')} matched={rd.get('matched')} source={rd.get('source')} "
+                f"observed={rd.get('observed')} threshold={rd.get('threshold')} mode={rd.get('mode')}"
+            )
 
         hard_reasons = [r for r in reasons if _is_hard_block_reason(r)]
+        daily_loss_reasons = [r for r in reasons if is_daily_loss_reason(r)]
+        shadow_ignore_daily_loss = (
+            RUN_LABEL.strip().lower() == "shadow"
+            and bool(ks_cfg.get("shadow_ignore_daily_loss", True))
+        )
         risk_off_hard = bool(hard_reasons)
         if hard_reasons:
             max_new = 0
+            risk_off_zero_stage = "risk_off:hard_data"
             print(f"[PAPER_ENGINE] risk_off=True -> BLOCK new entries (hard-data). reasons={msg}")
+        elif daily_loss_reasons and (not shadow_ignore_daily_loss):
+            adaptive_used = False
+            if adaptive_enabled and bool(aec.get("kill_switch_override_block", True)):
+                cap_info = compute_adaptive_kill_cap(base_max_new, cfg, p0_snapshot, kill_streak_days)
+                if cap_info is not None:
+                    cap, detail = cap_info
+                    adaptive_used = True
+                    requested_cap = max(0, int(cap))
+                    max_new = 0
+                    risk_off_zero_stage = "risk_off:daily_loss"
+                    if requested_cap > 0:
+                        print(f"[PAPER_ENGINE] risk_off=True -> DAILY_LOSS ADAPTIVE BLOCK fail_closed_cap=0 requested_cap={requested_cap} ({detail}). reasons={msg}")
+                    else:
+                        print(f"[PAPER_ENGINE] risk_off=True -> DAILY_LOSS ADAPTIVE BLOCK ({detail}). reasons={msg}")
+            if not adaptive_used:
+                max_new = 0
+                risk_off_zero_stage = "risk_off:daily_loss"
+                print(f"[PAPER_ENGINE] risk_off=True -> BLOCK new entries (daily-loss). reasons={msg}")
+        elif daily_loss_reasons and shadow_ignore_daily_loss:
+            risk_off_zero_stage = "risk_off:shadow_daily_loss"
+            print(
+                "[PAPER_ENGINE] risk_off=True -> SHADOW ignore daily-loss hard block; "
+                f"fallback to kill_switch policy. reasons={msg}"
+            )
         elif any("kill_switch" in str(r) for r in reasons):
             risk_off_has_kill = True
             adaptive_used = False
@@ -1107,37 +572,46 @@ def main() -> int:
                 cap_info = compute_adaptive_kill_cap(base_max_new, cfg, p0_snapshot, kill_streak_days)
                 if cap_info is not None:
                     cap, detail = cap_info
-                    max_new = max(0, int(cap))
                     adaptive_used = True
-                    print(f"[PAPER_ENGINE] risk_off=True -> ADAPTIVE REDUCE max_new={max_new} ({detail}). reasons={msg}")
+                    requested_cap = max(0, int(cap))
+                    max_new = 0
+                    risk_off_zero_stage = "risk_off:kill_switch"
+                    print(f"[PAPER_ENGINE] risk_off=True -> ADAPTIVE BLOCK fail_closed_cap=0 requested_cap={requested_cap} ({detail}). reasons={msg}")
             if not adaptive_used:
                 if ks_mode == "REDUCE":
-                    max_new = max(ks_min_new, int(math.floor(base_max_new * ks_reduce_factor)))
-                    print(f"[PAPER_ENGINE] risk_off=True -> REDUCE new entries to max_new={max_new}. reasons={msg}")
+                    requested_cap = max(ks_min_new, int(math.floor(base_max_new * ks_reduce_factor)))
+                    max_new = 0
+                    risk_off_zero_stage = "risk_off:kill_switch"
+                    print(f"[PAPER_ENGINE] risk_off=True -> BLOCK fail_closed_cap=0 requested_reduce_cap={requested_cap}. reasons={msg}")
                 else:
-                    if bool(aec.get("kill_switch_block_fallback_reduce", True)):
-                        max_new = max(1, ks_min_new)
-                        print(f"[PAPER_ENGINE] risk_off=True -> SOFT REDUCE fallback max_new={max_new} (kill_switch mode=BLOCK). reasons={msg}")
-                    else:
-                        max_new = 0
-                        print(f"[PAPER_ENGINE] risk_off=True -> BLOCK new entries. reasons={msg}")
+                    max_new = 0
+                    risk_off_zero_stage = "risk_off:kill_switch"
+                    print(f"[PAPER_ENGINE] risk_off=True -> BLOCK new entries. reasons={msg}")
         elif any("crash_risk_off" in str(r) for r in reasons):
             if crash_mode == "REDUCE":
-                max_new = max(crash_min_new, int(math.floor(base_max_new * crash_reduce_factor)))
-                print(f"[PAPER_ENGINE] risk_off=True -> REDUCE new entries to max_new={max_new}. reasons={msg}")
+                requested_cap = max(crash_min_new, int(math.floor(base_max_new * crash_reduce_factor)))
+                max_new = 0
+                risk_off_zero_stage = "risk_off:crash_risk_off"
+                print(f"[PAPER_ENGINE] risk_off=True -> BLOCK fail_closed_cap=0 requested_reduce_cap={requested_cap}. reasons={msg}")
             else:
                 max_new = 0
+                risk_off_zero_stage = "risk_off:crash_risk_off"
                 print(f"[PAPER_ENGINE] risk_off=True -> BLOCK new entries. reasons={msg}")
         else:
+            requested_cap = max(0, min(max_new, 1))
             max_new = 0
-            print(f"[PAPER_ENGINE] risk_off=True -> BLOCK new entries. reasons={msg}")
+            risk_off_zero_stage = "risk_off:unclassified"
+            print(f"[PAPER_ENGINE] risk_off=True -> SOFT BLOCK fail_closed_cap=0 requested_cap={requested_cap} (unclassified reason). reasons={msg}")
+        if int(max_new) != 0:
+            print(f"[FAIL_CLOSED] risk_off_active -> force max_new {int(max_new)}->0 reasons={msg}")
+        max_new = 0
+        risk_off_hard = True
+        risk_off_has_kill = False
+        daily_loss_relief_active = False
+    _capture_max_new_zero(risk_off_zero_stage)
     # Regime policy override (operations matrix)
     if bool(regime_policy.get("enabled", False)):
-        if market_regime == "CRASH" and bool(regime_policy.get("macro_hard_block_enabled", False)) and bool(regime_policy.get("crash_force_block", True)):
-            if max_new != 0:
-                print("[REGIME] CRASH -> force BLOCK new entries")
-            max_new = 0
-        elif market_regime == "RALLY":
+        if market_regime == "RALLY":
             if (
                 bool(regime_policy.get("rally_probe_under_kill_switch_block", True))
                 and risk_off_enabled
@@ -1154,10 +628,26 @@ def main() -> int:
                 print(f"[REGIME] RALLY -> probe reopen max_new={max_new} under kill_switch block")
 
     # Relax-ladder safety cap: tighten max_new when candidate filters were overly relaxed.
+    # L6+ can now be a valid auto-relax outcome, so avoid hard-blocking and cap entries instead.
     if chosen_level_num is not None:
-        if chosen_level_num >= 6:
-            max_new = 0
-            print(f"[PAPER_ENGINE] chosen_level={chosen_level} -> BLOCK new entries (max_new=0)")
+        if chosen_level_num >= 8:
+            try:
+                high_factor = float((aec or {}).get("dynamic_relax_high_factor", 0.50) or 0.50)
+            except Exception:
+                high_factor = 0.50
+            high_factor = max(0.0, min(1.0, high_factor))
+            high_cap = 0 if base_max_new <= 0 else max(1, int(math.floor(base_max_new * high_factor)))
+            max_new = min(max_new, high_cap)
+            print(f"[PAPER_ENGINE] chosen_level={chosen_level} -> HIGH CAP new entries to max_new={max_new} (high_factor={high_factor:.2f})")
+        elif chosen_level_num >= 6:
+            try:
+                l6_factor = float((aec or {}).get("dynamic_relax_l6_factor", 0.25) or 0.25)
+            except Exception:
+                l6_factor = 0.25
+            l6_factor = max(0.0, min(1.0, l6_factor))
+            l6_cap = 0 if base_max_new <= 0 else max(1, int(math.floor(base_max_new * l6_factor)))
+            max_new = min(max_new, l6_cap)
+            print(f"[PAPER_ENGINE] chosen_level={chosen_level} -> CAP new entries to max_new={max_new} (l6_factor={l6_factor:.2f})")
         elif chosen_level_num >= 5:
             try:
                 l5_factor = float((aec or {}).get("dynamic_relax_l5_factor", 0.10) or 0.10)
@@ -1171,10 +661,113 @@ def main() -> int:
             half_cap = 0 if base_max_new <= 0 else max(1, int(math.floor(base_max_new * 0.5)))
             max_new = min(max_new, half_cap)
             print(f"[PAPER_ENGINE] chosen_level={chosen_level} -> CAP new entries to max_new={max_new}")
+    ddm_cfg = cfg.get("drawdown_manager") if isinstance(cfg, dict) else {}
+    if not isinstance(ddm_cfg, dict):
+        ddm_cfg = {}
+    ddm_enabled = bool(ddm_cfg.get("enabled", False))
+    consecutive_loss_days = _ddm_count_consecutive_loss_days(TRADES)
+    ddm_context = {
+        "consecutive_loss_days": consecutive_loss_days,
+        "kill_switch_active": bool(((p0_snapshot.get("kill_switch") if isinstance(p0_snapshot.get("kill_switch"), dict) else {}) or {}).get("triggered", False)),
+        "risk_off": bool(p0_snapshot.get("risk_off_enabled", False)),
+        "gate_daily": str(gate_snapshot.get("gate_status") or "").upper(),
+    }
+    print(f"[DDM] context={ddm_context}")
+    ddm_action = _ddm_select_action(cfg, p0_snapshot, context=ddm_context)
+    ddm_exposure_cap: Optional[float] = None
+    ddm_force_liquidate_pct = 0.0
+
+    if ddm_enabled:
+        old_max_new = max_new
+        ddm_stage = max(0, int(getattr(ddm_action, "stage_idx", 0) or 0))
+        ddm_cap_new = calc_max_new(old_max_new, ddm_action.new_entry_allowed_pct, ddm_stage)
+        max_new = min(max_new, ddm_cap_new)
+        ddm_exposure_cap = ddm_action.max_exposure
+        ddm_force_liquidate_pct = float(ddm_action.liquidate_weakest_pct)
+        ddm_forced_sell_ratio_pct = float(_ddm_forced_sell_ratio_pct(ddm_action))
+        print(
+            "[DDM] mdd_abs=%.4f stage=%s threshold=%.2f entry_pct=%.2f liquidation_selection_pct=%.2f forced_sell_ratio_pct=%.2f exposure_cap=%s max_new=%d->%d"
+            % (
+                ddm_action.current_mdd_abs,
+                str(ddm_action.stage_idx),
+                ddm_action.threshold,
+                ddm_action.new_entry_allowed_pct,
+                ddm_action.liquidate_weakest_pct,
+                ddm_forced_sell_ratio_pct,
+                ("None" if ddm_action.max_exposure is None else f"{ddm_action.max_exposure:.2f}"),
+                old_max_new,
+                max_new,
+            )
+        )
+        try:
+            ddm_status = {
+                "generated_at": datetime.now().isoformat(timespec="seconds"),
+                "source": "paper_engine",
+                "pnl_summary_path": str(LOG_DIR / "paper_pnl_summary_last.json"),
+                "ddm_enabled": bool(ddm_enabled),
+                "current_mdd_abs": float(ddm_action.current_mdd_abs),
+                "metric_basis": str(getattr(ddm_action, "metric_basis", "") or ""),
+                "metric_details": (
+                    getattr(ddm_action, "metric_details", None)
+                    if isinstance(getattr(ddm_action, "metric_details", None), dict)
+                    else {}
+                ),
+                "stage_idx": int(ddm_action.stage_idx),
+                "threshold": float(ddm_action.threshold),
+                "new_entry_allowed_pct": float(ddm_action.new_entry_allowed_pct),
+                "liquidate_weakest_pct": float(ddm_action.liquidate_weakest_pct),
+                "liquidation_selection_pct": float(ddm_action.liquidate_weakest_pct),
+                "forced_sell_ratio_pct": float(ddm_forced_sell_ratio_pct),
+                "ddm_pct_field_semantics": {
+                    "liquidate_weakest_pct": "legacy_alias_for_liquidation_selection_pct",
+                    "liquidation_selection_pct": "weakest_position_selection_pct",
+                    "forced_sell_ratio_pct": "per_selected_position_sell_ratio_pct",
+                    "stage_4_plus": "full_exit_selected_positions_intentional_emergency_escalation",
+                    "dd_ratio_hard": "entry_gate_daily_loss_ratio_independent_from_drawdown_manager_mdd",
+                },
+                "max_exposure": ddm_action.max_exposure,
+                "max_new_before": int(old_max_new),
+                "max_new_after": int(max_new),
+                "context": ddm_context,
+                "p0_snapshot_path": p0_snapshot.get("path") if isinstance(p0_snapshot, dict) else None,
+                "p0_as_of_ymd": p0_snapshot.get("as_of_ymd") if isinstance(p0_snapshot, dict) else None,
+                "pnl_alignment": (
+                    p0_snapshot.get("ddm_pnl_alignment")
+                    if isinstance(p0_snapshot, dict) and isinstance(p0_snapshot.get("ddm_pnl_alignment"), dict)
+                    else {}
+                ),
+            }
+            ddm_status_path = DDM_STATUS_PATH
+            ddm_status_path.write_text(json.dumps(ddm_status, ensure_ascii=False, indent=2), encoding="utf-8")
+            print(f"[DDM_STATUS] json={ddm_status_path}")
+        except Exception as e:
+            print(f"[DDM_STATUS][WARN] write_failed={type(e).__name__}:{e}")
+    _capture_max_new_zero("ddm_stage_cap")
+
     max_hold_days = int(cfg.get("max_hold_days", 10))
-    sizing_mode = str(cfg.get("sizing_mode", "fixed_qty"))
-    allow_reentry = bool(cfg.get("allow_same_code_reentry", False))
+    entry_timing_mode = str(cfg.get("entry_timing_mode", "next_open") or "next_open").strip().lower()
+    same_close_entry_mode = entry_timing_mode in {"same_close", "close", "t_close", "close_entry"}
+    intraday_realtime_mode_env = _truthy(os.getenv("PAPER_INTRADAY_REALTIME_MODE", ""))
+    intraday_realtime_mode = bool(intraday_realtime_mode_env or bool(ops_enabled and ops_policy.get("strict_same_day_only", False)))
+    print(
+        f"[ENTRY_MODE] timing={entry_timing_mode} same_close={same_close_entry_mode} "
+        f"intraday_realtime={intraday_realtime_mode} env={intraday_realtime_mode_env} "
+        f"strict_same_day={bool(ops_enabled and ops_policy.get('strict_same_day_only', False))}"
+    )
     max_positions = int(cfg.get("max_positions", 0) or 0)
+    max_positions_meta = {
+        "effective": int(max_positions),
+        "source": str(max_positions_source),
+        "config": int(max_positions_config_value),
+        "stable_params": max_positions_stable_value,
+        "intraday_env": max_positions_intraday_value,
+    }
+
+    replay_cfg = cfg.get("stale_signal_replay", {}) if isinstance(cfg.get("stale_signal_replay", {}), dict) else {}
+    replay_enabled = bool(replay_cfg.get("enabled", False))
+    replay_min_age_days = max(1, _to_int(replay_cfg.get("min_signal_age_days", 2), 2))
+    replay_require_no_open_positions = bool(replay_cfg.get("require_no_open_positions", True))
+    replay_order_id_include_entry_day = bool(replay_cfg.get("order_id_include_entry_day", True))
 
     def _pct01(v: Any, default: float) -> float:
         try:
@@ -1186,13 +779,565 @@ def main() -> int:
         return max(0.0, min(1.0, x))
 
     capital_total = float(cfg.get("capital_total", 0) or 0)
+    capital_total_configured = float(capital_total)
+    account_equity_for_allocation = None
+    try:
+        _p0_metrics = ((p0_snapshot.get("kill_switch") or {}).get("metrics") or {}) if isinstance(p0_snapshot, dict) else {}
+        _p0_account = _p0_metrics.get("account_basis") if isinstance(_p0_metrics, dict) else None
+        if isinstance(_p0_account, dict) and _p0_account.get("status") == "PASS":
+            account_equity_for_allocation = _to_float(_p0_account.get("equity_est"), 0.0)
+            if account_equity_for_allocation > 0.0 and capital_total_configured > 0.0:
+                capital_total = min(capital_total_configured, float(account_equity_for_allocation))
+                print(
+                    f"[CAPITAL_BASIS] configured={capital_total_configured:.0f} "
+                    f"account_equity={float(account_equity_for_allocation):.0f} "
+                    f"effective={capital_total:.0f} basis=min(configured,account_equity)"
+                )
+    except Exception as e:
+        print(f"[CAPITAL_BASIS][WARN] account_equity_unavailable={type(e).__name__}:{e}")
+    max_positions_meta["capital_basis"] = {
+        "configured_capital_total": float(capital_total_configured),
+        "account_equity": (None if account_equity_for_allocation is None else float(account_equity_for_allocation)),
+        "effective_capital_total": float(capital_total),
+        "basis": "min(configured_capital_total,account_equity)" if account_equity_for_allocation else "configured_capital_total",
+    }
     max_gross_exposure_pct = _pct01(cfg.get("max_gross_exposure_pct", 1.0), 1.0)
     max_daily_new_exposure_pct = _pct01(cfg.get("max_daily_new_exposure_pct", 1.0), 1.0)
+    capital_budget_policy = cfg.get("capital_budget_policy", {}) if isinstance(cfg.get("capital_budget_policy"), dict) else {}
+    capital_budget_enabled = bool(capital_budget_policy.get("enabled", False))
+    if capital_budget_enabled:
+        budget_gross_cap = max(
+            0.0,
+            min(1.0, _pct01_from_config(capital_budget_policy.get("gross_exposure_pct", 0.55), 0.55)),
+        )
+        old_exp = max_gross_exposure_pct
+        max_gross_exposure_pct = min(max_gross_exposure_pct, budget_gross_cap)
+        print(
+            f"[BUDGET_POLICY] enabled=true gross_exposure {old_exp:.3f}->{max_gross_exposure_pct:.3f} "
+            f"basic={_pct01_from_config(capital_budget_policy.get('basic_alloc_pct', 0.40), 0.40):.3f} "
+            f"surge={_pct01_from_config(capital_budget_policy.get('surge_alloc_pct', 0.06), 0.06):.3f} "
+            f"split={_pct01_from_config(capital_budget_policy.get('split_alloc_pct', 0.18), 0.18):.3f} "
+            f"recovery={_pct01_from_config(capital_budget_policy.get('recovery_alloc_pct', 0.10), 0.10):.3f} "
+            f"reserve={_pct01_from_config(capital_budget_policy.get('reserve_alloc_pct', 0.20), 0.20):.3f}"
+        )
     max_per_sector_runtime = int(cfg.get("max_per_sector", 0) or 0)
-    max_per_symbol_exposure_pct = _pct01(cfg.get("max_per_symbol_exposure_pct", 0.0), 0.0)
+    macro_exposure_mult = _pct01((macro_snapshot or {}).get("exposure_multiplier", 1.0), 1.0)
+    if macro_exposure_mult < 1.0:
+        old_exp = max_gross_exposure_pct
+        max_gross_exposure_pct = min(max_gross_exposure_pct, max_gross_exposure_pct * macro_exposure_mult)
+        print(f"[MACRO] exposure_multiplier={macro_exposure_mult:.3f} -> gross_exposure {old_exp:.3f}->{max_gross_exposure_pct:.3f}")
+
+    cons_loss_thr = int(_ddm_to_float(ddm_cfg.get("consecutive_loss_days_threshold", 3), 3))
+    cons_loss_mult = _ddm_pct01(ddm_cfg.get("consecutive_loss_exposure_multiplier", 0.5), 0.5)
+    if consecutive_loss_days >= max(1, cons_loss_thr):
+        old_exp = max_gross_exposure_pct
+        max_gross_exposure_pct = max(0.0, min(1.0, max_gross_exposure_pct * cons_loss_mult))
+        if capital_budget_enabled:
+            defensive_floor = max(
+                0.0,
+                min(
+                    1.0,
+                    _pct01_from_config(
+                        capital_budget_policy.get("defensive_floor_exposure_pct", 0.45),
+                        0.45,
+                    ),
+                ),
+            )
+            if 0.0 < defensive_floor < old_exp and max_gross_exposure_pct < defensive_floor:
+                max_gross_exposure_pct = old_exp
+                defensive_max_new = max(0, _to_int(capital_budget_policy.get("defensive_max_new", 1), 1))
+                if defensive_max_new > 0:
+                    old_max_new = int(max_new)
+                    max_new = min(int(max_new), defensive_max_new)
+                    print(
+                        f"[BUDGET_DDM_BAND] floor={defensive_floor:.3f} cap={max_gross_exposure_pct:.3f} "
+                        f"defensive_max_new={defensive_max_new} max_new {old_max_new}->{max_new}"
+                    )
+        print(f"[DDM] consecutive_loss_days={consecutive_loss_days} >= {cons_loss_thr} -> gross_exposure {old_exp:.3f}->{max_gross_exposure_pct:.3f}")
+
+    if ddm_exposure_cap is not None:
+        old_exp = max_gross_exposure_pct
+        max_gross_exposure_pct = min(max_gross_exposure_pct, _ddm_pct01(ddm_exposure_cap, max_gross_exposure_pct))
+        if capital_budget_enabled:
+            defensive_floor = max(
+                0.0,
+                min(
+                    1.0,
+                    _pct01_from_config(
+                        capital_budget_policy.get("defensive_floor_exposure_pct", 0.45),
+                        0.45,
+                    ),
+                ),
+            )
+            if 0.0 < defensive_floor < old_exp and max_gross_exposure_pct < defensive_floor:
+                max_gross_exposure_pct = old_exp
+                defensive_max_new = max(0, _to_int(capital_budget_policy.get("defensive_max_new", 1), 1))
+                if defensive_max_new > 0:
+                    old_max_new = int(max_new)
+                    max_new = min(int(max_new), defensive_max_new)
+                    print(
+                        f"[BUDGET_DDM_BAND] floor={defensive_floor:.3f} cap={max_gross_exposure_pct:.3f} "
+                        f"defensive_max_new={defensive_max_new} max_new {old_max_new}->{max_new}"
+                    )
+        print(f"[DDM] stage exposure cap applied: {old_exp:.3f}->{max_gross_exposure_pct:.3f}")
+
+    position_size_multiplier = 1.0
+    vix_proxy = _ddm_extract_vix_proxy(macro_snapshot, LOG_DIR)
+    vix_thr = _ddm_to_float(ddm_cfg.get("vix_proxy_threshold", 30.0), 30.0)
+    high_vol_mult = _ddm_pct01(ddm_cfg.get("high_vol_position_size_multiplier", 0.7), 0.7)
+    if vix_proxy is not None and vix_proxy > vix_thr:
+        position_size_multiplier = min(position_size_multiplier, high_vol_mult)
+        print(f"[DDM] vix_proxy={vix_proxy:.2f} > {vix_thr:.2f} -> position_size_multiplier={position_size_multiplier:.2f}")
 
     gap_up_max_pct_runtime = float(cfg.get("gap_up_max_pct", 0.0) or 0.0)
     entry_gap_down_stop_pct_runtime = float(cfg.get("entry_gap_down_stop_pct", 0.0) or 0.0)
+    fx_policy = cfg.get("fx_entry_policy", {}) if isinstance(cfg.get("fx_entry_policy"), dict) else {}
+    fx_ctx: Dict[str, Any] = _get_dict(macro_snapshot, "fx_context")
+    _p0_mr = p0_snapshot.get("market_regime") or (p0_snapshot.get("meta") or {}).get("market_regime")
+    p0_market_status = str(_p0_mr or "").upper() or "UNKNOWN"
+    gate_market_status = str(gate_snapshot.get("gate_status") or "").upper() or "UNKNOWN"
+    risk_orch_trades_path = TRADES_CALC if (TRADES_CALC.exists() and not str(os.getenv("PAPER_TRADES_PATH", "") or "").strip()) else TRADES
+    risk_orch_ctx = _compute_risk_orch_scale(
+        cfg=cfg,
+        market_regime=str(market_regime or ""),
+        p0_snapshot=(p0_snapshot if isinstance(p0_snapshot, dict) else {}),
+        fee_pct=float(fee_pct),
+        slip_pct=float(slip_pct),
+        sell_tax_pct=float(sell_tax_pct),
+        trades_path=risk_orch_trades_path,
+    )
+    if bool(risk_orch_ctx.get("enabled", False)):
+        ro_scale = max(0.0, _to_float(risk_orch_ctx.get("scale", 1.0), 1.0))
+        old_psm = position_size_multiplier
+        position_size_multiplier = min(position_size_multiplier, ro_scale)
+        print(
+            f"[RISK_ORCH] regime={risk_orch_ctx.get('regime')} "
+            f"edge={_to_float(risk_orch_ctx.get('edge', 0.0), 0.0):.6f} "
+            f"var={_to_float(risk_orch_ctx.get('variance', 0.0), 0.0):.6f} "
+            f"es={_to_float(risk_orch_ctx.get('es', 0.0), 0.0):.6f} "
+            f"est_vol={_to_float(risk_orch_ctx.get('est_vol', 0.0), 0.0):.6f} "
+            f"target_vol={_to_float(risk_orch_ctx.get('target_vol', 0.0), 0.0):.6f} "
+            f"scale={ro_scale:.3f} position_size_multiplier={old_psm:.3f}->{position_size_multiplier:.3f}"
+        )
+    try:
+        ro_payload = {
+            "generated_at": now_ts(),
+            "run_label": str(RUN_LABEL or ""),
+            "market_regime": str(market_regime or ""),
+            "position_size_multiplier": float(position_size_multiplier),
+            "risk_orchestration": risk_orch_ctx,
+        }
+        (LOG_DIR / "risk_orchestration_latest.json").write_text(
+            json.dumps(ro_payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception as _roe:
+        print(f"[RISK_ORCH] write_status=FAIL reason={type(_roe).__name__}:{_roe}")
+
+    paper_validation_sample_policy = (
+        cfg.get("paper_validation_sample_policy", {})
+        if isinstance(cfg.get("paper_validation_sample_policy"), dict)
+        else {}
+    )
+
+    def _paper_validation_sample_cap(default_cap: int, decision_code: str = "") -> tuple[int, str]:
+        if not bool(paper_validation_sample_policy.get("enabled", False)):
+            return int(default_cap), "disabled"
+        allowed_labels = {
+            str(x or "").strip().lower()
+            for x in (paper_validation_sample_policy.get("allowed_run_labels") or ["main", "validation", "tuning"])
+        }
+        run_label = str(RUN_LABEL or "main").strip().lower() or "main"
+        if run_label not in allowed_labels:
+            return int(default_cap), f"run_label_not_allowed:{run_label}"
+        allowed_decisions = {
+            str(x or "").strip().upper()
+            for x in (paper_validation_sample_policy.get("allow_entry_gate_decisions") or ["CAUTION", "REDUCE"])
+        }
+        decision_text = str(decision_code or "").strip().upper()
+        if decision_text and decision_text not in allowed_decisions:
+            return int(default_cap), f"decision_not_allowed:{decision_text}"
+        if bool(paper_validation_sample_policy.get("require_account_risk_clear", True)) and not bool(risk_orch_ctx.get("account_risk_clear", False)):
+            return int(default_cap), "account_risk_not_clear"
+        if bool(paper_validation_sample_policy.get("require_no_es_hard_block", True)) and bool(risk_orch_ctx.get("es_hard_block", False)):
+            return int(default_cap), "es_hard_block"
+        if bool(paper_validation_sample_policy.get("require_no_dd_stop_triggered", True)) and bool(risk_orch_ctx.get("dd_stop_triggered", False)):
+            return int(default_cap), "dd_stop_triggered"
+        scale = max(0.0, min(1.0, _to_float(risk_orch_ctx.get("scale", position_size_multiplier), position_size_multiplier)))
+        scale_floor = max(0.0, min(1.0, _to_float(paper_validation_sample_policy.get("min_scale_floor", 0.0), 0.0)))
+        effective_scale = max(scale, scale_floor)
+        derived_cap = max(1, int(math.ceil(max(0, int(base_max_new)) * effective_scale)))
+        return min(max(0, int(base_max_new)), derived_cap), f"risk_scale_cap:{effective_scale:.3f}"
+
+    sample_cap_pre_p1, sample_cap_pre_p1_reason = _paper_validation_sample_cap(0)
+    if sample_cap_pre_p1 > int(max_new):
+        old_max_new = int(max_new)
+        max_new = min(int(base_max_new), int(sample_cap_pre_p1))
+        print(
+            f"[PAPER_VALIDATION_SAMPLE] pre_p1 max_new floor {old_max_new}->{int(max_new)} "
+            f"sample_cap={sample_cap_pre_p1} reason={sample_cap_pre_p1_reason}"
+        )
+    if str(RUN_LABEL or "").strip().lower() == "shadow":
+        _rr = [str(r) for r in (risk_off_reasons or [])]
+        _daily_only = bool(_rr) and all(
+            (is_daily_loss_reason(r) or ("kill_switch" in str(r)))
+            for r in _rr
+        )
+        if gate_market_status == "BLOCK" and _daily_only:
+            gate_market_status = "PASS"
+            print("[ENTRY_GATE] shadow bypass gate BLOCK from daily-loss kill_switch reasons")
+    elif daily_loss_relief_active:
+        _rr = [str(r) for r in (risk_off_reasons or [])]
+        _daily_only = bool(_rr) and all(
+            (is_daily_loss_reason(r) or ("kill_switch" in str(r)))
+            for r in _rr
+        )
+        if gate_market_status == "BLOCK" and _daily_only:
+            gate_market_status = "PASS"
+            print("[ENTRY_GATE] main bypass gate BLOCK from daily-loss kill_switch reasons (adaptive relief)")
+    fx_status = derive_fx_entry_status(fx_ctx, fx_policy)
+    entry_decision = final_entry_decision(
+        p0=p0_market_status,
+        gate_daily=gate_market_status,
+        engine_status=market_regime,
+        fx_status=fx_status,
+        risk_off=bool(risk_off_enabled),
+        daily_return=regime_info.get("day_ret"),
+        rally_day_ret_min=_to_float(regime_policy.get("rally_day_ret_min", 0.025), 0.025),
+        rate_hike_fear_reduce_day_ret_floor=_to_float(regime_policy.get("rate_hike_fear_reduce_day_ret_floor", -0.015), -0.015),
+        allow_bear_rally_override=bool(regime_policy.get("allow_bear_rally_override", True)),
+    )
+    entry_decision_code = str(entry_decision.get("decision") or "ALLOW").upper()
+    entry_decision_reason = str(entry_decision.get("reason") or "")
+    if (
+        str(market_regime or "").upper() == "CRASH"
+        and bool(regime_policy.get("crash_force_block", True))
+    ):
+        entry_decision_code = "BLOCK"
+        entry_decision_reason = (
+            f"{entry_decision_reason};regime_crash_force_block"
+            if entry_decision_reason
+            else "regime_crash_force_block"
+        )
+    (
+        entry_decision_code,
+        entry_decision_reason,
+        outlier_gate,
+        integrity_gate,
+        sigma_guard,
+        execution_guard,
+        macro_news_guard,
+        backtest_validation_guard,
+        production_risk_guard,
+    ) = _evaluate_entry_guards(
+        cfg,
+        LOG_DIR,
+        entry_decision_code,
+        entry_decision_reason,
+        apply_execution_guard=(str(RUN_LABEL or "").strip().lower() == "main"),
+        current_risk_orch=risk_orch_ctx,
+    )
+
+    outlier_decision = str(outlier_gate.get("decision") or "ALLOW").upper()
+    outlier_reason = str(outlier_gate.get("reason") or "")
+    integrity_decision = str(integrity_gate.get("decision") or "ALLOW").upper()
+    integrity_reason = str(integrity_gate.get("reason") or "")
+    sigma_decision = str(sigma_guard.get("decision") or "ALLOW").upper()
+    sigma_reason = str(sigma_guard.get("reason") or "")
+    execution_decision = str(execution_guard.get("decision") or "ALLOW").upper()
+    execution_reason = str(execution_guard.get("reason") or "")
+    macro_news_decision = str(macro_news_guard.get("decision") or "ALLOW").upper()
+    macro_news_reason = str(macro_news_guard.get("reason") or "")
+    backtest_validation_decision = str(backtest_validation_guard.get("decision") or "ALLOW").upper()
+    backtest_validation_reason = str(backtest_validation_guard.get("reason") or "")
+    production_risk_decision = str(production_risk_guard.get("decision") or "ALLOW").upper()
+    production_risk_reason = str(production_risk_guard.get("reason") or "")
+    print(
+        f"[OUTLIER_GATE] decision={outlier_decision} reason={outlier_reason} "
+        f"path={outlier_gate.get('path')} asof={outlier_gate.get('as_of_ymd')} age_days={outlier_gate.get('age_days')}"
+    )
+    print(
+        f"[INTEGRITY_GATE] decision={integrity_decision} reason={integrity_reason} "
+        f"ref={integrity_gate.get('reference_ymd')} max_skew_days={integrity_gate.get('max_skew_days')}"
+    )
+    print(
+        f"[SIGMA_GUARD] decision={sigma_decision} reason={sigma_reason} "
+        f"current={sigma_guard.get('current_rows')} mean={sigma_guard.get('mean_rows')} "
+        f"std={sigma_guard.get('std_rows')} z={sigma_guard.get('zscore')}"
+    )
+    print(
+        f"[EXECUTION_GUARD] decision={execution_decision} reason={execution_reason} "
+        f"lifecycle={execution_guard.get('lifecycle_status')} "
+        f"state_machine={execution_guard.get('state_machine_status')} "
+        f"slippage_avg_bps={execution_guard.get('slippage_avg_bps')}"
+    )
+    print(
+        f"[PROD_RISK_PLAYBOOK] action={production_risk_guard.get('action')} "
+        f"decision={production_risk_decision} reason={production_risk_reason} "
+        f"source_fresh={production_risk_guard.get('source_fresh')} "
+        f"path={production_risk_guard.get('artifact_path')}"
+    )
+    if production_risk_decision in {"REDUCE", "CAUTION", "BLOCK"}:
+        prp_cfg = cfg.get("production_risk_playbook", {}) if isinstance(cfg.get("production_risk_playbook"), dict) else {}
+        prp_mult_default = 0.0 if production_risk_decision == "BLOCK" else 0.5
+        prp_mult = max(0.0, min(1.0, _to_float(prp_cfg.get("hard_size_multiplier" if production_risk_decision == "BLOCK" else "soft_size_multiplier", prp_mult_default), prp_mult_default)))
+        old_psm_prp = float(position_size_multiplier)
+        position_size_multiplier = min(float(position_size_multiplier), float(prp_mult))
+        print(
+            f"[PROD_RISK_PLAYBOOK] mitigation size_multiplier "
+            f"{old_psm_prp:.3f}->{float(position_size_multiplier):.3f}"
+        )
+    print(
+        f"[MACRO_NEWS_GUARD] decision={macro_news_decision} reason={macro_news_reason} "
+        f"macro_stale_ratio={macro_news_guard.get('macro_stale_ratio')} "
+        f"macro_critical_bad={macro_news_guard.get('macro_critical_bad')} "
+        f"news_quality={macro_news_guard.get('news_quality')} quota_guard={macro_news_guard.get('news_quota_guard_stop')}"
+    )
+    print(
+        f"[BTVAL_GUARD] decision={backtest_validation_decision} reason={backtest_validation_reason} "
+        f"failed={','.join(backtest_validation_guard.get('failed_gates', [])[:5]) or '-'} "
+        f"asof={backtest_validation_guard.get('as_of')} age_days={backtest_validation_guard.get('age_days')}"
+    )
+    print(
+        f"[ENTRY_GATE] decision={entry_decision_code} reason={entry_decision_reason} "
+        f"p0={p0_market_status} gate={gate_market_status} engine={market_regime} fx={fx_status}"
+    )
+    if (
+        intraday_realtime_mode
+        and entry_decision_code == "BLOCK"
+        and "outlier=stage:dashboard:FAIL" in str(entry_decision_reason or "")
+    ):
+        entry_decision_code = "REDUCE"
+        entry_decision_reason = f"{entry_decision_reason};intraday_relax_dashboard_outlier"
+        print(f"[ENTRY_GATE] intraday relax: BLOCK->REDUCE reason={entry_decision_reason}")
+
+    _ro_validation_reduce_applied = False
+    _ro_val_cfg_for_surge_floor: Dict[str, Any] = {}
+    if bool(risk_orch_ctx.get("enabled", False)) and float(position_size_multiplier) <= 0.0:
+        _ro_reasons: List[str] = []
+        _ro_zero_causes = risk_orch_ctx.get("scale_zero_causes", [])
+        if not isinstance(_ro_zero_causes, list):
+            _ro_zero_causes = []
+        _ro_zero_cause_set = {str(x or "").strip() for x in _ro_zero_causes if str(x or "").strip()}
+        _ro_dd_stop_triggered = False
+        if "dd_stop" in _ro_zero_cause_set:
+            _ro_dd_stop_triggered = True
+            _ro_reasons.append("dd_stop")
+        if "es_hard_block" in _ro_zero_cause_set:
+            _ro_reasons.append("es_hard_block")
+        if "kelly_zero" in _ro_zero_cause_set:
+            _ro_reasons.append("kelly_zero")
+        _ro_reason = "risk_orch_size_zero" + (":" + ",".join(_ro_reasons) if _ro_reasons else "")
+        _ro_val_cfg = (cfg.get("risk_orchestration", {}) if isinstance(cfg, dict) else {}).get("dd_stop_validation", {})
+        if isinstance(_ro_val_cfg, dict):
+            _ro_val_cfg_for_surge_floor = _ro_val_cfg
+        _ro_val_enabled = bool(_ro_val_cfg.get("enabled", False)) if isinstance(_ro_val_cfg, dict) else False
+        _ro_val_mode = str(_ro_val_cfg.get("mode", "block") if isinstance(_ro_val_cfg, dict) else "block").strip().lower()
+        _ro_allowed_labels = _ro_val_cfg.get("allowed_run_labels", ["main", "validation", "tuning"]) if isinstance(_ro_val_cfg, dict) else []
+        if not isinstance(_ro_allowed_labels, list):
+            _ro_allowed_labels = ["main", "validation", "tuning"]
+        _ro_label_allowed = str(RUN_LABEL or "main").strip().lower() in {
+            str(x or "").strip().lower() for x in _ro_allowed_labels
+        }
+        _ro_val_allow_reasons = _ro_val_cfg.get("allow_reasons", ["dd_stop"]) if isinstance(_ro_val_cfg, dict) else ["dd_stop"]
+        if not isinstance(_ro_val_allow_reasons, list):
+            _ro_val_allow_reasons = ["dd_stop"]
+        _ro_val_allowed_reason_set = {
+            str(x or "").strip()
+            for x in _ro_val_allow_reasons
+            if str(x or "").strip()
+        }
+        _ro_val_reasons_allowed = bool(_ro_reasons) and set(_ro_reasons).issubset(_ro_val_allowed_reason_set)
+        _ro_val_require_dd_stop = bool(_ro_val_cfg.get("require_dd_stop", True)) if isinstance(_ro_val_cfg, dict) else True
+        _ro_val_dd_condition = (bool(_ro_dd_stop_triggered) if _ro_val_require_dd_stop else bool(_ro_reasons))
+        _ro_validation_reduce_applied = False
+        _min_qty_verification = _minimum_quantity_verification_cfg(cfg)
+        _min_qty_allowed_reason_set = {str(x).strip() for x in (_min_qty_verification.get("allow_reasons") or []) if str(x).strip()}
+        _min_qty_reason_allowed = bool(_ro_reasons) and set(_ro_reasons).issubset(_min_qty_allowed_reason_set)
+        if (
+            bool(_min_qty_verification.get("enabled", False))
+            and _ro_dd_stop_triggered
+            and _min_qty_reason_allowed
+            and entry_decision_code != "BLOCK"
+        ):
+            entry_decision_code = "REDUCE"
+            entry_decision_reason = (
+                f"{entry_decision_reason};{_ro_reason};minimum_quantity_verification"
+                if entry_decision_reason else
+                f"{_ro_reason};minimum_quantity_verification"
+            )
+            _mqv_mult = float(_min_qty_verification.get("position_size_multiplier", 0.01) or 0.01)
+            if _mqv_mult > 0.0:
+                position_size_multiplier = max(float(position_size_multiplier), _mqv_mult)
+            _ro_validation_reduce_applied = True
+            print(
+                f"[ENTRY_GATE] minimum quantity verification REDUCE propagated: "
+                f"session={PAPER_SESSION_ID} reason={_ro_reason} position_size_multiplier={position_size_multiplier:.3f}"
+            )
+        if (
+            _ro_val_enabled
+            and _ro_val_mode in {"reduce", "validation_reduce"}
+            and _ro_label_allowed
+            and _ro_val_dd_condition
+            and _ro_val_reasons_allowed
+            and entry_decision_code != "BLOCK"
+        ):
+            entry_decision_code = "REDUCE"
+            entry_decision_reason = f"{entry_decision_reason};{_ro_reason};validation_reduce" if entry_decision_reason else f"{_ro_reason};validation_reduce"
+            _ro_probe_mult = max(0.0, min(1.0, _to_float(_ro_val_cfg.get("position_size_multiplier", 0.10), 0.10)))
+            if _ro_probe_mult > 0.0:
+                position_size_multiplier = max(float(position_size_multiplier), float(_ro_probe_mult))
+            _ro_validation_reduce_applied = True
+            print(
+                f"[ENTRY_GATE] risk orchestration validation REDUCE propagated: "
+                f"reason={_ro_reason} position_size_multiplier={position_size_multiplier:.3f}"
+            )
+        if not _ro_validation_reduce_applied and entry_decision_code != "BLOCK":
+            entry_decision_code = "BLOCK"
+            entry_decision_reason = f"{entry_decision_reason};{_ro_reason}" if entry_decision_reason else _ro_reason
+            print(f"[ENTRY_GATE] risk orchestration BLOCK propagated: reason={_ro_reason}")
+
+    entry_gate_block_lock = (entry_decision_code == "BLOCK")
+
+    def _enforce_entry_gate_block_max_new(current_max_new: int, stage: str) -> int:
+        if not entry_gate_block_lock:
+            return int(current_max_new)
+        if int(current_max_new) != 0:
+            print(f"[ENTRY_GATE] BLOCK lock keeps max_new=0 at {stage}: {int(current_max_new)}->0")
+        return 0
+
+    if entry_decision_code == "BLOCK":
+        if max_new != 0:
+            print(f"[ENTRY_GATE] BLOCK -> force max_new=0 ({entry_decision_reason})")
+        max_new = 0
+        print(
+            "[FAIL_CLOSED] "
+            f"entry_gate_block_propagated=true stop_new_orders=true max_new={int(max_new)} "
+            f"reason={entry_decision_reason}"
+        )
+    elif entry_decision_code == "CAUTION":
+        old_max_new = max_new
+        sample_cap, sample_cap_reason = _paper_validation_sample_cap(1, entry_decision_code)
+        max_new = min(base_max_new, max(max_new, sample_cap))
+        old_exp = max_gross_exposure_pct
+        caution_gross_cap = 0.50
+        if capital_budget_enabled:
+            caution_gross_cap = max(
+                0.0,
+                min(
+                    1.0,
+                    _pct01_from_config(
+                        capital_budget_policy.get("caution_gross_exposure_pct", 0.55),
+                        0.55,
+                    ),
+                ),
+            )
+        max_gross_exposure_pct = min(max_gross_exposure_pct, caution_gross_cap)
+        print(
+            f"[ENTRY_GATE] CAUTION -> max_new {old_max_new}->{max_new}, "
+            f"gross_exposure {old_exp:.3f}->{max_gross_exposure_pct:.3f} "
+            f"sample_cap={sample_cap} sample_reason={sample_cap_reason}"
+        )
+    elif entry_decision_code == "REDUCE":
+        old_max_new = max_new
+        sample_cap, sample_cap_reason = _paper_validation_sample_cap(1, entry_decision_code)
+        max_new = min(base_max_new, max(max_new, sample_cap))
+        print(f"[ENTRY_GATE] REDUCE -> max_new {old_max_new}->{max_new} sample_cap={sample_cap} sample_reason={sample_cap_reason}")
+    bear_sizing_policy = cfg.get("bear_sizing_policy", {}) if isinstance(cfg.get("bear_sizing_policy"), dict) else {}
+    if bool(bear_sizing_policy.get("enabled", False)):
+        allowed_regimes = {
+            str(x).strip().upper()
+            for x in (bear_sizing_policy.get("market_regimes") or ["BEAR"])
+            if str(x).strip()
+        }
+        allowed_decisions = {
+            str(x).strip().upper()
+            for x in (bear_sizing_policy.get("entry_gate_decisions") or ["CAUTION"])
+            if str(x).strip()
+        }
+        ro_scale_for_bear = max(0.0, min(1.0, _to_float(risk_orch_ctx.get("scale", position_size_multiplier), position_size_multiplier)))
+        max_ro_scale = max(0.0, min(1.0, _to_float(bear_sizing_policy.get("max_risk_orch_scale", 0.50), 0.50)))
+        if (
+            str(market_regime or "").strip().upper() in allowed_regimes
+            and str(entry_decision_code or "").strip().upper() in allowed_decisions
+            and ro_scale_for_bear <= max_ro_scale
+        ):
+            old_exp = max_gross_exposure_pct
+            bear_gross_cap = max(0.0, min(1.0, _pct01_from_config(bear_sizing_policy.get("gross_exposure_cap_pct", 0.40), 0.40)))
+            max_gross_exposure_pct = min(max_gross_exposure_pct, bear_gross_cap)
+            print(
+                f"[BEAR_SIZING] applied=true gross_exposure {old_exp:.3f}->{max_gross_exposure_pct:.3f} "
+                f"cap={bear_gross_cap:.3f} regime={market_regime} entry_gate={entry_decision_code} "
+                f"risk_orch_scale={ro_scale_for_bear:.3f} max_scale={max_ro_scale:.3f}"
+            )
+        else:
+            print(
+                f"[BEAR_SIZING] applied=false regime={market_regime} entry_gate={entry_decision_code} "
+                f"risk_orch_scale={ro_scale_for_bear:.3f} max_scale={max_ro_scale:.3f}"
+            )
+    if (
+        bool(((cfg.get("risk_orchestration", {}) if isinstance(cfg, dict) else {}).get("dd_stop_validation", {}) or {}).get("enabled", False))
+        and "validation_reduce" in str(entry_decision_reason or "")
+        and entry_decision_code == "REDUCE"
+    ):
+        _ro_val_cfg2 = ((cfg.get("risk_orchestration", {}) if isinstance(cfg, dict) else {}).get("dd_stop_validation", {}) or {})
+        _ro_val_max_new = max(1, _to_int(_ro_val_cfg2.get("max_new", 1), 1))
+        if max_new < _ro_val_max_new:
+            old_max_new = int(max_new)
+            max_new = min(base_max_new, _ro_val_max_new)
+            print(f"[ENTRY_GATE] validation REDUCE floor max_new {old_max_new}->{max_new}")
+    _min_qty_verification2 = _minimum_quantity_verification_cfg(cfg)
+    if (
+        bool(_min_qty_verification2.get("enabled", False))
+        and "minimum_quantity_verification" in str(entry_decision_reason or "")
+        and entry_decision_code == "REDUCE"
+    ):
+        _mqv_max_new = max(1, _to_int(_min_qty_verification2.get("max_new", 1), 1))
+        if max_new < _mqv_max_new:
+            old_max_new = int(max_new)
+            max_new = min(base_max_new, _mqv_max_new)
+            print(f"[ENTRY_GATE] minimum quantity verification floor max_new {old_max_new}->{max_new}")
+    _capture_max_new_zero("entry_gate_decision")
+    if bool(fx_policy.get("enabled", False)) and fx_ctx:
+        fx_vol_band = str(fx_ctx.get("volatility_band") or "").upper()
+        fx_three_day_extreme = bool(fx_ctx.get("three_day_extreme"))
+        fx_level = _to_float(fx_ctx.get("level"), 0.0)
+        fx_daily_abs_change = _to_float(fx_ctx.get("daily_abs_change"), 0.0)
+        try:
+            weak_fx_level = float(fx_policy.get("weak_fx_export_bias_level", 1450.0) or 1450.0)
+        except Exception:
+            weak_fx_level = 1450.0
+        try:
+            strong_fx_level = float(fx_policy.get("strong_fx_domestic_bias_level", 1380.0) or 1380.0)
+        except Exception:
+            strong_fx_level = 1380.0
+        if fx_status == "EXTREME_HARD":
+            print(
+                f"[FX] EXTREME_HARD: daily_abs_change={fx_daily_abs_change:.2f} "
+                f"avg_abs_change_20={fx_ctx.get('avg_abs_change_20')}"
+            )
+        elif fx_status == "EXTREME_SOFT":
+            print(
+                f"[FX] EXTREME_SOFT: daily_abs_change={fx_daily_abs_change:.2f} "
+                f"avg_abs_change_20={fx_ctx.get('avg_abs_change_20')}"
+            )
+        elif fx_status == "CAUTION":
+            print(
+                f"[FX] CAUTION: daily_abs_change={fx_daily_abs_change:.2f} "
+                f"avg_abs_change_20={fx_ctx.get('avg_abs_change_20')}"
+            )
+        elif fx_vol_band == "HIGH":
+            try:
+                high_vol_cap = int(fx_policy.get("high_vol_reduce_max_new_to", 1) or 1)
+            except Exception:
+                high_vol_cap = 1
+            old_max_new = max_new
+            max_new = min(max_new, max(0, high_vol_cap))
+            print(f"[FX] high volatility cap applied: {old_max_new}->{max_new}")
+        if bool(fx_policy.get("three_day_extreme_force_defensive", True)) and fx_three_day_extreme:
+            old_exp = max_gross_exposure_pct
+            max_gross_exposure_pct = min(max_gross_exposure_pct, 0.35)
+            print(f"[FX] three_day_extreme defensive gross cap: {old_exp:.3f}->{max_gross_exposure_pct:.3f}")
 
     if bool(regime_policy.get("enabled", False)) and market_regime == "RALLY":
         max_gross_exposure_pct = min(
@@ -1237,119 +1382,1175 @@ def main() -> int:
         )
 
     cdf = pick_candidates(cfg)
+    state = _merge_last_t2_state_fields(state)
+    carryover_revalidate_summary: Dict[str, Any] = dict(_LAST_CARRYOVER_REVALIDATE_SUMMARY or {})
     rank_col = "final_score" if "final_score" in cdf.columns else ("score" if "score" in cdf.columns else None)
     if rank_col:
         print(f"[CAND] ranking key: {rank_col}")
 
-    cap_n_runtime = int(cfg.get("cap_signal_top_n", 0) or 0)
-    max_per_sector = int(max_per_sector_runtime or 0)
-
-    raw_cand_count = len(cdf)
-    shrink_min_candidates = max(1, _to_int(ops_policy.get("universe_shrink_min_candidates", 8), 8))
-    universe_shrink_candidates = raw_cand_count <= shrink_min_candidates if raw_cand_count > 0 else False
-    if ops_enabled and universe_shrink_candidates:
-        print(f"[OPS] universe_shrink detected: candidates={raw_cand_count} <= {shrink_min_candidates}")
-        if cap_n_runtime > 0 and bool(ops_policy.get("universe_shrink_disable_signal_cap", True)):
-            print(f"[OPS] universe_shrink -> disable cap_signal_top_n (was {cap_n_runtime})")
-            cap_n_runtime = 0
-        if max_per_sector > 0 and bool(ops_policy.get("universe_shrink_disable_sector_cap", True)):
-            print(f"[OPS] universe_shrink -> disable max_per_sector cap (was {max_per_sector})")
-            max_per_sector = 0
-
-    probe_floor = compute_dynamic_probe_floor(
-        base_max_new=base_max_new,
-        market_regime=market_regime,
-        regime_info=regime_info,
-        cfg=cfg,
-        risk_off_hard=risk_off_hard,
-        universe_shrink=universe_shrink_candidates,
+    pool_state = load_state()
+    pool_open_pos = pool_state.get("open_positions", []) if isinstance(pool_state, dict) else []
+    pool_open_codes = {
+        norm_code(p.get("code", ""))
+        for p in pool_open_pos
+        if isinstance(p, dict) and norm_code(p.get("code", ""))
+    }
+    _full_candidate_df_for_report = cdf.copy()
+    cdf, validation_cand_count = _prepare_entry_candidate_pool(
+        cdf,
+        cfg,
+        exclude_codes=pool_open_codes,
     )
-    if probe_floor > 0 and max_new < probe_floor:
-        old_max_new = max_new
-        max_new = min(base_max_new, probe_floor)
-        print(f"[OPS] dynamic_probe_floor applied: {old_max_new}->{max_new} (regime={market_regime})")
+    cdf, horizon_status = _apply_horizon_entry_policy(cdf, cfg)
 
-    # === CAP: limit entries per signal_date (tail-risk control) ===
-    if cap_n_runtime > 0 and ("signal_date" in cdf.columns):
-        if rank_col:
-            cdf["_score_n"] = pd.to_numeric(cdf[rank_col], errors="coerce")
-            tie_col = "trading_value" if "trading_value" in cdf.columns else ("value" if "value" in cdf.columns else None)
-            if tie_col:
-                cdf["_tie_n"] = pd.to_numeric(cdf[tie_col], errors="coerce")
-                cdf = cdf.sort_values(["signal_date", "_score_n", "_tie_n"], ascending=[True, False, False])
-            else:
-                cdf = cdf.sort_values(["signal_date", "_score_n"], ascending=[True, False])
+    max_new_before_p1 = int(max_new)
+    entry_candidates_before_p1 = int(len(cdf))
+    split2_p1_mask = pd.Series(False, index=cdf.index)
+    if "split_entry_2nd" in cdf.columns:
+        split2_p1_mask = cdf["split_entry_2nd"].astype(str).str.strip().str.lower().isin({"1", "true", "t", "y", "yes"})
+    cdf_split2_p1 = cdf[split2_p1_mask].copy()
+    cdf_p1_base = cdf[~split2_p1_mask].copy()
+    cdf_p1_base, max_new, p1_controls = apply_p1_entry_controls(cdf_p1_base, max_new, cfg)
+    if len(cdf_split2_p1) > 0:
+        cdf = _concat_drop_all_na_columns([cdf_split2_p1, cdf_p1_base], ignore_index=True)
+        if isinstance(p1_controls, dict):
+            p1_controls.setdefault("actions", []).append(f"split_entry_2nd:bypass_p1_new_entry_filters kept={len(cdf_split2_p1)}")
+        print(f"[P1_GATE] split_entry_2nd bypass applied: kept={len(cdf_split2_p1)}")
+    else:
+        cdf = cdf_p1_base
+    max_new = _enforce_entry_gate_block_max_new(max_new, "post_p1")
+    sample_cap_post_p1, sample_cap_post_p1_reason = _paper_validation_sample_cap(max_new, entry_decision_code)
+    if sample_cap_post_p1 > int(max_new):
+        old_max_new = int(max_new)
+        max_new = min(int(base_max_new), int(sample_cap_post_p1))
+        if isinstance(p1_controls, dict):
+            p1_controls.setdefault("actions", []).append(
+                f"paper_validation_sample:post_p1_floor {old_max_new}->{int(max_new)} reason={sample_cap_post_p1_reason}"
+            )
+        print(
+            f"[PAPER_VALIDATION_SAMPLE] post_p1 max_new floor {old_max_new}->{int(max_new)} "
+            f"sample_cap={sample_cap_post_p1} reason={sample_cap_post_p1_reason}"
+        )
+    _capture_max_new_zero("p1_controls")
+    entry_candidates_after_p1 = int(len(cdf))
+    risk_gate_runtime = {
+        "risk_off_enabled": bool(risk_off_enabled),
+        "risk_off_reasons": list(risk_off_reasons or []),
+        "risk_reason_details": list(risk_reason_details or []),
+        "kill_switch": {
+            "enabled": bool(ks_snap.get("enabled", False)),
+            "triggered": bool(ks_snap.get("triggered", False)),
+            "mode": str(ks_mode),
+            "reduce_factor": float(ks_reduce_factor),
+            "min_new_trades_per_day": int(ks_min_new),
+            "limits": dict(ks_limits or {}),
+            "metrics": dict((ks_snap.get("metrics") if isinstance(ks_snap.get("metrics"), dict) else {}) or {}),
+        },
+        "crash_risk_off": {
+            "enabled": bool(cr_snap.get("enabled", False)),
+            "triggered": bool(cr_snap.get("triggered", False)),
+            "mode": str(crash_mode),
+            "reduce_factor": float(crash_reduce_factor),
+            "min_new_trades_per_day": int(crash_min_new),
+            "limits": dict(cr_limits or {}),
+            "metrics": dict((cr_snap.get("metrics") if isinstance(cr_snap.get("metrics"), dict) else {}) or {}),
+        },
+        "entry_gate": {
+            "decision": str(entry_decision_code or ""),
+            "reason": str(entry_decision_reason or ""),
+            "block_lock": bool(entry_gate_block_lock),
+            "max_new_before_p1": int(max_new_before_p1),
+            "max_new_after_p1": int(max_new),
+            "paper_validation_sample_cap": int(sample_cap_post_p1),
+            "paper_validation_sample_reason": str(sample_cap_post_p1_reason or ""),
+            "max_new_zero_reason": str(max_new_zero_reason or ""),
+            "stop_new_orders": bool(int(max_new) <= 0),
+        },
+        "risk_orchestration": dict(risk_orch_ctx or {}),
+        "production_risk_playbook": dict(production_risk_guard or {}),
+        "position_size_multiplier": float(position_size_multiplier),
+        "fail_closed": bool(entry_gate_block_lock and int(max_new) <= 0),
+    }
+    risk_gate_runtime["entry_risk_basis"] = _build_entry_risk_basis(risk_gate_runtime)
+    if bool(entry_gate_block_lock and int(max_new) <= 0):
+        print(
+            "[FAIL_CLOSED] "
+            f"post_p1_stop_new_orders=true max_new={int(max_new)} "
+            f"reason={entry_decision_reason} zero_reason={max_new_zero_reason}"
+        )
+    _write_p1_gate_status(
+        p1_controls,
+        max_new_before_p1=max_new_before_p1,
+        max_new_after_p1=int(max_new),
+        entry_candidates_before_p1=entry_candidates_before_p1,
+        entry_candidates_after_p1=entry_candidates_after_p1,
+        market_regime=str(market_regime or ""),
+        entry_decision_code=str(entry_decision_code or ""),
+        entry_decision_reason=str(entry_decision_reason or ""),
+        risk_gate_runtime=risk_gate_runtime,
+    )
+    if horizon_status:
+        try:
+            print(
+                "[HORIZON] post-entry-pool "
+                f"enabled={bool(horizon_status.get('enabled', False))} "
+                f"before={int(horizon_status.get('before', 0) or 0)} "
+                f"after={int(horizon_status.get('after', 0) or 0)} "
+                f"allowed={int(horizon_status.get('allowed', 0) or 0)}"
+            )
+        except Exception:
+            pass
 
-            cdf["_rk_sig"] = cdf.groupby("signal_date").cumcount() + 1
-            before = len(cdf)
-            cdf = cdf[cdf["_rk_sig"] <= cap_n_runtime].copy()
-            after = len(cdf)
-            print(f"[CAP] cap_signal_top_n={cap_n_runtime} applied: {before}->{after}")
-        else:
-            print("[CAP] ranking column missing (need final_score or score); cap_signal_top_n ignored")
+    if bool(fx_policy.get("enabled", False)) and fx_ctx and bool(fx_policy.get("bias_keep_nonnegative_fx_score_only", True)):
+        fx_level = _to_float(fx_ctx.get("level"), 0.0)
+        try:
+            weak_fx_level = float(fx_policy.get("weak_fx_export_bias_level", 1450.0) or 1450.0)
+        except Exception:
+            weak_fx_level = 1450.0
+        try:
+            strong_fx_level = float(fx_policy.get("strong_fx_domestic_bias_level", 1380.0) or 1380.0)
+        except Exception:
+            strong_fx_level = 1380.0
+            if fx_level is not None and "fx_score" in cdf.columns:
+                if fx_level >= weak_fx_level:
+                    before = len(cdf)
+                    cdf, max_new = apply_fx_filter(cdf, fx_status, max_new)
+                    after = len(cdf)
+                    print(f"[FX] weak-fx export bias filter applied: {before}->{after} level={fx_level:.2f} max_new={int(max_new)}")
+                elif fx_level <= strong_fx_level:
+                    before = len(cdf)
+                    cdf, max_new = apply_fx_filter(cdf, fx_status, max_new)
+                    after = len(cdf)
+                    print(f"[FX] strong-fx domestic bias filter applied: {before}->{after} level={fx_level:.2f} max_new={int(max_new)}")
+            max_new = _enforce_entry_gate_block_max_new(max_new, "post_fx_filter")
+            _capture_max_new_zero("fx_filter")
 
-    # === CAP: limit entries per sector per signal_date ===
-    if max_per_sector > 0:
-        sector_col = "sector_code" if "sector_code" in cdf.columns else None
-        if not sector_col:
-            print("[CAP] max_per_sector set but sector_code column missing; ignored")
-        else:
-            cdf["_sector_key"] = cdf[sector_col].astype(str).str.strip()
-            miss = (cdf["_sector_key"] == "") | (cdf["_sector_key"].str.lower() == "nan")
-            cdf.loc[miss, "_sector_key"] = "__NA__" + cdf.loc[miss, "code"].astype(str).str.zfill(6)
+    cdf, max_new, universe_shrink_candidates = _apply_runtime_caps_and_filters(
+        cdf,
+        max_new=int(max_new),
+        base_max_new=int(base_max_new),
+        market_regime=str(market_regime or ""),
+        regime_info=regime_info,
+        config=cfg,
+        ops_policy=ops_policy,
+        ops_enabled=bool(ops_enabled),
+        risk_off_hard=bool(risk_off_hard),
+        rank_col=rank_col,
+        max_per_sector_runtime=int(max_per_sector_runtime),
+        trend_overlay_ctx=trend_overlay_ctx,
+    )
+    max_new = _enforce_entry_gate_block_max_new(max_new, "post_runtime_caps")
+    _capture_max_new_zero("runtime_caps")
 
-            if rank_col:
-                cdf["_score_sec"] = pd.to_numeric(cdf[rank_col], errors="coerce")
-                cdf = cdf.sort_values(["signal_date", "_sector_key", "_score_sec"], ascending=[True, True, False])
-
-            cdf["_rk_sector"] = cdf.groupby(["signal_date", "_sector_key"]).cumcount() + 1
-            before = len(cdf)
-            cdf = cdf[cdf["_rk_sector"] <= max_per_sector].copy()
-            after = len(cdf)
-            print(f"[CAP] max_per_sector={max_per_sector} applied: {before}->{after}")
-
-    # Prioritize deferred carryover signals so queued entries are consumed on next trading day.
-    if len(cdf) > 0:
-        if "_carryover" not in cdf.columns:
-            cdf["_carryover"] = 0
-        cdf["_carryover"] = pd.to_numeric(cdf["_carryover"], errors="coerce").fillna(0).astype(int)
-        if rank_col:
-            cdf["_rank_runtime"] = pd.to_numeric(cdf[rank_col], errors="coerce")
-            cdf = cdf.sort_values(["_carryover", "signal_date", "_rank_runtime"], ascending=[False, True, False])
-        else:
-            cdf = cdf.sort_values(["_carryover", "signal_date", "code"], ascending=[False, True, True])
-    state = load_state()
-
-    # ---- ????????????????????????釉먮폁????????꿔꺂???癰귥옖留???????????????????????????????????????????????????????????????꾩룆梨띰쭕?뚢뵾??????????????嶺뚮죭?댁젘??????????????????????釉먮폁???????????????????살몝??????????????????????????????????????????????????????????????????????????????????? ???????????????????釉먮폁????????꿔꺂???癰귥옖留????????????????????????????????????????????????????----
-    processed_signals = set(str(x) for x in (state.get("processed_signals") or []))
-
-    existing_fill_order_ids: set[str] = set()
-    existing_trade_sigs: set[str] = set()
-
-    if schema == "legacy":
-        df_fills = read_csv_safe(FILLS)
-        if df_fills is not None and "order_id" in df_fills.columns:
-            existing_fill_order_ids = set(df_fills["order_id"].astype(str).tolist())
-
-        df_trades = read_csv_safe(TRADES)
-        if df_trades is not None and len(df_trades) > 0:
-            # trades ???????????????????????processed_signals????????????????????????????⑤벡????????????????????????????????????????????????????????????????????????????????????????쎛?????????????????????釉먮폁????????꿔꺂???癰귥옖留???????????????????????????????????????????????????????????????????????????????꾩룆梨띰쭕?뚢뵾??????????????嶺뚮죭?댁젘??????????????????????釉먮폁???????????????????살몝???????????????????????????????????????????????????????????????????????????????????)
-            if "code" in df_trades.columns and "note" in df_trades.columns:
-                for _, rr in df_trades.iterrows():
-                    code = str(rr.get("code", "")).zfill(6)
-                    sd = _extract_signal_date(rr.get("note"))
-                    if sd:
-                        processed_signals.add(f"{code}:{sd}")
-
-            # trade signature set
+    signal_tracking = _build_signal_tracking_context(
+        cfg,
+        schema=schema,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
+        trail_pct=trail_pct,
+        fee_pct=float(fee_pct),
+        slip_pct=float(slip_pct),
+        sell_tax_pct=float(sell_tax_pct),
+        replay_enabled=bool(replay_enabled),
+        replay_min_age_days=int(replay_min_age_days),
+        replay_require_no_open_positions=bool(replay_require_no_open_positions),
+    )
+    state = signal_tracking.state
+    state = _merge_last_t2_state_fields(state)
+    processed_signals = signal_tracking.processed_signals
+    existing_fill_order_ids = signal_tracking.existing_fill_order_ids
+    existing_trade_sigs = signal_tracking.existing_trade_sigs
+    committed_source_order_ids = signal_tracking.committed_source_order_ids
+    committed_signal_keys = signal_tracking.committed_signal_keys
+    df_fills = signal_tracking.df_fills
+    same_close_filled_today = int(signal_tracking.same_close_filled_today)
+    open_pos = signal_tracking.open_pos
+    open_codes = signal_tracking.open_codes
+    open_slot_count = _count_open_position_slots(open_pos)
+    replay_global_ok = bool(signal_tracking.replay_global_ok)
+    d_ref_ymd = _derive_d_from_fills_path(FILLS)
+    entry_today_ref_ymd = now_ymd()
+    print(f"[ENTRY_DATE_REF] entry_today={entry_today_ref_ymd} fills_d_ref={d_ref_ymd}")
+    _today_buy_code_counts: Dict[str, int] = {}
+    _today_surge_buy_codes: set[str] = set()
+    _today_surge_notional_krw = 0.0
+    if df_fills is not None and not df_fills.empty:
+        _f = df_fills
+        _f_date_col = next((c for c in ["date", "exec_date", "datetime"] if c in _f.columns), None)
+        _f_side_col = next((c for c in ["side", "buy_sell"] if c in _f.columns), None)
+        _f_code_col = next((c for c in ["code", "ticker"] if c in _f.columns), None)
+        if _f_date_col and _f_side_col and _f_code_col:
+            _f_d = _f[_f_date_col].astype(str).str.replace(r"\D", "", regex=True).str[:8]
+            _f_buy = _f[
+                (_f_d == str(entry_today_ref_ymd))
+                & (_f[_f_side_col].astype(str).str.upper().str.strip() == "BUY")
+            ]
+            _note_col = "note" if "note" in _f_buy.columns else None
+            for _idx, _buy_row in _f_buy.iterrows():
+                _c = str(_buy_row.get(_f_code_col, "") or "").strip().zfill(6)
+                _today_buy_code_counts[_c] = _today_buy_code_counts.get(_c, 0) + 1
+                _note_s = str(_buy_row.get(_note_col, "") if _note_col else "")
+                if "surge_immediate=1" in _note_s:
+                    _today_surge_buy_codes.add(_c)
+                    _qty = _to_float(_buy_row.get("qty"), 0.0)
+                    _price = _to_float(_buy_row.get("price"), 0.0)
+                    if math.isfinite(float(_qty)) and math.isfinite(float(_price)) and _qty > 0 and _price > 0:
+                        _today_surge_notional_krw += float(_qty) * float(_price)
+    cdf, surge_inject_status = _inject_surge_immediate_candidates(
+        cdf,
+        cfg=cfg,
+        intraday_realtime_mode=bool(intraday_realtime_mode),
+        open_codes=set(open_codes),
+        today_ymd=str(entry_today_ref_ymd),
+        today_buy_code_counts=_today_buy_code_counts,
+    )
+    if max_positions > 0 and int(open_slot_count) >= int(max_positions):
+        _mp_override_meta: Dict[str, Any] = {
+            "enabled": False,
+            "applied": False,
+            "mode": "",
+            "reason": "disabled",
+            "open_notional": None,
+            "gross_cap_krw": None,
+            "capital_total": float(capital_total or 0.0),
+        }
+        _ro_val_cfg3 = ((cfg.get("risk_orchestration", {}) if isinstance(cfg, dict) else {}).get("dd_stop_validation", {}) or {})
+        _mp_override_cfg = _ro_val_cfg3.get("max_positions_full_override", {}) if isinstance(_ro_val_cfg3, dict) else {}
+        if not isinstance(_mp_override_cfg, dict):
+            _mp_override_cfg = {}
+        _mp_override_enabled = bool(_mp_override_cfg.get("enabled", False))
+        _mp_override_mode = str(_mp_override_cfg.get("mode", "gross_exposure_cap") or "gross_exposure_cap").strip().lower()
+        _allowed_labels3 = {
+            str(x).strip().lower()
+            for x in (_ro_val_cfg3.get("allowed_run_labels") or [])
+            if str(x).strip()
+        }
+        _label_allowed3 = (not _allowed_labels3) or str(RUN_LABEL or "").strip().lower() in _allowed_labels3
+        _is_validation_reduce3 = (
+            bool(_ro_val_cfg3.get("enabled", False))
+            and str(_ro_val_cfg3.get("mode", "") or "").strip().lower() in {"reduce", "validation_reduce"}
+            and _label_allowed3
+            and "validation_reduce" in str(entry_decision_reason or "")
+        )
+        _allow_max_positions_override = False
+        if _mp_override_enabled and _is_validation_reduce3 and _mp_override_mode == "gross_exposure_cap":
             try:
-                for _, rr in df_trades.iterrows():
-                    existing_trade_sigs.add(_legacy_trade_sig(rr))
+                _mp_px = load_prices_for_codes(cfg, sorted(set(open_codes)))
+                _mp_price_ok = (_mp_px is not None) and (not _mp_px.empty)
+                _mp_open_notional = _compute_current_open_notional(open_pos, _mp_px)
             except Exception:
-                pass
+                _mp_price_ok = False
+                _mp_open_notional = 0.0
+            _mp_gross_cap = (
+                float(capital_total) * float(max_gross_exposure_pct)
+                if float(capital_total or 0.0) > 0.0
+                else 0.0
+            )
+            _mp_reason = "gross_exposure_under_cap"
+            if not _mp_price_ok:
+                _mp_reason = "price_unavailable"
+            elif _mp_gross_cap <= 0:
+                _mp_reason = "gross_cap_missing"
+            elif _mp_open_notional >= _mp_gross_cap:
+                _mp_reason = "gross_exposure_cap_reached"
+            _mp_override_meta.update(
+                {
+                    "enabled": True,
+                    "mode": _mp_override_mode,
+                    "reason": _mp_reason,
+                    "price_ok": bool(_mp_price_ok),
+                    "open_notional": float(_mp_open_notional),
+                    "gross_cap_krw": float(_mp_gross_cap),
+                    "gross_exposure_pct": (
+                        float(_mp_open_notional) / float(capital_total)
+                        if float(capital_total or 0.0) > 0.0
+                        else None
+                    ),
+                    "max_gross_exposure_pct": float(max_gross_exposure_pct),
+                }
+            )
+            if _mp_price_ok and _mp_gross_cap > 0 and _mp_open_notional < _mp_gross_cap:
+                _allow_max_positions_override = True
+                _mp_override_meta["applied"] = True
+        elif capital_budget_enabled:
+            try:
+                _mp_px = load_prices_for_codes(cfg, sorted(set(open_codes)))
+                _mp_price_ok = (_mp_px is not None) and (not _mp_px.empty)
+                _mp_open_notional = _compute_current_open_notional(open_pos, _mp_px)
+            except Exception:
+                _mp_price_ok = False
+                _mp_open_notional = 0.0
+            _mp_gross_cap = (
+                float(capital_total) * float(max_gross_exposure_pct)
+                if float(capital_total or 0.0) > 0.0
+                else 0.0
+            )
+            _mp_reason = "gross_exposure_under_cap"
+            if not _mp_price_ok:
+                _mp_reason = "price_unavailable"
+            elif _mp_gross_cap <= 0:
+                _mp_reason = "gross_cap_missing"
+            elif _mp_open_notional >= _mp_gross_cap:
+                _mp_reason = "gross_exposure_cap_reached"
+            _mp_override_meta.update(
+                {
+                    "enabled": True,
+                    "mode": "budget_gross_exposure_cap",
+                    "reason": _mp_reason,
+                    "price_ok": bool(_mp_price_ok),
+                    "open_notional": float(_mp_open_notional),
+                    "gross_cap_krw": float(_mp_gross_cap),
+                    "gross_exposure_pct": (
+                        float(_mp_open_notional) / float(capital_total)
+                        if float(capital_total or 0.0) > 0.0
+                        else None
+                    ),
+                    "max_gross_exposure_pct": float(max_gross_exposure_pct),
+                }
+            )
+            if _mp_price_ok and _mp_gross_cap > 0 and _mp_open_notional < _mp_gross_cap:
+                _allow_max_positions_override = True
+                _mp_override_meta["applied"] = True
+        elif _mp_override_enabled:
+            _mp_override_meta.update(
+                {
+                    "enabled": True,
+                    "mode": _mp_override_mode,
+                    "reason": "not_validation_reduce",
+                }
+            )
+        max_positions_meta["validation_exposure_override"] = _mp_override_meta
+        if _allow_max_positions_override:
+            print(
+                f"[ENTRY_MAX_POSITIONS_VALIDATION_OVERRIDE] open_slots={int(open_slot_count)} "
+                f">= max_positions={int(max_positions)} but open_notional={float(_mp_override_meta.get('open_notional') or 0.0):.0f} "
+                f"< gross_cap={float(_mp_override_meta.get('gross_cap_krw') or 0.0):.0f} -> keep max_new={int(max_new)}"
+            )
+        else:
+            if int(max_new) > 0:
+                print(
+                    f"[ENTRY_MAX_POSITIONS_PRECHECK] open_slots={int(open_slot_count)} "
+                    f">= max_positions={int(max_positions)} -> max_new {int(max_new)}->0"
+                )
+            max_new = 0
+            _capture_max_new_zero("max_positions_full")
+    max_positions_override_allowed = bool(
+        _get_dict(max_positions_meta, "validation_exposure_override").get("applied", False)
+    )
+    if bool(surge_inject_status.get("enabled", False)):
+        print(
+            "[SURGE_IMMEDIATE] "
+            f"applied={bool(surge_inject_status.get('applied', False))} "
+            f"added={int(surge_inject_status.get('added', 0) or 0)} "
+            f"updated={int(surge_inject_status.get('updated_existing', 0) or 0)} "
+            f"codes={','.join(surge_inject_status.get('selected_codes', [])[:5]) or '-'} "
+            f"reason={str(surge_inject_status.get('reason', ''))}"
+        )
+    _old_max_new_surge = int(max_new_surge)
+    if exit_only_mode:
+        max_new_surge = 0
+        dynamic_max_new_surge_meta = {"enabled": False, "reason": "exit_only_mode"}
+    else:
+        max_new_surge, dynamic_max_new_surge_meta = _compute_dynamic_max_new_surge(
+            cdf,
+            cfg,
+            capital_total=float(capital_total),
+            fallback_max_new_surge=int(max_new_surge),
+            existing_surge_count=int(len(_today_surge_buy_codes)),
+            existing_surge_notional_krw=float(_today_surge_notional_krw),
+        )
+    if bool(dynamic_max_new_surge_meta.get("enabled", False)):
+        print(
+            "[SURGE_DYNAMIC_MAX_NEW] "
+            f"max_new_surge={_old_max_new_surge}->{int(max_new_surge)} "
+            f"eligible={dynamic_max_new_surge_meta.get('eligible_count', 0)} "
+            f"medium={dynamic_max_new_surge_meta.get('medium_count', 0)} "
+            f"strong={dynamic_max_new_surge_meta.get('strong_count', 0)} "
+            f"budget_cap={dynamic_max_new_surge_meta.get('budget_cap', 0)} "
+            f"budget_left_slots={dynamic_max_new_surge_meta.get('budget_slots_left', 0)} "
+            f"quality_cap={dynamic_max_new_surge_meta.get('quality_cap', 0)} "
+            f"existing={dynamic_max_new_surge_meta.get('existing_surge_count', 0)} "
+            f"new_cap={dynamic_max_new_surge_meta.get('new_candidate_cap', 0)} "
+            f"reason={dynamic_max_new_surge_meta.get('reason', '')}"
+        )
+    if (
+        (not exit_only_mode)
+        and bool(_ro_validation_reduce_applied)
+        and int(max_new) > 0
+        and int(max_new_surge) <= 0
+    ):
+        _surge_validation_floor = max(0, _to_int(_ro_val_cfg_for_surge_floor.get("max_new_surge", 0), 0))
+        if "_surge_immediate" in cdf.columns:
+            _surge_floor_candidates = int(pd.to_numeric(cdf["_surge_immediate"], errors="coerce").fillna(0).astype(int).sum())
+        elif "surge_type" in cdf.columns:
+            _surge_floor_candidates = int(cdf["surge_type"].astype(str).str.strip().ne("").sum())
+        else:
+            _surge_floor_candidates = 0
+        if _surge_validation_floor > 0 and _surge_floor_candidates > 0:
+            _old_floor_surge = int(max_new_surge)
+            max_new_surge = max(int(max_new_surge), min(int(max_new), int(_surge_validation_floor)))
+            dynamic_max_new_surge_meta["validation_reduce_floor_applied"] = True
+            dynamic_max_new_surge_meta["validation_reduce_floor"] = int(_surge_validation_floor)
+            dynamic_max_new_surge_meta["validation_reduce_floor_candidates"] = int(_surge_floor_candidates)
+            print(
+                "[SURGE_VALIDATION_REDUCE_FLOOR] "
+                f"max_new_surge={_old_floor_surge}->{int(max_new_surge)} "
+                f"floor={int(_surge_validation_floor)} candidates={int(_surge_floor_candidates)}"
+            )
 
-    open_pos: List[Dict[str, Any]] = state.get("open_positions", []) or []
-    open_codes = set(norm_code(p.get("code", "")) for p in open_pos if norm_code(p.get("code", "")))
+    cdf_for_ops_alert = cdf.copy()
+    cdf = _apply_entry_selection_policy(
+        cdf,
+        cfg=cfg,
+        rank_col=rank_col,
+        max_new=int(max_new),
+        exclude_codes=set(open_codes),
+        same_code_day_buy_counts=_today_buy_code_counts,
+    )
+    if isinstance(cdf, pd.DataFrame) and not cdf.empty:
+        cdf["_entry_gate_decision"] = str(entry_decision_code or "")
+        cdf["_entry_gate_reason"] = str(entry_decision_reason or "")
+        cdf["_risk_orch_scale"] = risk_orch_ctx.get("scale", "") if isinstance(risk_orch_ctx, dict) else ""
+        _scale_zero_causes = risk_orch_ctx.get("scale_zero_causes", []) if isinstance(risk_orch_ctx, dict) else []
+        cdf["_scale_zero_causes"] = ",".join(str(x) for x in _scale_zero_causes) if isinstance(_scale_zero_causes, list) else str(_scale_zero_causes or "")
+    elif isinstance(cdf, pd.DataFrame) and cdf.empty:
+        _write_entry_signal_snapshot(
+            rows=[],
+            d_ref_ymd=str(d_ref_ymd),
+            rank_col=str(rank_col or ""),
+        )
+        _write_entry_decision_layers_snapshot(
+            candidate_df=cdf,
+            entry_decision_rows=[],
+            d_ref_ymd=str(d_ref_ymd),
+            rank_col=str(rank_col or ""),
+            risk_gate_runtime=(risk_gate_runtime if isinstance(risk_gate_runtime, dict) else {}),
+        )
+        _write_normal_entry_fill_quality_report(
+            candidate_df=_full_candidate_df_for_report,
+            entry_decision_rows=[],
+            d_ref_ymd=str(d_ref_ymd),
+            rank_col=str(rank_col or ""),
+        )
+        _write_surge_realtime_shadow_runtime_snapshot(
+            entry_decision_rows=[],
+            d_ref_ymd=str(d_ref_ymd),
+        )
 
-    current_open_notional = 0.0
-    open_notional_by_code: Dict[str, float] = {}
+    pretrade_runtime = _prepare_pretrade_runtime(
+        cdf,
+        cfg,
+        state,
+        open_pos,
+        open_codes,
+        schema=schema,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
+        trail_pct=trail_pct,
+        capital_total=float(capital_total),
+        max_gross_exposure_pct=float(max_gross_exposure_pct),
+        max_daily_new_exposure_pct=float(max_daily_new_exposure_pct),
+        ddm_enabled=bool(ddm_enabled),
+        ddm_cfg=ddm_cfg,
+        ddm_force_liquidate_pct=float(ddm_force_liquidate_pct),
+    )
+    early_return = pretrade_runtime.get("early_return")
+    if early_return is not None:
+        return int(early_return)
+
+    entry_sector_col = pretrade_runtime.get("entry_sector_col")
+    block_same_sector_entry = bool(pretrade_runtime.get("block_same_sector_entry"))
+    blocked_sector_value = pretrade_runtime.get("blocked_sector_value")
+    sector_concentration = float(pretrade_runtime.get("sector_concentration", 0.0) or 0.0)
+    gross_cap_krw = pretrade_runtime.get("gross_cap_krw")
+    daily_new_cap_krw = pretrade_runtime.get("daily_new_cap_krw")
+    px: pd.DataFrame = pretrade_runtime.get("px") if isinstance(pretrade_runtime.get("px"), pd.DataFrame) else pd.DataFrame()
+    current_open_notional = float(pretrade_runtime.get("current_open_notional", 0.0) or 0.0)
+    ddm_liquidation_targets = pretrade_runtime.get("ddm_liquidation_targets") or set()
+    ddm_liquidation_price_mode = str(pretrade_runtime.get("ddm_liquidation_price_mode") or "close")
+
+    price_universe_codes = int(px["code"].nunique()) if ("code" in px.columns and len(px) > 0) else 0
+    shrink_min_price_codes = max(0, _to_int(ops_policy.get("universe_shrink_min_price_codes", 0), 0))
+    if ops_enabled and shrink_min_price_codes > 0 and price_universe_codes > 0 and price_universe_codes <= shrink_min_price_codes:
+        universe_shrink_candidates = True
+        print(f"[OPS] universe_shrink detected: price_codes={price_universe_codes} <= {shrink_min_price_codes}")
+        probe_floor2 = compute_dynamic_probe_floor(
+            base_max_new=base_max_new,
+            market_regime=market_regime,
+            regime_info=regime_info,
+            cfg=cfg,
+            risk_off_hard=risk_off_hard,
+            universe_shrink=True,
+        )
+        if probe_floor2 > 0 and max_new < probe_floor2:
+            old_max_new = max_new
+            max_new = min(base_max_new, probe_floor2)
+            print(f"[OPS] dynamic_probe_floor(recheck) applied: {old_max_new}->{max_new}")
+        max_new = _enforce_entry_gate_block_max_new(max_new, "post_ops_recheck")
+        _capture_max_new_zero("ops_recheck")
+
+    if exit_only_mode:
+        max_new = 0
+        max_new_surge = 0
+        _capture_max_new_zero("exit_only_mode_final")
+        print("[ENTRY_EXIT_ONLY] final entry lock -> max_new=0 max_new_surge=0")
+
+    loop_state = _init_entry_loop_state(
+        same_close_entry_mode=bool(same_close_entry_mode),
+        same_close_filled_today=int(same_close_filled_today),
+        ops_enabled=bool(ops_enabled),
+        ops_policy=ops_policy,
+        replay_recovery_summary=replay_recovery_summary,
+        risk_off_enabled=bool(risk_off_enabled),
+        market_regime=str(market_regime or ""),
+        d_ref_ymd=str(entry_today_ref_ymd),
+        portfolio_state=state,
+        p0_snapshot=p0_snapshot,
+    )
+    loop_state["entry_decision_code"] = str(entry_decision_code or "")
+    loop_state["entry_decision_reason"] = str(entry_decision_reason or "")
+    loop_state["_same_code_day_buy_counts"] = dict(_today_buy_code_counts)
+    loop_state["surge_new_count"] = int(len(_today_surge_buy_codes))
+    loop_state["surge_notional_krw"] = float(_today_surge_notional_krw)
+    if _today_surge_buy_codes:
+        print(
+            "[SURGE_DAILY_CAP_SEED] "
+            f"existing_surge_codes={int(len(_today_surge_buy_codes))} "
+            f"existing_surge_notional={float(_today_surge_notional_krw):.0f}"
+        )
+    if int(max_new) <= 0 and len(cdf) > 0:
+        print(
+            f"[ENTRY_CAP_ZERO] candidates={len(cdf)} reason={max_new_zero_reason or 'unknown'} "
+            f"surge_cap={int(max_new_surge)}"
+        )
+    fills_new = loop_state["fills_new"]
+    trades_new = loop_state["trades_new"]
+    new_count = int(loop_state["new_count"])
+    new_notional_krw = float(loop_state["new_notional_krw"])
+    surge_new_count = int(loop_state.get("surge_new_count", 0))
+    surge_notional_krw = float(loop_state.get("surge_notional_krw", 0.0))
+    split_notional_krw = float(loop_state.get("split_notional_krw", 0.0))
+    evaluated_count = int(loop_state["evaluated_count"])
+    no_next_day_count = int(loop_state["no_next_day_count"])
+    entry_ready_count = int(loop_state["entry_ready_count"])
+    cap_block_count = int(loop_state["cap_block_count"])
+    processed_skip_count = int(loop_state["processed_skip_count"])
+    idempotent_skip_count = int(loop_state.get("idempotent_skip_count", 0))
+    stale_replay_used_count = int(loop_state["stale_replay_used_count"])
+    open_order_replay_used_count = int(loop_state["open_order_replay_used_count"])
+    today_ymd = str(loop_state["today_ymd"])
+    pending_carry_rows = loop_state["pending_carry_rows"]
+    carry_max_age = int(loop_state["carry_max_age"])
+    replay_due_today_count = int(loop_state["replay_due_today_count"])
+    carryover_market_gate_block = bool(loop_state["carryover_market_gate_block"])
+    loop_result = _process_entry_rows(
+        cdf,
+        max_new=int(max_new),
+        max_new_surge=int(max_new_surge),
+        capital_total=float(capital_total),
+        max_positions=int(max_positions),
+        schema=str(schema),
+        config=cfg,
+        prices_df=px,
+        fee_pct=float(fee_pct),
+        slip_pct=float(slip_pct),
+        gap_up_max_pct_runtime=float(gap_up_max_pct_runtime),
+        entry_gap_down_stop_pct_runtime=float(entry_gap_down_stop_pct_runtime),
+        stop_loss=float(stop_loss),
+        take_profit=take_profit,
+        trail_pct=trail_pct,
+        same_close_entry_mode=bool(same_close_entry_mode),
+        intraday_realtime_mode=bool(intraday_realtime_mode),
+        processed_signals=processed_signals,
+        committed_signal_keys=committed_signal_keys,
+        replay_enabled=bool(replay_enabled),
+        replay_global_ok=bool(replay_global_ok),
+        replay_min_age_days=int(replay_min_age_days),
+        replay_order_id_include_entry_day=bool(replay_order_id_include_entry_day),
+        ops_enabled=bool(ops_enabled),
+        ops_policy=ops_policy,
+        carryover_market_gate_block=bool(carryover_market_gate_block),
+        carryover_revalidate_summary=carryover_revalidate_summary,
+        market_regime=str(market_regime or ''),
+        risk_off_enabled=bool(risk_off_enabled),
+        block_same_sector_entry=bool(block_same_sector_entry),
+        entry_sector_col=str(entry_sector_col or ''),
+        blocked_sector_value=str(blocked_sector_value or ''),
+        sector_concentration=float(sector_concentration),
+        gross_cap_krw=gross_cap_krw,
+        daily_new_cap_krw=daily_new_cap_krw,
+        current_open_notional=float(current_open_notional),
+        position_size_multiplier=float(position_size_multiplier),
+        fundamentals_db=fundamentals_db,
+        sector_db=sector_db,
+        trend_overlay_ctx=trend_overlay_ctx,
+        existing_fill_order_ids=existing_fill_order_ids,
+        open_pos=open_pos,
+        open_codes=open_codes,
+        max_positions_override_allowed=bool(max_positions_override_allowed),
+        loop_state=loop_state,
+    )
+    fills_new = loop_result['fills_new']
+    trades_new = loop_result['trades_new']
+    new_count = int(loop_result['new_count'])
+    new_notional_krw = float(loop_result['new_notional_krw'])
+    surge_new_count = int(loop_result.get('surge_new_count', 0))
+    surge_notional_krw = float(loop_result.get('surge_notional_krw', 0.0))
+    split_notional_krw = float(loop_result.get('split_notional_krw', 0.0))
+    evaluated_count = int(loop_result['evaluated_count'])
+    no_next_day_count = int(loop_result['no_next_day_count'])
+    entry_ready_count = int(loop_result['entry_ready_count'])
+    cap_block_count = int(loop_result['cap_block_count'])
+    processed_skip_count = int(loop_result['processed_skip_count'])
+    max_new_skip_count = int(loop_result.get('max_new_skip_count', 0))
+    idempotent_skip_count = int(loop_result.get('idempotent_skip_count', 0))
+    stale_replay_used_count = int(loop_result['stale_replay_used_count'])
+    open_order_replay_used_count = int(loop_result['open_order_replay_used_count'])
+    max_positions_blocked = bool(loop_result.get('max_positions_blocked', False))
+    today_ymd = str(loop_result['today_ymd'])
+    pending_carry_rows = loop_result['pending_carry_rows']
+    state = _get_dict(loop_result, "portfolio_state", state)
+    t2_cash_checks: List[Dict[str, Any]] = cast(List[Dict[str, Any]], _get_list(loop_result, "t2_cash_checks"))
+    entry_decisions = loop_result.get("entry_decisions", [])
+    _lr_fc = bool(loop_result.get('fail_closed_triggered', False))
+    _lr_fc_reason = str(loop_result.get('fail_closed_reason', ''))
+    if _lr_fc:
+        print(
+            f"[FILL_SUMMARY_V2] ttl_expired={loop_result.get('ttl_expired_count',0)} "
+            f"retry_blocked={loop_result.get('retry_blocked_count',0)} "
+            f"exec_quality_blocked={loop_result.get('exec_quality_blocked_count',0)} "
+            f"quote_stale_blocked={loop_result.get('quote_stale_blocked_count',0)} "
+            f"close_cutoff_blocked={loop_result.get('close_cutoff_blocked_count',0)} "
+            f"partial_fill_expired={loop_result.get('partial_fill_expired_count',0)} "
+            f"fail_closed={_lr_fc} fail_closed_reason={_lr_fc_reason}"
+        )
+    else:
+        _any_v2 = any(loop_result.get(k, 0) > 0 for k in (
+            'ttl_expired_count','retry_blocked_count','exec_quality_blocked_count',
+            'quote_stale_blocked_count','close_cutoff_blocked_count','partial_fill_expired_count'))
+        if _any_v2:
+            print(
+                f"[FILL_SUMMARY_V2] ttl_expired={loop_result.get('ttl_expired_count',0)} "
+                f"retry_blocked={loop_result.get('retry_blocked_count',0)} "
+                f"exec_quality_blocked={loop_result.get('exec_quality_blocked_count',0)} "
+                f"quote_stale_blocked={loop_result.get('quote_stale_blocked_count',0)} "
+                f"close_cutoff_blocked={loop_result.get('close_cutoff_blocked_count',0)} "
+                f"partial_fill_expired={loop_result.get('partial_fill_expired_count',0)} "
+                f"fail_closed=no"
+            )
+    _paper_engine_phase_trace("entry_signal_snapshot_before", decisions=len(entry_decisions) if isinstance(entry_decisions, list) else -1)
+    _write_entry_signal_snapshot(
+        rows=(entry_decisions if isinstance(entry_decisions, list) else []),
+        d_ref_ymd=str(d_ref_ymd),
+        rank_col=str(rank_col or ""),
+    )
+    _paper_engine_phase_trace("entry_signal_snapshot_after")
+    _paper_engine_phase_trace("entry_decision_layers_before", candidates=len(cdf))
+    _write_entry_decision_layers_snapshot(
+        candidate_df=cdf,
+        entry_decision_rows=(entry_decisions if isinstance(entry_decisions, list) else []),
+        d_ref_ymd=str(d_ref_ymd),
+        rank_col=str(rank_col or ""),
+        risk_gate_runtime=(risk_gate_runtime if isinstance(risk_gate_runtime, dict) else {}),
+    )
+    _paper_engine_phase_trace("entry_decision_layers_after")
+    _paper_engine_phase_trace("normal_entry_fill_quality_before")
+    _write_normal_entry_fill_quality_report(
+        candidate_df=_full_candidate_df_for_report,
+        entry_decision_rows=(entry_decisions if isinstance(entry_decisions, list) else []),
+        d_ref_ymd=str(d_ref_ymd),
+        rank_col=str(rank_col or ""),
+    )
+    _paper_engine_phase_trace("normal_entry_fill_quality_after")
+    _paper_engine_phase_trace("surge_realtime_shadow_runtime_before")
+    _write_surge_realtime_shadow_runtime_snapshot(
+        entry_decision_rows=(entry_decisions if isinstance(entry_decisions, list) else []),
+        d_ref_ymd=str(d_ref_ymd),
+    )
+    _paper_engine_phase_trace("surge_realtime_shadow_runtime_after")
+    entry_fill_rows_runtime = len(
+        [
+            row
+            for row in fills_new
+            if len(row) >= 3 and str(row[2] if schema == "legacy" else row[4]).strip().upper() == "BUY"
+        ]
+    )
+
+    _paper_engine_phase_trace("ops_alert_carryover_before", entry_ready=entry_ready_count, fills=entry_fill_rows_runtime)
+    ops_summary = _build_ops_alert_and_carryover(
+        ops_enabled=bool(ops_enabled),
+        ops_policy=ops_policy,
+        pending_carry_rows=pending_carry_rows,
+        carry_max_age=int(carry_max_age),
+        px=px,
+        market_regime=str(market_regime or ""),
+        regime_info=regime_info,
+        config=cfg,
+        max_new=int(max_new),
+        max_new_zero_reason=str(max_new_zero_reason or ""),
+        candidate_count=int(len(cdf)),
+        price_universe_codes=int(price_universe_codes),
+        evaluated_count=int(evaluated_count),
+        entry_ready_count=int(entry_ready_count),
+        new_count=int(new_count),
+        filled_count=int(entry_fill_rows_runtime),
+        no_next_day_count=int(no_next_day_count),
+        cap_block_count=int(cap_block_count),
+        processed_skip_count=int(processed_skip_count),
+        max_new_skip_count=int(max_new_skip_count),
+        idempotent_skip_count=int(idempotent_skip_count),
+        stale_replay_used_count=int(stale_replay_used_count),
+        open_order_replay_used_count=int(open_order_replay_used_count),
+        entry_decisions=(entry_decisions if isinstance(entry_decisions, list) else []),
+        entry_candidate_df=cdf_for_ops_alert,
+        universe_shrink_candidates=bool(universe_shrink_candidates),
+        open_slot_count=int(open_slot_count),
+        max_positions=int(max_positions),
+        max_positions_meta=max_positions_meta,
+    )
+    _paper_engine_phase_trace("ops_alert_carryover_after")
+    expected_min_fills = int(ops_summary.get("expected_min_fills", 0))
+    ops_alert = dict(ops_summary.get("ops_alert") or {})
+
+    if ops_enabled and ((entry_ready_count > 0 and entry_fill_rows_runtime < expected_min_fills) or (len(cdf) > 0 and no_next_day_count >= len(cdf))):
+        no_fill_reasons = ops_alert.get("no_fill_reasons") or []
+        no_fill_reason_txt = ",".join(str(x) for x in no_fill_reasons) if no_fill_reasons else "-"
+        print(
+            f"[OPS_ALERT] participation weak: filled={entry_fill_rows_runtime} expected>={expected_min_fills} "
+            f"entry_ready={entry_ready_count} no_next_day={no_next_day_count}/{len(cdf)} "
+            f"reasons={no_fill_reason_txt}"
+        )
+    if replay_enabled:
+        print(
+            f"[REPLAY] processed_skip={processed_skip_count} stale_replay_used={stale_replay_used_count} "
+            f"new_fills={entry_fill_rows_runtime}"
+        )
+    _paper_engine_phase_trace("replay_queue_status_before", ops_enabled=bool(ops_enabled))
+    replay_queue_status = _write_replay_queue_status(carry_max_age, open_order_replay_used_count) if ops_enabled else {}
+    _paper_engine_phase_trace("replay_queue_status_after")
+    _paper_engine_phase_trace("replay_consistency_before")
+    replay_sync_result = _refresh_replay_consistency(
+        ops_enabled=bool(ops_enabled),
+        replay_queue_status=replay_queue_status,
+        replay_recovery_summary=replay_recovery_summary,
+        replay_queue_scan=replay_queue_scan,
+        replay_quarantine_status=replay_quarantine_status,
+        replay_prune_status=replay_prune_status,
+        replay_consistency_status=replay_consistency_status,
+        replay_consistency_remediation=replay_consistency_remediation,
+        carry_max_age=int(carry_max_age),
+        recovered_open_pos=recovered_open_pos,
+        open_order_replay_used_count=int(open_order_replay_used_count),
+        recovery_status_doc=recovery_status_doc,
+    )
+    _paper_engine_phase_trace("replay_consistency_after")
+    replay_summary_sync_status = replay_sync_result["replay_summary_sync_status"]
+    replay_consistency_status = replay_sync_result["replay_consistency_status"]
+    replay_consistency_remediation = replay_sync_result["replay_consistency_remediation"]
+    replay_recovery_summary = replay_sync_result["replay_recovery_summary"]
+    replay_queue_scan = replay_sync_result["replay_queue_scan"]
+    replay_quarantine_status = replay_sync_result["replay_quarantine_status"]
+    replay_prune_status = replay_sync_result["replay_prune_status"]
+    replay_queue_status = replay_sync_result["replay_queue_status"]
+    recovery_status_doc = replay_sync_result["recovery_status_doc"]
+    _paper_engine_phase_trace("open_positions_rebalance_before", open_positions=len(open_pos) if isinstance(open_pos, list) else -1)
+    position_result = _process_open_positions_and_rebalance(
+        config=cfg,
+        schema=str(schema),
+        prices_df=px,
+        open_pos=open_pos,
+        fundamentals_db=fundamentals_db,
+        sector_db=sector_db,
+        max_hold_days=int(max_hold_days),
+        sell_rules=sell_rules,
+        sell_rules_enabled=bool(sell_rules_enabled),
+        ddm_liquidation_targets=ddm_liquidation_targets,
+        ddm_liquidation_price_mode=str(ddm_liquidation_price_mode),
+        ddm_action=ddm_action,
+        fee_pct=float(fee_pct),
+        slip_pct=float(slip_pct),
+        sell_tax_pct=float(sell_tax_pct),
+        fills_new=fills_new,
+        trades_new=trades_new,
+        existing_fill_order_ids=existing_fill_order_ids,
+        existing_trade_sigs=existing_trade_sigs,
+        committed_source_order_ids=committed_source_order_ids,
+        next_seq_start=int(state.get("next_trade_seq", 1)),
+        stop_loss=float(stop_loss),
+        take_profit=take_profit,
+        trail_pct=trail_pct,
+        vix_proxy=vix_proxy,
+        fx_ctx=fx_ctx,
+        macro_snapshot=macro_snapshot,
+        p0_snapshot=p0_snapshot,
+        market_regime=str(market_regime or ""),
+        candidate_df=cdf,
+    )
+    _paper_engine_phase_trace("open_positions_rebalance_after")
+    still_open = position_result["still_open"]
+    next_seq = int(position_result["next_seq"])
+    _paper_engine_phase_trace("residual_overnight_shadow_before", still_open=len(still_open) if isinstance(still_open, list) else -1)
+    residual_guard_shadow = _write_intraday_residual_overnight_guard_shadow(
+        config=cfg,
+        schema=str(schema),
+        trades_new=trades_new,
+        still_open=still_open,
+        runtime_ymd=str(today_ymd),
+    )
+    _paper_engine_phase_trace("residual_overnight_shadow_after")
+    print(
+        "[INTRADAY_RESIDUAL_OVERNIGHT_GUARD_SHADOW] "
+        f"status={residual_guard_shadow.get('status')} "
+        f"candidates={residual_guard_shadow.get('candidates')} "
+        f"trading_effect={residual_guard_shadow.get('trading_effect')}"
+    )
+    _paper_engine_phase_trace("residual_overnight_exit_before")
+    residual_guard_exit = _apply_intraday_residual_overnight_guard_exits(
+        config=cfg,
+        schema=str(schema),
+        prices_df=px,
+        still_open=still_open,
+        shadow_payload=residual_guard_shadow,
+        runtime_ymd=str(today_ymd),
+        fee_pct=float(fee_pct),
+        slip_pct=float(slip_pct),
+        sell_tax_pct=float(sell_tax_pct),
+        fills_new=fills_new,
+        trades_new=trades_new,
+        existing_fill_order_ids=existing_fill_order_ids,
+        existing_trade_sigs=existing_trade_sigs,
+        next_seq_start=int(next_seq),
+    )
+    _paper_engine_phase_trace("residual_overnight_exit_after")
+    still_open = residual_guard_exit["still_open"]
+    next_seq = int(residual_guard_exit["next_seq"])
+    print(
+        "[INTRADAY_RESIDUAL_OVERNIGHT_GUARD_EXIT] "
+        f"status={residual_guard_exit.get('status')} "
+        f"active={residual_guard_exit.get('active')} "
+        f"applied={residual_guard_exit.get('applied_count')} "
+        f"skipped={residual_guard_exit.get('skipped_count')} "
+        f"trading_effect={residual_guard_exit.get('trading_effect')}"
+    )
+
+    if (not exit_only_mode) and max_positions_blocked and max_positions > 0 and len(still_open) < max_positions and len(cdf) > 0 and new_count < max_new:
+        slots_after_exit = max(0, int(max_positions) - int(len(still_open)))
+        print(
+            f"[ENTRY_RECHECK_AFTER_EXIT] triggered=1 slots_after_exit={slots_after_exit} "
+            f"open_after_exit={len(still_open)} max_positions={max_positions}"
+        )
+        current_open_notional = _compute_current_open_notional(still_open, px)
+        open_codes_after_exit = {str(pos.get("code", "")).zfill(6) for pos in still_open}
+        loop_state_recheck = {
+            "fills_new": fills_new,
+            "trades_new": trades_new,
+            "new_count": int(new_count),
+            "new_notional_krw": float(new_notional_krw),
+            "surge_new_count": int(surge_new_count),
+            "surge_notional_krw": float(surge_notional_krw),
+            "split_notional_krw": float(split_notional_krw),
+            "evaluated_count": int(evaluated_count),
+            "no_next_day_count": int(no_next_day_count),
+            "entry_ready_count": int(entry_ready_count),
+            "cap_block_count": int(cap_block_count),
+            "processed_skip_count": int(processed_skip_count),
+            "idempotent_skip_count": int(idempotent_skip_count),
+            "stale_replay_used_count": int(stale_replay_used_count),
+            "open_order_replay_used_count": int(open_order_replay_used_count),
+            "max_positions_blocked": False,
+            "today_ymd": str(today_ymd),
+            "pending_carry_rows": pending_carry_rows,
+            "entry_decision_code": str(entry_decision_code or ""),
+            "entry_decision_reason": str(entry_decision_reason or ""),
+            "p0_rolling_dd_abs": loop_state.get("p0_rolling_dd_abs", 0.0),
+            "p0_rolling_dd_source": loop_state.get("p0_rolling_dd_source", "p0.kill_switch.metrics.max_drawdown_pct"),
+            "_same_code_day_buy_counts": loop_state.get("_same_code_day_buy_counts", {}),
+            "portfolio_state": state,
+            "t2_cash_checks": t2_cash_checks,
+        }
+        recheck_result = _process_entry_rows(
+            cdf,
+            max_new=int(max_new),
+            max_new_surge=int(max_new_surge),
+            capital_total=float(capital_total),
+            max_positions=int(max_positions),
+            schema=str(schema),
+            config=cfg,
+            prices_df=px,
+            fee_pct=float(fee_pct),
+            slip_pct=float(slip_pct),
+            gap_up_max_pct_runtime=float(gap_up_max_pct_runtime),
+            entry_gap_down_stop_pct_runtime=float(entry_gap_down_stop_pct_runtime),
+            stop_loss=float(stop_loss),
+            take_profit=take_profit,
+            trail_pct=trail_pct,
+            same_close_entry_mode=bool(same_close_entry_mode),
+            intraday_realtime_mode=bool(intraday_realtime_mode),
+            processed_signals=processed_signals,
+            committed_signal_keys=committed_signal_keys,
+            replay_enabled=bool(replay_enabled),
+            replay_global_ok=bool(replay_global_ok),
+            replay_min_age_days=int(replay_min_age_days),
+            replay_order_id_include_entry_day=bool(replay_order_id_include_entry_day),
+            ops_enabled=bool(ops_enabled),
+            ops_policy=ops_policy,
+            carryover_market_gate_block=bool(carryover_market_gate_block),
+            carryover_revalidate_summary=carryover_revalidate_summary,
+            market_regime=str(market_regime or ''),
+            risk_off_enabled=bool(risk_off_enabled),
+            block_same_sector_entry=bool(block_same_sector_entry),
+            entry_sector_col=str(entry_sector_col or ''),
+            blocked_sector_value=str(blocked_sector_value or ''),
+            sector_concentration=float(sector_concentration),
+            gross_cap_krw=gross_cap_krw,
+            daily_new_cap_krw=daily_new_cap_krw,
+            current_open_notional=float(current_open_notional),
+            position_size_multiplier=float(position_size_multiplier),
+            fundamentals_db=fundamentals_db,
+            sector_db=sector_db,
+            trend_overlay_ctx=trend_overlay_ctx,
+            existing_fill_order_ids=existing_fill_order_ids,
+            open_pos=still_open,
+            open_codes=open_codes_after_exit,
+            max_positions_override_allowed=bool(max_positions_override_allowed),
+            loop_state=loop_state_recheck,
+        )
+        fills_new = recheck_result['fills_new']
+        trades_new = recheck_result['trades_new']
+        new_count = int(recheck_result['new_count'])
+        new_notional_krw = float(recheck_result['new_notional_krw'])
+        surge_new_count = int(recheck_result.get('surge_new_count', 0))
+        surge_notional_krw = float(recheck_result.get('surge_notional_krw', 0.0))
+        split_notional_krw = float(recheck_result.get('split_notional_krw', 0.0))
+        evaluated_count = int(recheck_result['evaluated_count'])
+        no_next_day_count = int(recheck_result['no_next_day_count'])
+        entry_ready_count = int(recheck_result['entry_ready_count'])
+        cap_block_count = int(recheck_result['cap_block_count'])
+        processed_skip_count = int(recheck_result['processed_skip_count'])
+        idempotent_skip_count = int(recheck_result.get('idempotent_skip_count', 0))
+        stale_replay_used_count = int(recheck_result['stale_replay_used_count'])
+        open_order_replay_used_count = int(recheck_result['open_order_replay_used_count'])
+        pending_carry_rows = recheck_result['pending_carry_rows']
+        state = _get_dict(recheck_result, "portfolio_state", state)
+        t2_cash_checks = cast(List[Dict[str, Any]], _get_list(recheck_result, "t2_cash_checks", t2_cash_checks))
+        print(
+            f"[ENTRY_RECHECK_AFTER_EXIT] result new_count={new_count} "
+            f"entry_ready={entry_ready_count} open_positions={len(still_open)}"
+        )
+
+    fills_backup_path = ""
+    trades_backup_path = ""
+    try:
+        if fills_new:
+            fills_header = LEGACY_FILLS_HEADER if schema == "legacy" else V411_FILLS_HEADER
+            existing_fills_for_idem = read_csv_safe(FILLS)
+            existing_fill_rows_for_idem = (
+                existing_fills_for_idem.to_dict("records")
+                if isinstance(existing_fills_for_idem, pd.DataFrame)
+                else []
+            )
+            fills_new, fill_idem_report = filter_new_fill_rows(
+                header=fills_header,
+                existing_rows=existing_fill_rows_for_idem,
+                new_rows=fills_new,
+                source="paper_engine",
+            )
+            print(
+                "[FILL_IDEMPOTENCY] "
+                f"accepted={fill_idem_report.get('accepted_rows')} "
+                f"duplicates={fill_idem_report.get('duplicate_rows')} "
+                f"processed={fill_idem_report.get('processed_count')} "
+                f"state={fill_idem_report.get('state_path')}"
+            )
+            fills_backup_path = _append_rows_atomic(FILLS, fills_new, fills_header)
+            live_bridge_sync = _sync_new_fills_to_live_bridge(fills_new, schema, prices_df=px)
+            print(
+                f"[LIVE_BRIDGE] status={live_bridge_sync.get('status')} "
+                f"added={live_bridge_sync.get('added_rows')} total={live_bridge_sync.get('total_rows')}"
+            )
+        if trades_new:
+            trades_header = LEGACY_TRADES_HEADER if schema == "legacy" else V411_TRADES_HEADER
+            trades_backup_path = _append_rows_atomic(TRADES, trades_new, trades_header)
+        if schema == "v41.1":
+            _write_dashboard_compat_csv(schema)
+            print(f"[DASHBOARD_COMPAT] legacy copies updated: {FILLS.parent / 'fills_dashboard_compat.csv'}, "
+                  f"{TRADES.parent / 'trades_dashboard_compat.csv'}")
+    except Exception as write_err:
+        if isinstance(write_err, IdempotencyConflict):
+            print(f"[WRITE_TXN] fill idempotency conflict -> fail closed: {write_err}")
+            return 2
+        print(f"[WRITE_TXN] append failed -> rollback start: {type(write_err).__name__}: {write_err}")
+        try:
+            _restore_backup_file(FILLS, fills_backup_path)
+        except Exception as rollback_err:
+            print(f"[WRITE_TXN] rollback fills failed: {type(rollback_err).__name__}: {rollback_err}")
+        try:
+            _restore_backup_file(TRADES, trades_backup_path)
+        except Exception as rollback_err:
+            print(f"[WRITE_TXN] rollback trades failed: {type(rollback_err).__name__}: {rollback_err}")
+        try:
+            post_rollback_fills = read_csv_safe(FILLS)
+            post_rollback_rows = (
+                post_rollback_fills.to_dict("records")
+                if isinstance(post_rollback_fills, pd.DataFrame)
+                else []
+            )
+            rebuild_report = rebuild_state_from_existing_rows(
+                existing_rows=post_rollback_rows,
+                source="paper_engine_write_rollback",
+            )
+            print(
+                "[FILL_IDEMPOTENCY_REBUILD] "
+                f"processed={rebuild_report.get('processed_count')} "
+                f"state={rebuild_report.get('state_path')}"
+            )
+        except Exception as rebuild_err:
+            print(f"[WRITE_TXN] idempotency state rebuild failed: {type(rebuild_err).__name__}: {rebuild_err}")
+        return 2
+    if schema == "legacy":
+        # Final fail-safe: keep state open_positions aligned with persisted fills net.
+        df_fills_after = read_csv_safe(FILLS)
+        still_open, reconcile_open_summary = _reconcile_open_positions_with_fills(
+            open_positions=still_open,
+            fills_df=df_fills_after if isinstance(df_fills_after, pd.DataFrame) else pd.DataFrame(),
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+            trail_pct=trail_pct,
+        )
+        if reconcile_open_summary.get("added_codes") or reconcile_open_summary.get("removed_codes") or reconcile_open_summary.get("qty_adjusted_codes"):
+            print(
+                "[RECOVER] post-write open_positions reconciled "
+                f"after={reconcile_open_summary.get('state_open_after', 0)} "
+                f"fills_open_codes={reconcile_open_summary.get('fills_open_codes', 0)}"
+            )
+
+    entry_fill_rows_final = len(
+        [
+            row
+            for row in fills_new
+            if len(row) >= 3 and str(row[2] if schema == "legacy" else row[4]).strip().upper() == "BUY"
+        ]
+    )
+    ops_alert["filled"] = int(entry_fill_rows_final)
+    ops_alert["slo_pass"] = bool(int(entry_fill_rows_final) >= int(ops_alert.get("expected_min_fills", 0) or 0))
+    log_pipeline_event(
+        stage="paper_engine_main",
+        batch_label="[7/9]",
+        event="END",
+        date=_audit_ymd,
+        output_files={
+            "fills": {"path": str(FILLS), "new_rows": int(len(fills_new)), "total_rows": count_rows(FILLS)},
+            "trades": {"path": str(TRADES), "new_rows": int(len(trades_new)), "total_rows": count_rows(TRADES)},
+        },
+        metrics={
+            "fills_new": int(len(fills_new)),
+            "trades_new": int(len(trades_new)),
+            "ops_alert_filled": int(ops_alert.get("filled", 0) or 0),
+            "schema": schema,
+        },
+        status="PASS",
+    )
+
+    for row in fills_new:
+        try:
+            if schema == "legacy":
+                if len(row) < 6 or str(row[2]).strip().upper() != "SELL":
+                    continue
+                _trade_date, _code, _qty, _price, _order_id = _extract_ymd_from_ts_text(row[0]), row[1], row[3], row[4], row[5]
+                _amount = float(_to_float(_qty, 0.0) or 0.0) * float(_to_float(_price, 0.0) or 0.0)
+            else:
+                if len(row) < 10 or str(row[4]).strip().upper() != "SELL":
+                    continue
+                _trade_date, _code, _qty, _price, _fee, _slp, _order_id = row[1], row[2], row[5], row[6], row[7], row[8], row[9]
+                _amount = (
+                    float(_to_float(_qty, 0.0) or 0.0) * float(_to_float(_price, 0.0) or 0.0)
+                    - float(_to_float(_fee, 0.0) or 0.0)
+                    - float(_to_float(_slp, 0.0) or 0.0)
+                )
+            _t2_record_sell_pending(
+                state,
+                cfg,
+                code=str(_code),
+                trade_date=str(_trade_date),
+                order_id=str(_order_id),
+                amount=float(max(0.0, _amount)),
+            )
+        except Exception:
+            continue
+    _write_t2_settlement_status(state, cfg, now_ymd(), t2_cash_checks)
+
+    # gross_cap 재계산: 부분/전체 청산 반영 후 현재가(마지막 종가) 기준으로 다시 계산
+    current_open_notional = _recalculate_open_notional_and_alert(
+        still_open=still_open,
+        prices_df=px,
+        current_open_notional=float(current_open_notional),
+        gross_cap_krw=gross_cap_krw,
+        ops_alert=ops_alert,
+        ops_enabled=bool(ops_enabled),
+    )
+
+    _persist_state_and_runtime_status(
+        state=state,
+        still_open=still_open,
+        next_seq=int(next_seq),
+        processed_signals=processed_signals,
+        carry_max_age=int(carry_max_age),
+        ops_enabled=bool(ops_enabled),
+        schema=str(schema),
+        fills_new=fills_new,
+        trades_new=trades_new,
+        initial_open_count=int(len(open_pos)),
+        replay_recovery_summary=replay_recovery_summary,
+        replay_due_today_count=int(replay_due_today_count),
+        recovery_summary=recovery_summary,
+        replay_queue_status=replay_queue_status,
+        replay_consistency_status=replay_consistency_status,
+        ddm_enabled=bool(ddm_enabled),
+        ddm_action=ddm_action,
+        ddm_force_liquidate_pct=float(ddm_force_liquidate_pct),
+        ddm_liquidation_targets=ddm_liquidation_targets,
+        open_pos=open_pos,
+        stop_loss=float(stop_loss),
+        take_profit=take_profit,
+        trail_pct=trail_pct,
+        recovery_status_doc=recovery_status_doc,
+        market_regime=str(market_regime or ""),
+        max_new=int(max_new),
+        max_new_surge=int(max_new_surge),
+        max_new_zero_reason=str(max_new_zero_reason or ""),
+        candidate_df=cdf,
+        entry_decisions=(entry_decisions if isinstance(entry_decisions, list) else []),
+        surge_inject_status=surge_inject_status,
+        entry_ready_count=int(entry_ready_count),
+        no_next_day_count=int(no_next_day_count),
+        open_order_replay_used_count=int(open_order_replay_used_count),
+        replay_regen_result=replay_regen_result,
+        replay_queue_scan=replay_queue_scan,
+        replay_quarantine_status=replay_quarantine_status,
+        replay_prune_status=replay_prune_status,
+        replay_consistency_remediation=replay_consistency_remediation,
+        replay_summary_sync_status=replay_summary_sync_status,
+        carryover_revalidate_summary=carryover_revalidate_summary,
+        runtime_ymd=str(today_ymd),
+        ops_alert=ops_alert,
+        capital_total=float(capital_total),
+        current_open_notional=float(current_open_notional),
+        gross_cap_krw=gross_cap_krw,
+        daily_new_cap_krw=daily_new_cap_krw,
+        max_positions_meta=max_positions_meta,
+    )
+
+    maybe_run_pnl_report()
+
+    print("============================================================")
+    print(f"[PAPER_ENGINE] ts={now_ts()} schema={schema}")
+    print(f"[PAPER_ENGINE] new_fills={len(fills_new)} new_trades={len(trades_new)} open_positions={len(still_open)}")
+    print(f"[PAPER_ENGINE] stop_loss={stop_loss} take_profit={take_profit} trail_pct={trail_pct}")
+    print("[PAPER_ENGINE] dashboard state refreshes via E:/vibe/buffett/tools/vibe_dashboard_state_hourly.ps1 (max 1h delay)")
+    print("[PAPER_ENGINE] for immediate refresh run: python E:/vibe/buffett/tools/build_dashboard_state_v2.py")
+    print("============================================================")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

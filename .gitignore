@@ -31,6 +31,7 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+build
 .venv/
 venv/
 
@@ -44,9 +45,12 @@ _cache/
 _krx_seed_full/
 _krx_manual/
 paper/
-paper_engine/
 runs/
 0/
+
+# paper_engine/ is a source package. Keep package files trackable, but ignore
+# local backups created during the split/refactor work.
+paper_engine/*.bak*
 
 # === Logs ===
 2_Logs/
@@ -58,6 +62,8 @@ _diag/
 .DS_Store
 Thumbs.db
 desktop.ini
+_tmp/
+artifacts/
 
 # === Environment ===
 .env
@@ -93,6 +99,16 @@ _dev/
 _notes/
 risk_off/
 news_trading/
+tasks/
+tests/
+checkfile/outputs/
+
+# === Local backups / captures / browser temp ===
+backup_*
+*.png
+_chrome_cdp_*/
+_edge_headless_verify/
+edge-profile-*/
 
 # === Broken/junk filenames (script artifacts) ===
 %BAKCFG%
@@ -133,14 +149,13 @@ Params
 params.*
 tuple\[str
 _safe_int*
-paper_engine
 risk_off
 d].head*
 pq.ParquetFile*
 (report*
 '')*
 '')
-?? ?�더/
+?? ?�더/
 _krx_clean/
 
 # === Parquet (uncomment if too large) ===
@@ -150,3 +165,9 @@ _krx_clean/
 docker_export/
 docker_export_*.zip
 *.tar
+# === Generated docs / root temp work ===
+docs/PARAM_CANDIDATES_V41_1_*.md
+docs/03-operations/*_latest.md
+docs/03-operations/integrity_gate_20*.md
+docs/03-operations/integrity_overlay_20*.md
+*_work.py

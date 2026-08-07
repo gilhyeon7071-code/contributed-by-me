@@ -46,20 +46,42 @@ logging.basicConfig(
 )
 logger = logging.getLogger("generate_candidates")
 
+# [NEW] Add FileHandler for strategy dashboard real-time tailing
+try:
+    from pathlib import Path
+    _strategy_log_path = Path('E:/vibe/buffett/logs/strategy_decision.log')
+    _strategy_log_path.parent.mkdir(parents=True, exist_ok=True)
+    _fh = logging.FileHandler(_strategy_log_path, encoding='utf-8')
+    _fh.setLevel(logging.INFO)
+    _fh.setFormatter(logging.Formatter('[%(asctime)s] [%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
+    logger.addHandler(_fh)
+except Exception as e:
+    logger.warning("Failed to setup strategy_decision.log handler: %s", e)
+
+# ROOT?뺤쓽 ?붿냼??utils import 媛???⑸룄濡?sys.path 異붽?
+ROOT = Path(os.environ.get("STOC_BASE_DIR", r"E:\1_Data"))
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 # 怨듯넻 ?좏떥由ы떚 紐⑤뱢 import
-from utils.common import read_json, write_json, find_parquets
+from utils.common import read_json, write_json
+from utils.stable_params_gate import evaluate_stable_params, load_stable_quality_gate
+from utils.price_history_contract import apply_price_history_contract
+from utils.gate_audit import log_gate_event
+from utils.pipeline_audit import log_pipeline_event, count_rows
 
 BASE_DIR = Path(os.environ.get("STOC_BASE_DIR", r"E:\1_Data"))
 LOG_DIR = BASE_DIR / "2_Logs"
 CACHE_DIR = BASE_DIR / "_cache"
 RISK_DIR = BASE_DIR / "12_Risk_Controlled"
+PAPER_ENGINE_CONFIG = BASE_DIR / "paper" / "paper_engine_config.json"
 
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 RISK_DIR.mkdir(parents=True, exist_ok=True)
 
 DEFAULT_PARAMS = {
-    "rs_lim": 1.70,
+    "rs_lim": 0.05,
     "v_accel_lim": 2.50,
     "stretch_max": 1.19,
     "value_min": 1_000_000_000.0,
@@ -74,7 +96,7 @@ DEFAULT_PARAMS = {
     "w_v_accel": 0.25,
     "w_tech_score": 0.75,
     "w_fundamental_score": 0.25,
-    "company_analyzer_enable": 1.0,
+    "company_analyzer_enable": 0.0,  # 2026-07-24: disabled -- 98% rank-redundant with local fundamental blend (spearman=0.982), momentum/forward_value sub-factors non-functional, never tuned by optimizer
     "company_analyzer_blend": 0.70,
     "exclude_administrative": 1.0,
     "exclude_investment_warning": 1.0,
@@ -127,7 +149,7 @@ def _load_listing_map() -> pd.DataFrame:
     p = CACHE_DIR / "krx_listing.csv"
     if not p.exists():
         return pd.DataFrame(columns=["code", "name"])
-    df = pd.read_csv(p, dtype={"code": str})
+    df = pd.read_csv(p, dtype={"code": str}, encoding="utf-8-sig")
     if "code" not in df.columns or "name" not in df.columns:
         return pd.DataFrame(columns=["code", "name"])
     df["code"] = df["code"].astype(str).str.zfill(6)
@@ -136,8 +158,31 @@ def _load_listing_map() -> pd.DataFrame:
 
 # _find_parquets -> utils.common.find_parquets濡??대룞??
 
-def _load_data() -> pd.DataFrame:
-    files = find_parquets(BASE_DIR, "krx_daily_*_clean.parquet")  # ??utils.common ?ъ슜
+def _bounded_krx_glob(pattern: str) -> list[Path]:
+    """Return only canonical, non-recursive KRX parquet sources."""
+    out: list[Path] = []
+    seen: set[str] = set()
+    for directory in (BASE_DIR / "_krx_manual", BASE_DIR / "krx_daily_archive", BASE_DIR):
+        if not directory.exists() or not directory.is_dir():
+            continue
+        for path in directory.glob(pattern):
+            key = str(path.resolve())
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(path)
+    return sorted(out)
+
+
+def _find_krx_parquets() -> list[Path]:
+    files = _bounded_krx_glob("krx_daily_*_clean.parquet")
+    if files:
+        return files
+    return _bounded_krx_glob("krx_daily_*.parquet")
+
+
+def _load_data(*, max_gap_sessions: int = 0) -> pd.DataFrame:
+    files = _find_krx_parquets()
     if not files:
         print("[ERR] parquet files not found (krx_daily_*_clean.parquet).")
         return pd.DataFrame()
@@ -153,6 +198,11 @@ def _load_data() -> pd.DataFrame:
             skipped.append((str(f), f"read_error:{e.__class__.__name__}"))
             continue
 
+        mandatory_cols = ["date", "code", "open", "high", "low", "close", "volume", "value"]
+        missing_mandatory = [c for c in mandatory_cols if c not in df.columns]
+        if missing_mandatory:
+            raise ValueError(f"parquet missing mandatory cols={missing_mandatory} file={f}")
+
         if "date" not in df.columns:
             skipped.append((str(f), "missing_date"))
             continue
@@ -165,6 +215,11 @@ def _load_data() -> pd.DataFrame:
             continue
 
         df = df.loc[pd.Series(df["date"]).notna()].copy()
+        df["_src_priority"] = 2 if f.parent == BASE_DIR / "_krx_manual" else (1 if f.parent == BASE_DIR / "krx_daily_archive" else 0)
+        try:
+            df["_src_mtime"] = f.stat().st_mtime
+        except OSError:
+            df["_src_mtime"] = 0.0
         parts.append(df)
 
     if skipped:
@@ -180,16 +235,29 @@ def _load_data() -> pd.DataFrame:
 
     df = pd.concat(parts, ignore_index=True)
 
-    # --- value dtype/overflow guard (auto) ---
-    if 'value' in df.columns and 'close' in df.columns and 'volume' in df.columns:
-        v = pd.to_numeric(df['value'], errors='coerce').astype('float64')
-        mask = v.isna() | (v < 0)
-        if int(mask.sum()) > 0:
-            c = pd.to_numeric(df.loc[mask,'close'], errors='coerce').astype('float64')
-            vol = pd.to_numeric(df.loc[mask,'volume'], errors='coerce').astype('float64')
-            v.loc[mask] = c * vol
-        df['value'] = v
+    if "code" not in df.columns:
+        print("[ERR] parquet data missing code column.")
+        return pd.DataFrame()
 
+    rows_loaded = int(len(df))
+    df["code"] = df["code"].astype(str).str.zfill(6)
+    for column in ["open", "high", "low", "close", "volume", "value"]:
+        df[column] = pd.to_numeric(df[column], errors="coerce")
+        df.loc[df[column] == 0, column] = np.nan
+
+    df = df.dropna(subset=["close", "open", "high", "low", "value"])
+    rows_before_dedupe = int(len(df))
+    df = (
+        df.sort_values(["_src_priority", "_src_mtime"])
+        .drop_duplicates(subset=["code", "date"], keep="last")
+        .drop(columns=["_src_priority", "_src_mtime"])
+    )
+    print(
+        f"[LOAD_DEDUPE] rows_loaded={rows_loaded} required_rows={rows_before_dedupe} "
+        f"rows_after={len(df)} removed={rows_before_dedupe - len(df)}"
+    )
+    df, integrity = apply_price_history_contract(df, max_gap_sessions=max_gap_sessions)
+    print(f"[PRICE_HISTORY_INTEGRITY] {integrity['log_line']}")
     return df
 
 
@@ -204,7 +272,7 @@ def _normalize_params(p: dict) -> dict:
         except Exception:
             return float(default)
 
-    x["rs_lim"] = min(max(fnum(x["rs_lim"], DEFAULT_PARAMS["rs_lim"]), 1.10), 5.00)
+    x["rs_lim"] = min(max(fnum(x["rs_lim"], DEFAULT_PARAMS["rs_lim"]), -0.10), 1.00)
     x["v_accel_lim"] = min(max(fnum(x["v_accel_lim"], DEFAULT_PARAMS["v_accel_lim"]), 1.20), 20.0)
     x["stretch_max"] = min(max(fnum(x["stretch_max"], DEFAULT_PARAMS["stretch_max"]), 1.05), 1.30)
     x["value_min"] = min(max(fnum(x["value_min"], DEFAULT_PARAMS["value_min"]), 1_000_000_000.0), 500_000_000_000.0)
@@ -212,7 +280,7 @@ def _normalize_params(p: dict) -> dict:
     x["rsi_max"] = min(max(fnum(x["rsi_max"], DEFAULT_PARAMS["rsi_max"]), 50.0), 90.0)
     x["require_macd_golden"] = 1.0 if fnum(x["require_macd_golden"], DEFAULT_PARAMS["require_macd_golden"]) >= 0.5 else 0.0
     x["vol_close_corr_min"] = min(max(fnum(x["vol_close_corr_min"], DEFAULT_PARAMS["vol_close_corr_min"]), -1.0), 1.0)
-    x["near_52w_high_gap_max"] = min(max(fnum(x["near_52w_high_gap_max"], DEFAULT_PARAMS["near_52w_high_gap_max"]), 0.0), 0.30)
+    x["near_52w_high_gap_max"] = min(max(fnum(x["near_52w_high_gap_max"], DEFAULT_PARAMS["near_52w_high_gap_max"]), 0.0), 0.50)
     x["min_listing_days"] = min(max(fnum(x["min_listing_days"], DEFAULT_PARAMS["min_listing_days"]), 0.0), 1000.0)
 
     # technical score weights normalize
@@ -290,54 +358,81 @@ def _compute_factors(df: pd.DataFrame):
     df = df.dropna(subset=["date", "code", "close"]).copy()
     df = df.sort_values(["code", "date"])
 
-    # market proxy (吏??????됯퇏 醫낃?)
-    idx = df.groupby("date", as_index=True)["close"].mean().sort_index()
-    idx_ma60 = idx.rolling(60).mean()
-    idx_bull = idx > idx_ma60
+    # Market proxy: use each row's KOSPI/KOSDAQ peer group when available,
+    # with the old all-market average as a compatibility fallback.
+    df["market"] = df["market"].fillna("").astype(str).str.upper().str.strip()
+    overall_idx = df.groupby("date", as_index=True)["close"].mean().sort_index()
+    overall_ret_20 = overall_idx.pct_change(20)
+    overall_bull = overall_idx > overall_idx.rolling(60).mean()
 
-    # m_ret_20 map
-    m_ret_20 = idx.pct_change(20)
-    df["m_ret_20"] = df["date"].map(m_ret_20)
+    market_idx = (
+        df[df["market"].ne("")]
+        .groupby(["market", "date"], as_index=False)["close"]
+        .mean()
+        .sort_values(["market", "date"])
+    )
+    if not market_idx.empty:
+        market_idx["m_ret_20"] = market_idx.groupby("market")["close"].pct_change(20)
+        market_idx["market_ma60"] = market_idx.groupby("market")["close"].transform(lambda x: x.rolling(60).mean())
+        market_idx["market_is_bull"] = market_idx["close"] > market_idx["market_ma60"]
+        df = df.merge(
+            market_idx[["market", "date", "m_ret_20", "market_is_bull"]],
+            on=["market", "date"],
+            how="left",
+            sort=False,
+        )
+    else:
+        df["m_ret_20"] = np.nan
+        df["market_is_bull"] = pd.NA
+
+    df["m_ret_20"] = df["m_ret_20"].fillna(df["date"].map(overall_ret_20))
+    df["market_is_bull"] = df["market_is_bull"].where(df["market_is_bull"].notna(), df["date"].map(overall_bull))
+    df["market_regime"] = np.where(df["market_is_bull"].fillna(True).astype(bool), "BULL", "BEAR")
 
     # RS / slope
-    df["ret_20"] = df.groupby("code")["close"].pct_change(20)
-    df["rs"] = df["ret_20"] / (df["m_ret_20"] + 1e-9)
-    df["rs_slope"] = df.groupby("code")["rs"].diff(5)
+    df["ret_20"] = df.groupby("price_history_key", sort=False)["close"].pct_change(20)
+    df["rs"] = df["ret_20"] - df["m_ret_20"]
+    df["rs_slope"] = df.groupby("price_history_key", sort=False)["rs"].diff(5)
 
     # MA5 stretch
-    df["ma5"] = df.groupby("code")["close"].transform(lambda x: x.rolling(5).mean())
+    df["ma5"] = df.groupby("price_history_key", sort=False)["close"].transform(lambda x: x.rolling(5).mean())
     df["stretch"] = df["close"] / (df["ma5"] + 1e-9)
 
+    df["ma60"] = df.groupby("price_history_key", sort=False)["close"].transform(lambda x: x.rolling(60).mean())
+    df["ma60_support_bounce"] = ((df["low"] <= df["ma60"]) & (df["close"] > df["ma60"])).fillna(False).astype(int)
+
+
+
     # value accel
-    df["v_ma5"] = df.groupby("code")["value"].transform(lambda x: x.rolling(5).mean())
-    df["v_accel"] = df["value"] / (df.groupby("code")["v_ma5"].shift(1) + 1e-9)
+    df["v_ma5"] = df.groupby("price_history_key", sort=False)["value"].transform(lambda x: x.rolling(5).mean())
+    df["v_accel"] = df["value"] / (df.groupby("price_history_key", sort=False)["v_ma5"].shift(1) + 1e-9)
 
     # RSI(14): overbought guard
-    delta = df.groupby("code")["close"].diff()
+    delta = df.groupby("price_history_key", sort=False)["close"].diff()
     up = delta.clip(lower=0.0)
     down = (-delta).clip(lower=0.0)
-    avg_up = up.groupby(df["code"]).transform(lambda x: x.ewm(alpha=1/14, adjust=False, min_periods=14).mean())
-    avg_down = down.groupby(df["code"]).transform(lambda x: x.ewm(alpha=1/14, adjust=False, min_periods=14).mean())
+    avg_up = up.groupby(df["price_history_key"]).transform(lambda x: x.ewm(alpha=1/14, adjust=False, min_periods=14).mean())
+    avg_down = down.groupby(df["price_history_key"]).transform(lambda x: x.ewm(alpha=1/14, adjust=False, min_periods=14).mean())
     rs = avg_up / (avg_down + 1e-9)
     df["rsi14"] = 100.0 - (100.0 / (1.0 + rs))
 
     # MACD(12,26,9): optional trend turn confirmation
-    ema12 = df.groupby("code")["close"].transform(lambda x: x.ewm(span=12, adjust=False).mean())
-    ema26 = df.groupby("code")["close"].transform(lambda x: x.ewm(span=26, adjust=False).mean())
+    ema12 = df.groupby("price_history_key", sort=False)["close"].transform(lambda x: x.ewm(span=12, adjust=False).mean())
+    ema26 = df.groupby("price_history_key", sort=False)["close"].transform(lambda x: x.ewm(span=26, adjust=False).mean())
     df["macd_line"] = ema12 - ema26
-    df["macd_signal"] = df.groupby("code")["macd_line"].transform(lambda x: x.ewm(span=9, adjust=False).mean())
-    prev_macd = df.groupby("code")["macd_line"].shift(1)
-    prev_sig = df.groupby("code")["macd_signal"].shift(1)
+    df["macd_signal"] = df.groupby("price_history_key", sort=False)["macd_line"].transform(lambda x: x.ewm(span=9, adjust=False).mean())
+    prev_macd = df.groupby("price_history_key", sort=False)["macd_line"].shift(1)
+    prev_sig = df.groupby("price_history_key", sort=False)["macd_signal"].shift(1)
     df["macd_golden"] = (df["macd_line"] > df["macd_signal"]) & (prev_macd <= prev_sig)
 
     # Rolling correlation(close, volume): confirm price move with volume participation
     df["vol_close_corr20"] = (
-        df.groupby("code")["close"]
+        df.groupby("price_history_key", sort=False)["close"]
           .transform(lambda x: x.rolling(20, min_periods=20).corr(df.loc[x.index, "volume"]))
     )
 
     # 52-week high proximity (252 trading days)
-    df["high_52w"] = df.groupby("code")["close"].transform(lambda x: x.rolling(252, min_periods=20).max())
+    df["high_52w"] = df.groupby("price_history_key", sort=False)["close"].transform(lambda x: x.rolling(252, min_periods=20).max())
     df["high_52w_gap"] = ((df["high_52w"] - df["close"]) / (df["high_52w"] + 1e-9)).clip(lower=0.0)
 
     # Listing age guard: exclude short-history names
@@ -345,7 +440,7 @@ def _compute_factors(df: pd.DataFrame):
     df["listing_days"] = (df["date"] - first_date).dt.days
 
     # ATR14 pct
-    prev_close = df.groupby("code")["close"].shift(1)
+    prev_close = df.groupby("price_history_key", sort=False)["close"].shift(1)
     tr = pd.concat([
         (df["high"] - df["low"]).abs(),
         (df["high"] - prev_close).abs(),
@@ -353,9 +448,9 @@ def _compute_factors(df: pd.DataFrame):
     ], axis=1).max(axis=1)
 
     df["tr"] = tr
-    df["atr14"] = df.groupby("code")["tr"].transform(lambda x: x.rolling(14, min_periods=14).mean())
+    df["atr14"] = df.groupby("price_history_key", sort=False)["tr"].transform(lambda x: x.rolling(14, min_periods=14).mean())
     df["atr14_pct"] = df["atr14"] / (df["close"] + 1e-9)
-    df["ret1_pct"] = df.groupby("code")["close"].pct_change(1) * 100.0
+    df["ret1_pct"] = df.groupby("price_history_key", sort=False)["close"].pct_change(1) * 100.0
 
     # latest date + bull flag
     # --- AS_OF selection: prefer latest date with sufficient universe size ---
@@ -390,7 +485,12 @@ def _compute_factors(df: pd.DataFrame):
             'codes_today_selected': int(g.get(latest_selected8, 0)),
         }
         df.attrs['as_of_select'] = as_of_select
-    val = idx_bull.loc[latest_dt] if latest_dt in idx_bull.index else pd.NA
+    latest_market_bull = market_idx[market_idx["date"].eq(latest_dt)] if not market_idx.empty else pd.DataFrame()
+    kospi_latest = latest_market_bull[latest_market_bull["market"].eq("KOSPI")] if not latest_market_bull.empty else pd.DataFrame()
+    if not kospi_latest.empty:
+        val = kospi_latest["market_is_bull"].iloc[-1]
+    else:
+        val = overall_bull.loc[latest_dt] if latest_dt in overall_bull.index else pd.NA
     if pd.isna(val):
         is_bull = True
     else:
@@ -415,7 +515,7 @@ def _diag_counts(today: pd.DataFrame, p: dict, n_all: int) -> dict:
     }
 
 def _select_candidates(today: pd.DataFrame, p: dict) -> pd.DataFrame:
-    require_macd = float(p.get("require_macd_golden", 0.0) or 0.0) >= 0.5
+    require_macd = float((p.get("require_macd_golden") if p.get("require_macd_golden") is not None else 0.0)) >= 0.5
     cond = (
         (today["rs"] > float(p["rs_lim"]))
         & (today["v_accel"] > float(p["v_accel_lim"]))
@@ -820,9 +920,9 @@ def _apply_krx_watch_hard_filter(candidates: pd.DataFrame, p: dict) -> tuple[pd.
     if out.empty:
         return out, {"removed_admin": 0, "removed_warning": 0, "removed_risk": 0, "before": 0, "after": 0}
 
-    ex_admin = float(p.get("exclude_administrative", 1.0) or 1.0) >= 0.5
-    ex_warn = float(p.get("exclude_investment_warning", 1.0) or 1.0) >= 0.5
-    ex_risk = float(p.get("exclude_investment_risk", 1.0) or 1.0) >= 0.5
+    ex_admin = float((p.get("exclude_administrative") if p.get("exclude_administrative") is not None else 1.0)) >= 0.5
+    ex_warn = float((p.get("exclude_investment_warning") if p.get("exclude_investment_warning") is not None else 1.0)) >= 0.5
+    ex_risk = float((p.get("exclude_investment_risk") if p.get("exclude_investment_risk") is not None else 1.0)) >= 0.5
 
     for c in ["krx_admin", "krx_warning", "krx_risk"]:
         if c not in out.columns:
@@ -863,7 +963,7 @@ def _apply_krx_watch_soft_penalty(candidates: pd.DataFrame, p: dict) -> tuple[pd
     if "krx_caution" not in out.columns:
         out["krx_caution"] = False
 
-    pen = float(p.get("watch_penalty_caution", 0.10) or 0.10)
+    pen = float((p.get("watch_penalty_caution") if p.get("watch_penalty_caution") is not None else 0.10))
     pen = min(max(pen, 0.0), 0.9)
     m = out["krx_caution"].fillna(False).astype(bool)
     if int(m.sum()) > 0 and pen > 0:
@@ -906,6 +1006,9 @@ def _apply_junk_risk_overlay(candidates: pd.DataFrame, p: dict) -> tuple[pd.Data
     out = candidates.copy()
     info = {
         "enabled": False,
+        "mode": "disabled",
+        "fallback_applied": False,
+        "fallback_reason": "",
         "hard_exclude": False,
         "hard_threshold": None,
         "penalty_max": 0.0,
@@ -915,13 +1018,26 @@ def _apply_junk_risk_overlay(candidates: pd.DataFrame, p: dict) -> tuple[pd.Data
         "penalized_rows": 0,
         "high_risk_rows": 0,
         "extreme_risk_rows": 0,
+        "korean_special_rows": 0,
         "mean_score": 0.0,
     }
 
-    if out.empty or ("final_score" not in out.columns):
-        return out, info
+    def _apply_junk_fallback(reason: str, mode: str) -> tuple[pd.DataFrame, dict]:
+        fb = out.copy()
+        fb["junk_risk_score"] = 0.0
+        fb["junk_risk_grade"] = "FALLBACK"
+        fb["junk_flags"] = ""
+        fb["junk_penalty"] = 0.0
+        info["mode"] = mode
+        info["fallback_applied"] = True
+        info["fallback_reason"] = reason
+        info["after"] = int(len(fb))
+        return fb, info
 
-    enabled = float(p.get("junk_risk_enable", 1.0) or 1.0) >= 0.5
+    if out.empty or ("final_score" not in out.columns):
+        return _apply_junk_fallback("missing_final_score", "fallback_missing_final_score")
+
+    enabled = float((p.get("junk_risk_enable") if p.get("junk_risk_enable") is not None else 1.0)) >= 0.5
     info["enabled"] = bool(enabled)
 
     if "krx_caution" not in out.columns:
@@ -934,24 +1050,37 @@ def _apply_junk_risk_overlay(candidates: pd.DataFrame, p: dict) -> tuple[pd.Data
         out["junk_penalty"] = 0.0
         return out, info
 
-    # Liquidity risk (lower traded value => higher risk)
-    liq_r = _risk_unit_linear(out.get("value", np.nan), low=10_000_000_000.0, high=80_000_000_000.0, invert=True)
+    info["mode"] = "normal"
 
-    # Pump/operation-like microstructure pattern
-    v_r = _risk_unit_linear(out.get("v_accel", np.nan), low=1.8, high=4.2)
-    stretch_r = _risk_unit_linear(out.get("stretch", np.nan), low=1.08, high=1.30)
-    ret_r = _risk_unit_linear(out.get("ret1_pct", np.nan), low=8.0, high=30.0)
-    rsi_r = _risk_unit_linear(out.get("rsi14", np.nan), low=65.0, high=85.0)
-    pump_r = pd.concat([v_r, stretch_r, ret_r, rsi_r], axis=1).mean(axis=1, skipna=True).fillna(0.0).clip(0.0, 1.0)
+    def _aligned_risk(values, *, low: float, high: float, invert: bool = False) -> pd.Series:
+        ser = _risk_unit_linear(values, low=low, high=high, invert=invert)
+        if not isinstance(ser, pd.Series):
+            ser = pd.Series(ser, index=out.index)
+        if len(ser) != len(out) or not ser.index.equals(out.index):
+            ser = ser.reindex(out.index)
+        return pd.to_numeric(ser, errors="coerce").fillna(0.0).clip(0.0, 1.0)
 
-    # Young listing risk
-    young_r = _risk_unit_linear(out.get("listing_days", np.nan), low=120.0, high=720.0, invert=True).fillna(0.0)
+    try:
+        # Liquidity risk (lower traded value => higher risk)
+        liq_r = _aligned_risk(out.get("value", np.nan), low=10_000_000_000.0, high=80_000_000_000.0, invert=True)
 
-    # Fundamental fragility risk (if columns exist)
-    roe_r = _risk_unit_linear(out.get("ROE", np.nan), low=5.0, high=25.0, invert=True)
-    opm_r = _risk_unit_linear(out.get("OPM", np.nan), low=3.0, high=18.0, invert=True)
-    debt_r = _risk_unit_linear(out.get("debt_ratio", np.nan), low=180.0, high=1200.0, invert=False)
-    fund_r = pd.concat([roe_r, opm_r, debt_r], axis=1).mean(axis=1, skipna=True).fillna(0.0).clip(0.0, 1.0)
+        # Pump/operation-like microstructure pattern
+        v_r = _aligned_risk(out.get("v_accel", np.nan), low=1.8, high=4.2)
+        stretch_r = _aligned_risk(out.get("stretch", np.nan), low=1.08, high=1.30)
+        ret_r = _aligned_risk(out.get("ret1_pct", np.nan), low=8.0, high=30.0)
+        rsi_r = _aligned_risk(out.get("rsi14", np.nan), low=65.0, high=85.0)
+        pump_r = pd.concat([v_r, stretch_r, ret_r, rsi_r], axis=1).mean(axis=1, skipna=True).fillna(0.0).clip(0.0, 1.0)
+
+        # Young listing risk
+        young_r = _aligned_risk(out.get("listing_days", np.nan), low=120.0, high=720.0, invert=True)
+
+        # Fundamental fragility risk (if columns exist)
+        roe_r = _aligned_risk(out.get("ROE", np.nan), low=5.0, high=25.0, invert=True)
+        opm_r = _aligned_risk(out.get("OPM", np.nan), low=3.0, high=18.0, invert=True)
+        debt_r = _aligned_risk(out.get("debt_ratio", np.nan), low=180.0, high=1200.0, invert=False)
+        fund_r = pd.concat([roe_r, opm_r, debt_r], axis=1).mean(axis=1, skipna=True).fillna(0.0).clip(0.0, 1.0)
+    except Exception as exc:
+        return _apply_junk_fallback(type(exc).__name__, "fallback_exception")
 
     junk_r = (liq_r.fillna(0.0) * 0.35 + pump_r * 0.40 + young_r * 0.10 + fund_r * 0.15).clip(0.0, 1.0)
     score100 = (junk_r * 100.0).round(2)
@@ -961,6 +1090,7 @@ def _apply_junk_risk_overlay(candidates: pd.DataFrame, p: dict) -> tuple[pd.Data
 
     # Human-readable flags
     flags = []
+    korean_special_rows = 0
     for idx in out.index:
         f = []
         if float(liq_r.loc[idx]) >= 0.55:
@@ -973,15 +1103,33 @@ def _apply_junk_risk_overlay(candidates: pd.DataFrame, p: dict) -> tuple[pd.Data
             f.append("weak_fundamental")
         if bool(out.loc[idx, "krx_caution"]):
             f.append("krx_caution")
+        market = str(out.loc[idx, "market"] if "market" in out.columns else "" or "").strip().upper()
+        market_cap = float(pd.to_numeric(pd.Series([out.loc[idx, "market_cap"] if "market_cap" in out.columns else np.nan]), errors="coerce").fillna(0.0).iloc[0])
+        ret1 = float(pd.to_numeric(pd.Series([out.loc[idx, "ret1_pct"] if "ret1_pct" in out.columns else np.nan]), errors="coerce").fillna(0.0).iloc[0])
+        stretch = float(pd.to_numeric(pd.Series([out.loc[idx, "stretch"] if "stretch" in out.columns else np.nan]), errors="coerce").fillna(0.0).iloc[0])
+        watch_note = str(out.loc[idx, "krx_watch_note"] if "krx_watch_note" in out.columns else "" or "")
+        special = False
+        if ret1 >= 29.0 or stretch >= 1.24:
+            f.append("limit_up_like")
+            special = True
+        if ("과열" in watch_note) or ("怨쇱뿴" in watch_note):
+            f.append("krx_overheat_note")
+            special = True
+        if market == "KOSDAQ" and 0.0 < market_cap <= 300_000_000_000.0:
+            f.append("kosdaq_smallcap_spec")
+            special = True
+        if special:
+            korean_special_rows += 1
         flags.append("|".join(f))
     out["junk_flags"] = flags
+    info["korean_special_rows"] = int(korean_special_rows)
 
     info["mean_score"] = float(pd.to_numeric(out["junk_risk_score"], errors="coerce").fillna(0.0).mean())
     info["high_risk_rows"] = int((pd.to_numeric(out["junk_risk_score"], errors="coerce") >= 70.0).sum())
     info["extreme_risk_rows"] = int((pd.to_numeric(out["junk_risk_score"], errors="coerce") >= 85.0).sum())
 
     # Soft penalty on final_score
-    pen_max = float(p.get("junk_penalty_max", 0.18) or 0.18)
+    pen_max = float((p.get("junk_penalty_max") if p.get("junk_penalty_max") is not None else 0.18))
     pen_max = min(max(pen_max, 0.0), 0.35)
     info["penalty_max"] = float(pen_max)
 
@@ -994,14 +1142,21 @@ def _apply_junk_risk_overlay(candidates: pd.DataFrame, p: dict) -> tuple[pd.Data
         out.loc[m_pen, "final_score"] = pd.to_numeric(out.loc[m_pen, "final_score"], errors="coerce") * (1.0 - pen_ser.loc[m_pen])
 
     # Optional hard exclude for extreme junk/manipulation risk
-    hard_ex = float(p.get("junk_hard_exclude", 1.0) or 1.0) >= 0.5
-    hard_th = float(p.get("junk_hard_threshold", 88.0) or 88.0)
+    hard_ex = float((p.get("junk_hard_exclude") if p.get("junk_hard_exclude") is not None else 1.0)) >= 0.5
+    hard_th = float((p.get("junk_hard_threshold") if p.get("junk_hard_threshold") is not None else 88.0))
     hard_th = min(max(hard_th, 60.0), 99.0)
     info["hard_exclude"] = bool(hard_ex)
     info["hard_threshold"] = float(hard_th)
 
     if hard_ex:
-        m_hard = pd.to_numeric(out["junk_risk_score"], errors="coerce").fillna(0.0) >= hard_th
+        hard_threshold_ser = pd.Series(float(hard_th), index=out.index, dtype=float)
+        if "market_cap" in out.columns:
+            market_cap_ser = pd.to_numeric(out["market_cap"], errors="coerce").fillna(0.0)
+            hard_threshold_ser.loc[market_cap_ser >= 1_000_000_000_000.0] = np.maximum(
+                hard_threshold_ser.loc[market_cap_ser >= 1_000_000_000_000.0],
+                95.0,
+            )
+        m_hard = pd.to_numeric(out["junk_risk_score"], errors="coerce").fillna(0.0) >= hard_threshold_ser
         before = int(len(out))
         out = out.loc[~m_hard].copy()
         info["before"] = before
@@ -1023,8 +1178,8 @@ def _get_company_analyzer(enabled: bool = True):
     env_path = str(os.environ.get("COMPANY_ANALYZER_FILE", "")).strip()
     if env_path:
         candidate_paths.append(Path(env_path))
-    candidate_paths.append(Path(r"C:\Users\jjtop\OneDrive\Desktop\claude code\기업분석\company_analyzer.py"))
     candidate_paths.append(BASE_DIR / "company_analyzer.py")
+    candidate_paths.append(Path(r"C:\Users\jjtop\OneDrive\Desktop\claude code\기업분석\company_analyzer.py"))
 
     for p in candidate_paths:
         try:
@@ -1150,23 +1305,33 @@ def _apply_fundamental_overlay(candidates: pd.DataFrame, p: dict, market_regime:
     stability_r, stability_used = _component_rank(out, stability_specs)
     supply_r, supply_used = _component_rank(out, supply_specs)
 
-    regime = str(market_regime or "SIDEWAYS").upper()
-    if regime == "BULL":
-        rw = {"value": 0.10, "quality": 0.15, "growth": 0.40, "stability": 0.10, "supply": 0.25}
-    elif regime == "BEAR":
-        rw = {"value": 0.15, "quality": 0.20, "growth": 0.05, "stability": 0.50, "supply": 0.10}
-    elif regime == "CORRECTION":
-        rw = {"value": 0.25, "quality": 0.25, "growth": 0.15, "stability": 0.25, "supply": 0.10}
+    regime_weights = {
+        "BULL": {"value": 0.10, "quality": 0.15, "growth": 0.40, "stability": 0.10, "supply": 0.25},
+        "BEAR": {"value": 0.15, "quality": 0.20, "growth": 0.05, "stability": 0.50, "supply": 0.10},
+        "CORRECTION": {"value": 0.25, "quality": 0.25, "growth": 0.15, "stability": 0.25, "supply": 0.10},
+        "SIDEWAYS": {"value": 0.20, "quality": 0.20, "growth": 0.10, "stability": 0.40, "supply": 0.10},
+    }
+    default_regime = str(market_regime or "SIDEWAYS").upper()
+    if default_regime not in regime_weights:
+        default_regime = "SIDEWAYS"
+    if "market_regime" in out.columns:
+        regime_s = out["market_regime"].fillna(default_regime).astype(str).str.upper()
+        regime_s = regime_s.where(regime_s.isin(regime_weights.keys()), default_regime)
     else:
-        rw = {"value": 0.20, "quality": 0.20, "growth": 0.10, "stability": 0.40, "supply": 0.10}
+        regime_s = pd.Series(default_regime, index=out.index)
 
-    fund_rank = (
-        value_r * rw["value"]
-        + quality_r * rw["quality"]
-        + growth_r * rw["growth"]
-        + stability_r * rw["stability"]
-        + supply_r * rw["supply"]
-    ).clip(0.0, 1.0)
+    fund_rank = pd.Series(0.0, index=out.index, dtype=float)
+    components = {
+        "value": value_r,
+        "quality": quality_r,
+        "growth": growth_r,
+        "stability": stability_r,
+        "supply": supply_r,
+    }
+    for comp_name, comp_rank in components.items():
+        weight_s = regime_s.map({k: v[comp_name] for k, v in regime_weights.items()}).astype(float)
+        fund_rank = fund_rank + comp_rank * weight_s
+    fund_rank = fund_rank.clip(0.0, 1.0)
 
     out["fundamental_score"] = (fund_rank * 100.0).round(2)
     out["fundamental_grade"] = out["fundamental_score"].apply(_fundamental_grade)
@@ -1174,10 +1339,11 @@ def _apply_fundamental_overlay(candidates: pd.DataFrame, p: dict, market_regime:
         len(value_used) + len(quality_used) + len(growth_used) + len(stability_used) + len(supply_used)
     )
 
-    use_ca = float(p.get("company_analyzer_enable", 1.0) or 1.0) >= 0.5
+    _ca_enable_raw = p.get("company_analyzer_enable")
+    use_ca = float(_ca_enable_raw if _ca_enable_raw is not None else 1.0) >= 0.5
     analyzer = _get_company_analyzer(enabled=use_ca)
     if analyzer is not None and (len(out) > 0):
-        blend = min(max(float(p.get("company_analyzer_blend", 0.70) or 0.70), 0.0), 1.0)
+        blend = min(max(float((p.get("company_analyzer_blend") if p.get("company_analyzer_blend") is not None else 0.70)), 0.0), 1.0)
         fd_alias = {
             "PER": ["PER"],
             "PBR": ["PBR"],
@@ -1215,7 +1381,7 @@ def _apply_fundamental_overlay(candidates: pd.DataFrame, p: dict, market_regime:
                     name=str(rr.get("name", rr.get("code", ""))),
                     fundamental_data=fd,
                     price_df=None,
-                    regime=regime,
+                    regime=str(regime_s.loc[rr.name]),
                 )
                 ca_scores.append(float(getattr(sc, "total_score", np.nan)))
             except Exception:
@@ -1245,8 +1411,8 @@ def _build_sector_code_map() -> pd.DataFrame:
     if (not SECTOR_SSOT_PATH.exists()) or (not SECTOR_MAP_PATH.exists()):
         return pd.DataFrame(columns=["code", "sector_code"])
     try:
-        ssot = pd.read_csv(SECTOR_SSOT_PATH, dtype={"code": str, "krx_sector": str})
-        mp = pd.read_csv(SECTOR_MAP_PATH, dtype={"krx_sector": str, "sector_code": str})
+        ssot = pd.read_csv(SECTOR_SSOT_PATH, dtype={"code": str, "krx_sector": str}, encoding="utf-8-sig")
+        mp = pd.read_csv(SECTOR_MAP_PATH, dtype={"krx_sector": str, "sector_code": str}, encoding="utf-8-sig")
     except Exception:
         return pd.DataFrame(columns=["code", "sector_code"])
 
@@ -1261,6 +1427,24 @@ def _build_sector_code_map() -> pd.DataFrame:
     return out[["code", "sector_code"]].drop_duplicates("code")
 
 
+def _compute_rally_breadth_stats(ret1_pct: pd.Series) -> tuple[float, float, float]:
+    """Shared cross-section return-breadth stats for broad-rally signals.
+
+    Returns (max_ret, pct_ge_5, pct_ge_10); all 0.0 if input is missing/empty.
+    Callers each apply their own broad_rally threshold combination on top of
+    these shared stats -- 2026-07-24: _apply_sector_prefilter_union() and
+    _apply_rally_safety_override() previously computed this independently
+    with copy-pasted (and silently divergeable) code; thresholds are kept
+    call-site-specific on purpose (different stakes: display-only fallback
+    pool sizing vs. real entry-gate relaxation), only the stat computation
+    itself is now shared.
+    """
+    ret = pd.to_numeric(ret1_pct, errors="coerce").dropna()
+    if ret.empty:
+        return 0.0, 0.0, 0.0
+    return float(ret.max()), float((ret >= 5.0).mean()), float((ret >= 10.0).mean())
+
+
 def _apply_sector_prefilter_union(today: pd.DataFrame, candidates: pd.DataFrame, p: dict, chosen_level: str = "L0") -> tuple[pd.DataFrame, dict]:
     enabled = str(os.environ.get("SECTOR_PREFILTER_ENABLE", "1")).strip() != "0"
 
@@ -1269,10 +1453,7 @@ def _apply_sector_prefilter_union(today: pd.DataFrame, candidates: pd.DataFrame,
     except Exception:
         level_num = 0
 
-    ret = pd.to_numeric(today.get("ret1_pct"), errors="coerce").dropna()
-    max_ret = float(ret.max()) if len(ret) else 0.0
-    pct_ge_10 = float((ret >= 10.0).mean()) if len(ret) else 0.0
-    pct_ge_5 = float((ret >= 5.0).mean()) if len(ret) else 0.0
+    max_ret, pct_ge_5, pct_ge_10 = _compute_rally_breadth_stats(today.get("ret1_pct"))
     broad_rally = (max_ret >= 20.0 and pct_ge_5 >= 0.12) or (pct_ge_10 >= 0.10)
 
     env_min = str(os.environ.get("SECTOR_PREFILTER_MIN_TOTAL", "")).strip()
@@ -1394,6 +1575,10 @@ def _apply_sector_prefilter_union(today: pd.DataFrame, candidates: pd.DataFrame,
             selected = pd.concat([selected, extra], ignore_index=True)
 
     selected = selected.drop(columns=["_r_rs", "_r_sl", "_r_va", "_r_liq", "_seed"], errors="ignore")
+    selected["candidate_origin"] = "SECTOR_PREFILTER_UNION"
+    selected["natural_pass"] = False
+    selected["observe_only"] = True
+    selected["observe_only_reason"] = "sector_prefilter_union_fallback"
 
     if candidates.empty:
         out = selected.copy()
@@ -1423,14 +1608,11 @@ def _apply_rally_safety_override(today: pd.DataFrame, p: dict, cand: pd.DataFram
         return cand, p, False, info
 
     # broad rally signal from cross-section returns (ret1_pct is in percent scale)
-    ret = pd.to_numeric(today.get("ret1_pct"), errors="coerce")
-    ret = ret.dropna()
-    if ret.empty:
+    if pd.to_numeric(today.get("ret1_pct"), errors="coerce").dropna().empty:
         info["reason"] = "ret_missing"
         return cand, p, False, info
 
-    pct_ge_10 = float((ret >= 10.0).mean())
-    max_ret = float(ret.max())
+    max_ret, _pct_ge_5, pct_ge_10 = _compute_rally_breadth_stats(today.get("ret1_pct"))
     broad_rally = (max_ret >= 25.0) and (pct_ge_10 >= 0.08)
     info["broad_rally"] = broad_rally
     info["max_ret_pct"] = max_ret
@@ -1475,14 +1657,14 @@ def _relax_ladder(p0: dict) -> list[dict]:
     p2 = dict(p1)
     p2["atr_max"] = max(float(p2["atr_max"]), 0.12)
     p2["v_accel_lim"] = max(float(p2["v_accel_lim"]) * 0.90, 1.20)
-    p2["rs_lim"] = max(float(p2["rs_lim"]) * 0.95, 1.10)
+    p2["rs_lim"] = max(float(p2["rs_lim"]) * 0.95, -0.10)
     ladder.append(("L2", p2))
 
     # L3: stretch/value ?꾪솕(留덉?留??④퀎)
     p3 = dict(p2)
     p3["atr_max"] = max(float(p3["atr_max"]), 0.15)
     p3["v_accel_lim"] = max(float(p3["v_accel_lim"]) * 0.90, 1.20)
-    p3["rs_lim"] = max(float(p3["rs_lim"]) * 0.95, 1.10)
+    p3["rs_lim"] = max(float(p3["rs_lim"]) * 0.95, -0.10)
     p3["stretch_max"] = min(float(p3["stretch_max"]) + 0.03, 1.30)
     p3["value_min"] = max(float(p3["value_min"]) * 0.85, 1_000_000_000.0)
     ladder.append(("L3", p3))
@@ -1491,7 +1673,7 @@ def _relax_ladder(p0: dict) -> list[dict]:
     p4 = dict(p3)
     p4["atr_max"] = max(float(p4["atr_max"]), 0.18)
     p4["v_accel_lim"] = max(float(p4["v_accel_lim"]) * 0.90, 1.15)
-    p4["rs_lim"] = max(float(p4["rs_lim"]) * 0.93, 1.05)
+    p4["rs_lim"] = max(float(p4["rs_lim"]) * 0.93, -0.10)
     p4["stretch_max"] = min(float(p4["stretch_max"]) + 0.03, 1.35)
     p4["value_min"] = max(float(p4["value_min"]) * 0.70, 1_000_000_000.0)
     ladder.append(("L4", p4))
@@ -1500,7 +1682,7 @@ def _relax_ladder(p0: dict) -> list[dict]:
     p5 = dict(p4)
     p5["atr_max"] = max(float(p5["atr_max"]), 0.22)
     p5["v_accel_lim"] = max(float(p5["v_accel_lim"]) * 0.88, 1.10)
-    p5["rs_lim"] = max(float(p5["rs_lim"]) * 0.92, 1.02)
+    p5["rs_lim"] = max(float(p5["rs_lim"]) * 0.92, -0.10)
     p5["stretch_max"] = min(float(p5["stretch_max"]) + 0.04, 1.40)
     p5["value_min"] = max(float(p5["value_min"]) * 0.55, 1_000_000_000.0)
     ladder.append(("L5", p5))
@@ -1509,18 +1691,84 @@ def _relax_ladder(p0: dict) -> list[dict]:
     p6 = dict(p5)
     p6["atr_max"] = max(float(p6["atr_max"]), 0.25)
     p6["v_accel_lim"] = max(float(p6["v_accel_lim"]) * 0.85, 1.05)
-    p6["rs_lim"] = max(float(p6["rs_lim"]) * 0.90, 1.00)
+    p6["rs_lim"] = max(float(p6["rs_lim"]) * 0.90, -0.10)
     p6["stretch_max"] = min(float(p6["stretch_max"]) + 0.05, 1.45)
     p6["value_min"] = max(float(p6["value_min"]) * 0.40, 1_000_000_000.0)
     ladder.append(("L6", p6))
+
+    # L7-L9: late-stage recovery only for sample collapse.
+    p7 = dict(p6)
+    p7["near_52w_high_gap_max"] = max(float(p7.get("near_52w_high_gap_max", 0.05)), 0.65)
+    p7["rsi_max"] = max(float(p7.get("rsi_max", 70.0)), 80.0)
+    p7["vol_close_corr_min"] = min(float(p7.get("vol_close_corr_min", 0.0)), -0.30)
+    p7["disparity20_max"] = max(float(p7.get("disparity20_max", 1.06)), 1.25)
+    p7["disparity60_max"] = max(float(p7.get("disparity60_max", 1.12)), 1.36)
+    p7["disparity200_max"] = max(float(p7.get("disparity200_max", 1.30)), 1.50)
+    ladder.append(("L7", p7))
+
+    p8 = dict(p7)
+    p8["near_52w_high_gap_max"] = max(float(p8.get("near_52w_high_gap_max", 0.05)), 0.70)
+    p8["rsi_max"] = max(float(p8.get("rsi_max", 70.0)), 85.0)
+    p8["vol_close_corr_min"] = min(float(p8.get("vol_close_corr_min", 0.0)), -0.50)
+    p8["disparity20_max"] = max(float(p8.get("disparity20_max", 1.06)), 1.25)
+    p8["disparity60_max"] = max(float(p8.get("disparity60_max", 1.12)), 1.36)
+    p8["disparity200_max"] = max(float(p8.get("disparity200_max", 1.30)), 1.50)
+    ladder.append(("L8", p8))
+
+    p9 = dict(p8)
+    p9["near_52w_high_gap_max"] = max(float(p9.get("near_52w_high_gap_max", 0.05)), 0.80)
+    p9["rsi_max"] = max(float(p9.get("rsi_max", 70.0)), 90.0)
+    p9["vol_close_corr_min"] = min(float(p9.get("vol_close_corr_min", 0.0)), -1.00)
+    p9["disparity20_max"] = max(float(p9.get("disparity20_max", 1.06)), 1.30)
+    p9["disparity60_max"] = max(float(p9.get("disparity60_max", 1.12)), 1.42)
+    p9["disparity200_max"] = max(float(p9.get("disparity200_max", 1.30)), 1.60)
+    ladder.append(("L9", p9))
 
     return ladder
 
 
 def main() -> int:
+    research_mode = os.environ.get("CANDIDATE_RESEARCH_MODE", "0") == "1"
+    research_params_path_s = os.environ.get("CANDIDATE_RESEARCH_PARAMS_PATH", "").strip()
+    research_output_dir_s = os.environ.get("CANDIDATE_RESEARCH_OUTPUT_DIR", "").strip()
+    research_allow_unapproved = os.environ.get("CANDIDATE_RESEARCH_ALLOW_UNAPPROVED", "0") == "1"
+    research_disable_relax = os.environ.get("CANDIDATE_RESEARCH_DISABLE_RELAX", "0") == "1"
+    research_disable_sector_union = os.environ.get("CANDIDATE_RESEARCH_DISABLE_SECTOR_UNION", "0") == "1"
+    output_log_dir = Path(research_output_dir_s) if research_output_dir_s else LOG_DIR
+    output_log_dir.mkdir(parents=True, exist_ok=True)
+    _audit_ymd = datetime.now().strftime("%Y%m%d")
+    log_pipeline_event(
+        stage="generate_candidates",
+        batch_label="[6.25/9]",
+        event="START",
+        date=_audit_ymd,
+        input_files={
+            "stable_params": str(RISK_DIR / "stable_params_v41_1.json"),
+        },
+    )
+
     stable_path = RISK_DIR / "stable_params_v41_1.json"
-    raw_params = read_json(stable_path) or {}  # ??utils.common ?ъ슜
+    if research_mode and research_params_path_s:
+        stable_path = Path(research_params_path_s)
+        raw_payload = read_json(stable_path) or {}
+        raw_params = raw_payload.get("params", raw_payload) if isinstance(raw_payload, dict) else {}
+    else:
+        raw_params = read_json(stable_path) or {}
+    try:
+        stable_gate_cfg = load_stable_quality_gate(PAPER_ENGINE_CONFIG)
+        stable_gate_status = evaluate_stable_params(raw_params, stable_gate_cfg)
+    except Exception as exc:
+        stable_gate_status = {
+            "ok": False,
+            "reason": f"quality_gate_load_failed:{type(exc).__name__}",
+            "reasons": [f"quality_gate_load_failed:{type(exc).__name__}"],
+            "promoted": bool(raw_params.get("promoted", False)),
+        }
     params = _normalize_params(raw_params)
+    print(
+        f"[PARAM_GATE] ok={stable_gate_status.get('ok', False)} "
+        f"reason={stable_gate_status.get('reason', 'unknown')}"
+    )
 
     print(f"[PARAM] source=stable rs_lim={params['rs_lim']} v_accel_lim={params['v_accel_lim']} stretch_max={params['stretch_max']} value_min={params['value_min']} atr_max={params['atr_max']}")
     print(f"[PARAM] weights w_rs={params['w_rs']:.2f} w_rs_slope={params['w_rs_slope']:.2f} w_v_accel={params['w_v_accel']:.2f} w_tech={params['w_tech_score']:.2f} w_fund={params['w_fundamental_score']:.2f} ca_blend={params['company_analyzer_blend']:.2f}")
@@ -1534,6 +1782,8 @@ def main() -> int:
     listing = _load_listing_map()
 
     df, latest_dt, is_bull = _compute_factors(df_raw)
+
+    _log_candidate_stable_gate(stable_gate_status, as_of_ymd=latest_dt.strftime("%Y%m%d"))
 
 
     # NOTE: as_of_select is produced inside _compute_factors() and stored on df.attrs
@@ -1578,12 +1828,19 @@ def main() -> int:
     chosen_params = None
     candidates = pd.DataFrame()
 
-    ladder = _relax_ladder(params)
+    ladder = [("L0_RESEARCH", dict(params))] if (research_mode and research_disable_relax) else _relax_ladder(params)
+    if not (research_mode and research_disable_relax):
+        _relax_max_raw = str(os.environ.get("CAND_RELAX_MAX_LEVEL", "9")).strip()
+        try:
+            relax_max_level = max(0, int(float(_relax_max_raw)))
+        except Exception:
+            relax_max_level = 6
+        ladder = [(level, p) for level, p in ladder if int(str(level).lstrip("L")) <= relax_max_level]
     for level, p in ladder:
         cand = _select_candidates(today, p)
         d = _diag_counts(today, p, len(cand))
         attempts.append({"level": level, "params": {k: float(p[k]) for k in PARAM_EXPORT_KEYS}, "diag": d})
-        if not cand.empty:
+        if (bool(stable_gate_status.get("ok", False)) or (research_mode and research_allow_unapproved)) and not cand.empty:
             chosen_level = level
             chosen_params = p
             candidates = cand
@@ -1607,10 +1864,29 @@ def main() -> int:
         chosen_level = "NONE"
         chosen_params = params
 
-    candidates, sector_union_info = _apply_sector_prefilter_union(today, candidates, chosen_params, chosen_level=chosen_level)
+    if research_mode and research_disable_sector_union:
+        sector_union_info = {
+            "enabled": False,
+            "reason": "research_mode_disabled",
+            "before": int(len(candidates)),
+            "added": 0,
+            "after": int(len(candidates)),
+        }
+    else:
+        candidates, sector_union_info = _apply_sector_prefilter_union(today, candidates, chosen_params, chosen_level=chosen_level)
     candidates, watch_hard_info = _apply_krx_watch_hard_filter(candidates, chosen_params)
 
     meta = {
+        "research_mode": {
+            "enabled": bool(research_mode),
+            "params_path": str(stable_path) if research_mode else None,
+            "output_dir": str(output_log_dir) if research_mode else None,
+            "allow_unapproved": bool(research_allow_unapproved),
+            "disable_relax": bool(research_disable_relax),
+            "disable_sector_union": bool(research_disable_sector_union),
+            "official_use_allowed": False if research_mode else bool(stable_gate_status.get("ok", False)),
+        },
+        "stable_param_gate": stable_gate_status,
         "stable_params": {
             "path": str(stable_path),
             "file_mtime": (datetime.fromtimestamp(stable_path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S") if stable_path.exists() else None),
@@ -1630,28 +1906,28 @@ def main() -> int:
         "watch_hard_filter": watch_hard_info,
         "watch_soft_penalty": watch_soft_info,
     }
-    out_path = LOG_DIR / f"candidates_v41_1_{latest_dt.strftime('%Y%m%d')}.csv"
-    latest_ptr = LOG_DIR / "candidates_latest.csv"
-    latest_data_path = LOG_DIR / "candidates_latest_data.csv"
-    latest_meta_path = LOG_DIR / "candidates_latest_meta.json"
+    out_path = output_log_dir / f"candidates_v41_1_{latest_dt.strftime('%Y%m%d')}.csv"
+    latest_ptr = output_log_dir / "candidates_latest.csv"
+    latest_data_path = output_log_dir / "candidates_latest_data.csv"
+    latest_meta_path = output_log_dir / "candidates_latest_meta.json"
 
     # [CR] meta paths SSOT (寃쎈줈??臾몄옄?대줈 怨좎젙 湲곕줉)
     meta["paths"] = {
-        "log_dir": str(LOG_DIR),
+        "log_dir": str(output_log_dir),
         "versioned_csv": str(out_path),
         "latest_ptr": str(latest_ptr),
         "latest_data_csv": str(latest_data_path),
         "latest_meta_json": str(latest_meta_path),
         "csv": str(latest_data_path),  # standard_check expects paths.csv (alias of latest_data_csv)
     }
-    out_path = LOG_DIR / f"candidates_v41_1_{latest_dt.strftime('%Y%m%d')}.csv"
-    latest_ptr = LOG_DIR / "candidates_latest.csv"
-    latest_data_path = LOG_DIR / "candidates_latest_data.csv"
-    latest_meta_path = LOG_DIR / "candidates_latest_meta.json"
+    out_path = output_log_dir / f"candidates_v41_1_{latest_dt.strftime('%Y%m%d')}.csv"
+    latest_ptr = output_log_dir / "candidates_latest.csv"
+    latest_data_path = output_log_dir / "candidates_latest_data.csv"
+    latest_meta_path = output_log_dir / "candidates_latest_meta.json"
 
     if candidates.empty:
         # empty output (schema fixed)
-        cols = ["no","date","code","name","market","close","value","market_cap","listed_shares","rs","rs_slope","stretch","v_accel","atr14_pct","rsi14","macd_golden","vol_close_corr20","high_52w_gap","listing_days","score","fundamental_score","fundamental_grade","final_score","junk_risk_score","junk_risk_grade","junk_flags","krx_admin","krx_warning","krx_risk","krx_caution","relax_level"]
+        cols = ["no","date","code","name","market","market_regime","close","value","market_cap","listed_shares","rs","rs_slope","stretch","v_accel","atr14_pct","rsi14","macd_golden","vol_close_corr20","high_52w_gap","listing_days","score","fundamental_score","fundamental_grade","final_score","junk_risk_score","junk_risk_grade","junk_flags","krx_admin","krx_warning","krx_risk","krx_caution","relax_level"]
         pd.DataFrame(columns=cols).to_csv(out_path, index=False, encoding="utf-8-sig")
         latest_ptr.write_text(out_path.name, encoding="utf-8")
         print("[FIX17] latest_data kept (no candidates) -> NOT overwriting candidates_latest_data.csv")
@@ -1666,6 +1942,21 @@ def main() -> int:
         print(f"[DIAG] {diag0}")
         print(f"[OUT] {out_path}")
         print(f"[META] {latest_meta_path}")
+        log_pipeline_event(
+            stage="generate_candidates",
+            batch_label="[6.25/9]",
+            event="END",
+            date=_audit_ymd,
+            output_files={
+                "candidates_latest_data": {"path": str(latest_data_path), "rows": count_rows(latest_data_path)},
+                "versioned_csv": {"path": str(out_path), "rows": 0},
+            },
+            metrics={
+                "chosen_level": chosen_level,
+                "candidates_empty": True,
+            },
+            status="PASS",
+        )
         return 0
 
     # score
@@ -1690,7 +1981,7 @@ def main() -> int:
     top.insert(0, "no", range(1, len(top) + 1))
 
     # columns order
-    keep_cols = ["no","date","code","name","market","close","value","market_cap","listed_shares","ret1_pct","rs","rs_slope","stretch","v_accel","atr14_pct","rsi14","macd_golden","vol_close_corr20","high_52w_gap","listing_days","score","fundamental_score","fundamental_grade","final_score","junk_risk_score","junk_risk_grade","junk_flags","krx_admin","krx_warning","krx_risk","krx_caution","relax_level"]
+    keep_cols = ["no","date","code","name","market","market_regime","close","value","market_cap","listed_shares","ret1_pct","rs","rs_slope","stretch","v_accel","atr14_pct","rsi14","macd_golden","vol_close_corr20","high_52w_gap","listing_days","ma60_support_bounce","trend_smoothness","price_vol_divergence","score","fundamental_score","fundamental_grade","final_score","junk_risk_score","junk_risk_grade","junk_flags","krx_admin","krx_warning","krx_risk","krx_caution","relax_level"]
     for c in keep_cols:
         if c not in top.columns:
             top[c] = np.nan
@@ -1705,6 +1996,8 @@ def main() -> int:
     meta['as_of_select']['src'] = 'generate_candidates_v41_1.py'  # standard_check expects as_of_select.src
     write_json(latest_meta_path, meta)
 
+    _log_candidate_summary(today, chosen_level, chosen_params, top, as_of_ymd)
+
     # print summary
     diag_chosen = attempts[-1]["diag"] if attempts else {}
     print(f"\n[AS_OF] {latest_dt.date()} (BULL={is_bull})")
@@ -1717,42 +2010,81 @@ def main() -> int:
     print(f"[OUT] {out_path}")
     print(f"[META] {latest_meta_path}")
     print(f"[DIAG] {diag_chosen}")
+    log_pipeline_event(
+        stage="generate_candidates",
+        batch_label="[6.25/9]",
+        event="END",
+        date=_audit_ymd,
+        output_files={
+            "candidates_latest_data": {"path": str(latest_data_path), "rows": int(len(top))},
+            "versioned_csv": {"path": str(out_path), "rows": int(len(top))},
+        },
+        metrics={
+            "chosen_level": chosen_level,
+            "candidates_empty": False,
+        },
+        status="PASS",
+    )
     return 0
+
+
+def _log_candidate_stable_gate(stable_gate_status: dict, as_of_ymd: str) -> None:
+    ok = bool(stable_gate_status.get("ok", False))
+    log_gate_event(
+        gate_layer="candidate",
+        gate_name="stable_params_quality_gate",
+        decision="PASS" if ok else "BLOCK",
+        reason_code="ok" if ok else "stable_gate_failed",
+        reason_detail=str(stable_gate_status.get("reason", "")),
+        source_file="generate_candidates_v41_1.py",
+        source_key="evaluate_stable_params",
+        recoverable=not ok,
+        recovery_hint="HPO 또는 gate 임계값 조정",
+        date=as_of_ymd,
+        extra={k: v for k, v in stable_gate_status.items() if k not in {"reasons", "thresholds"}},
+    )
+
+
+def _log_candidate_summary(
+    today: pd.DataFrame,
+    chosen_level: str,
+    chosen_params: dict,
+    top: pd.DataFrame,
+    as_of_ymd: str,
+) -> None:
+    if top.empty:
+        log_gate_event(
+            gate_layer="candidate",
+            gate_name="candidate_pool_empty",
+            decision="BLOCK",
+            reason_code="no_candidates_after_filters",
+            reason_detail=f"level={chosen_level}, today_rows={len(today)}",
+            source_file="generate_candidates_v41_1.py",
+            source_key="main",
+            recoverable=True,
+            recovery_hint="필터/릴랙스 레벨 조정",
+            date=as_of_ymd,
+            extra={"chosen_level": chosen_level, "today_rows": int(len(today))},
+        )
+        return
+    for _, r in top.iterrows():
+        code = str(r.get("code", "")).zfill(6)
+        log_gate_event(
+            code=code,
+            gate_layer="candidate",
+            gate_name="candidate_selected",
+            decision="PASS",
+            source_file="generate_candidates_v41_1.py",
+            source_key=f"level={chosen_level}",
+            date=as_of_ymd,
+            extra={
+                "level": chosen_level,
+                "final_score": float(r.get("final_score", 0)),
+                "rs": float(r.get("rs", 0)),
+                "value": float(r.get("value", 0)),
+            },
+        )
+
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
