@@ -41,7 +41,6 @@ from utils.common import (
     read_csv_safe,
 )
 from utils.pipeline_audit import log_pipeline_event, count_rows
-from tools.fill_idempotency import IdempotencyConflict, filter_new_fill_rows, rebuild_state_from_existing_rows
 from paper_engine.config import load_config, _path_from_env, _deep_merge_dict
 from paper_engine.io import (
     detect_schema,
@@ -142,9 +141,7 @@ from paper_engine.exit import (
     _apply_intraday_residual_overnight_guard_exits,
 )
 from paper_engine.positions import (
-    _append_rows_atomic,
-    _restore_backup_file,
-    _sync_new_fills_to_live_bridge,
+    _append_fills_trades_with_rollback,
     _reconcile_open_positions_with_fills,
     _recover_open_positions,
     _compute_current_open_notional,
@@ -2338,74 +2335,24 @@ def main() -> int:
             f"entry_ready={entry_ready_count} open_positions={len(still_open)}"
         )
 
-    fills_backup_path = ""
-    trades_backup_path = ""
-    try:
-        if fills_new:
-            fills_header = LEGACY_FILLS_HEADER if schema == "legacy" else V411_FILLS_HEADER
-            existing_fills_for_idem = read_csv_safe(FILLS)
-            existing_fill_rows_for_idem = (
-                existing_fills_for_idem.to_dict("records")
-                if isinstance(existing_fills_for_idem, pd.DataFrame)
-                else []
-            )
-            fills_new, fill_idem_report = filter_new_fill_rows(
-                header=fills_header,
-                existing_rows=existing_fill_rows_for_idem,
-                new_rows=fills_new,
-                source="paper_engine",
-            )
-            print(
-                "[FILL_IDEMPOTENCY] "
-                f"accepted={fill_idem_report.get('accepted_rows')} "
-                f"duplicates={fill_idem_report.get('duplicate_rows')} "
-                f"processed={fill_idem_report.get('processed_count')} "
-                f"state={fill_idem_report.get('state_path')}"
-            )
-            fills_backup_path = _append_rows_atomic(FILLS, fills_new, fills_header)
-            live_bridge_sync = _sync_new_fills_to_live_bridge(fills_new, schema, prices_df=px)
-            print(
-                f"[LIVE_BRIDGE] status={live_bridge_sync.get('status')} "
-                f"added={live_bridge_sync.get('added_rows')} total={live_bridge_sync.get('total_rows')}"
-            )
-        if trades_new:
-            trades_header = LEGACY_TRADES_HEADER if schema == "legacy" else V411_TRADES_HEADER
-            trades_backup_path = _append_rows_atomic(TRADES, trades_new, trades_header)
-        if schema == "v41.1":
-            _write_dashboard_compat_csv(schema)
-            print(f"[DASHBOARD_COMPAT] legacy copies updated: {FILLS.parent / 'fills_dashboard_compat.csv'}, "
-                  f"{TRADES.parent / 'trades_dashboard_compat.csv'}")
-    except Exception as write_err:
-        if isinstance(write_err, IdempotencyConflict):
-            print(f"[WRITE_TXN] fill idempotency conflict -> fail closed: {write_err}")
-            return 2
-        print(f"[WRITE_TXN] append failed -> rollback start: {type(write_err).__name__}: {write_err}")
-        try:
-            _restore_backup_file(FILLS, fills_backup_path)
-        except Exception as rollback_err:
-            print(f"[WRITE_TXN] rollback fills failed: {type(rollback_err).__name__}: {rollback_err}")
-        try:
-            _restore_backup_file(TRADES, trades_backup_path)
-        except Exception as rollback_err:
-            print(f"[WRITE_TXN] rollback trades failed: {type(rollback_err).__name__}: {rollback_err}")
-        try:
-            post_rollback_fills = read_csv_safe(FILLS)
-            post_rollback_rows = (
-                post_rollback_fills.to_dict("records")
-                if isinstance(post_rollback_fills, pd.DataFrame)
-                else []
-            )
-            rebuild_report = rebuild_state_from_existing_rows(
-                existing_rows=post_rollback_rows,
-                source="paper_engine_write_rollback",
-            )
-            print(
-                "[FILL_IDEMPOTENCY_REBUILD] "
-                f"processed={rebuild_report.get('processed_count')} "
-                f"state={rebuild_report.get('state_path')}"
-            )
-        except Exception as rebuild_err:
-            print(f"[WRITE_TXN] idempotency state rebuild failed: {type(rebuild_err).__name__}: {rebuild_err}")
+    fills_header = LEGACY_FILLS_HEADER if schema == "legacy" else V411_FILLS_HEADER
+    trades_header = LEGACY_TRADES_HEADER if schema == "legacy" else V411_TRADES_HEADER
+    write_txn_result = _append_fills_trades_with_rollback(
+        fills_path=FILLS,
+        trades_path=TRADES,
+        fills_new=fills_new,
+        trades_new=trades_new,
+        schema=str(schema),
+        fills_header=fills_header,
+        trades_header=trades_header,
+        prices_df=px,
+        write_dashboard_compat_csv=_write_dashboard_compat_csv,
+    )
+    fills_new = cast(List[List[Any]], write_txn_result.get("fills_new", fills_new))
+    if schema == "v41.1" and bool(write_txn_result.get("dashboard_compat_updated", False)):
+        print(f"[DASHBOARD_COMPAT] legacy copies updated: {FILLS.parent / 'fills_dashboard_compat.csv'}, "
+              f"{TRADES.parent / 'trades_dashboard_compat.csv'}")
+    if int(write_txn_result.get("return_code", 0) or 0) != 0:
         return 2
     if schema == "legacy":
         # Final fail-safe: keep state open_positions aligned with persisted fills net.

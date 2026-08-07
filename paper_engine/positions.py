@@ -34,6 +34,7 @@ __all__ = [
     '_append_rows_atomic',
     '_restore_backup_file',
     '_sync_new_fills_to_live_bridge',
+    '_append_fills_trades_with_rollback',
     '_compute_current_open_notional',
     '_count_open_position_slots',
     '_recalculate_open_notional_and_alert',
@@ -51,7 +52,7 @@ import re
 import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, cast
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, cast
 
 import pandas as pd
 
@@ -61,6 +62,7 @@ from pricing_engine import (
     calc_roundtrip_slippage,
 )
 from utils.common import norm_code, now_ymd, read_csv_safe
+from tools.fill_idempotency import IdempotencyConflict, filter_new_fill_rows, rebuild_state_from_existing_rows
 
 from paper_engine.config import _path_from_env
 from paper_engine.common import (
@@ -2266,6 +2268,109 @@ def _sync_new_fills_to_live_bridge(
         "path": str(live_path),
         "status": "ok",
     }
+
+def _append_fills_trades_with_rollback(
+    *,
+    fills_path: Path,
+    trades_path: Path,
+    fills_new: List[List[Any]],
+    trades_new: List[List[Any]],
+    schema: str,
+    fills_header: List[str],
+    trades_header: List[str],
+    prices_df: Optional[pd.DataFrame],
+    write_dashboard_compat_csv: Optional[Callable[[str], None]] = None,
+) -> Dict[str, Any]:
+    fills_backup_path = ""
+    trades_backup_path = ""
+    result: Dict[str, Any] = {
+        "status": "ok",
+        "return_code": 0,
+        "fills_new": fills_new,
+        "trades_new": trades_new,
+        "fills_backup_path": fills_backup_path,
+        "trades_backup_path": trades_backup_path,
+        "fill_idempotency_report": {},
+        "live_bridge_sync": {},
+        "dashboard_compat_updated": False,
+    }
+    try:
+        if fills_new:
+            existing_fills_for_idem = read_csv_safe(fills_path)
+            existing_fill_rows_for_idem = (
+                existing_fills_for_idem.to_dict("records")
+                if isinstance(existing_fills_for_idem, pd.DataFrame)
+                else []
+            )
+            fills_new, fill_idem_report = filter_new_fill_rows(
+                header=fills_header,
+                existing_rows=existing_fill_rows_for_idem,
+                new_rows=fills_new,
+                source="paper_engine",
+            )
+            result["fills_new"] = fills_new
+            result["fill_idempotency_report"] = fill_idem_report
+            print(
+                "[FILL_IDEMPOTENCY] "
+                f"accepted={fill_idem_report.get('accepted_rows')} "
+                f"duplicates={fill_idem_report.get('duplicate_rows')} "
+                f"processed={fill_idem_report.get('processed_count')} "
+                f"state={fill_idem_report.get('state_path')}"
+            )
+            fills_backup_path = _append_rows_atomic(fills_path, fills_new, fills_header)
+            result["fills_backup_path"] = fills_backup_path
+            live_bridge_sync = _sync_new_fills_to_live_bridge(fills_new, schema, prices_df=prices_df)
+            result["live_bridge_sync"] = live_bridge_sync
+            print(
+                f"[LIVE_BRIDGE] status={live_bridge_sync.get('status')} "
+                f"added={live_bridge_sync.get('added_rows')} total={live_bridge_sync.get('total_rows')}"
+            )
+        if trades_new:
+            trades_backup_path = _append_rows_atomic(trades_path, trades_new, trades_header)
+            result["trades_backup_path"] = trades_backup_path
+        if schema == "v41.1" and write_dashboard_compat_csv is not None:
+            write_dashboard_compat_csv(schema)
+            result["dashboard_compat_updated"] = True
+    except Exception as write_err:
+        if isinstance(write_err, IdempotencyConflict):
+            print(f"[WRITE_TXN] fill idempotency conflict -> fail closed: {write_err}")
+            result["status"] = "idempotency_conflict"
+            result["return_code"] = 2
+            result["error"] = f"{type(write_err).__name__}: {write_err}"
+            return result
+        print(f"[WRITE_TXN] append failed -> rollback start: {type(write_err).__name__}: {write_err}")
+        try:
+            _restore_backup_file(fills_path, fills_backup_path)
+        except Exception as rollback_err:
+            print(f"[WRITE_TXN] rollback fills failed: {type(rollback_err).__name__}: {rollback_err}")
+        try:
+            _restore_backup_file(trades_path, trades_backup_path)
+        except Exception as rollback_err:
+            print(f"[WRITE_TXN] rollback trades failed: {type(rollback_err).__name__}: {rollback_err}")
+        try:
+            post_rollback_fills = read_csv_safe(fills_path)
+            post_rollback_rows = (
+                post_rollback_fills.to_dict("records")
+                if isinstance(post_rollback_fills, pd.DataFrame)
+                else []
+            )
+            rebuild_report = rebuild_state_from_existing_rows(
+                existing_rows=post_rollback_rows,
+                source="paper_engine_write_rollback",
+            )
+            result["idempotency_rebuild_report"] = rebuild_report
+            print(
+                "[FILL_IDEMPOTENCY_REBUILD] "
+                f"processed={rebuild_report.get('processed_count')} "
+                f"state={rebuild_report.get('state_path')}"
+            )
+        except Exception as rebuild_err:
+            print(f"[WRITE_TXN] idempotency state rebuild failed: {type(rebuild_err).__name__}: {rebuild_err}")
+        result["status"] = "append_failed_rollback_attempted"
+        result["return_code"] = 2
+        result["error"] = f"{type(write_err).__name__}: {write_err}"
+        return result
+    return result
 
 def _compute_current_open_notional(open_pos: List[Dict[str, Any]], px: pd.DataFrame) -> float:
     if not open_pos or px is None or px.empty:
