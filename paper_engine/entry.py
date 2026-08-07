@@ -144,6 +144,8 @@ __all__ = [
     '_build_lineage_session_note_parts',
     '_record_buy_executed_decision',
     '_record_entry_t2_cash_if_needed',
+    '_normalize_entry_loop_result',
+    '_print_entry_fill_summary_v2',
     '_process_entry_rows',
     'derive_fx_entry_status',
     'apply_fx_filter',
@@ -7806,6 +7808,65 @@ def _record_entry_t2_cash_if_needed(
         amount=float(entry_notional_for_cap),
     )
     return True
+
+
+def _normalize_entry_loop_result(
+    loop_result: Dict[str, Any],
+    *,
+    fallback_portfolio_state: Optional[Dict[str, Any]] = None,
+    fallback_t2_cash_checks: Optional[List[Any]] = None,
+) -> Dict[str, Any]:
+    return {
+        "fills_new": loop_result["fills_new"],
+        "trades_new": loop_result["trades_new"],
+        "new_count": int(loop_result["new_count"]),
+        "new_notional_krw": float(loop_result["new_notional_krw"]),
+        "surge_new_count": int(loop_result.get("surge_new_count", 0)),
+        "surge_notional_krw": float(loop_result.get("surge_notional_krw", 0.0)),
+        "split_notional_krw": float(loop_result.get("split_notional_krw", 0.0)),
+        "evaluated_count": int(loop_result["evaluated_count"]),
+        "no_next_day_count": int(loop_result["no_next_day_count"]),
+        "entry_ready_count": int(loop_result["entry_ready_count"]),
+        "cap_block_count": int(loop_result["cap_block_count"]),
+        "processed_skip_count": int(loop_result["processed_skip_count"]),
+        "max_new_skip_count": int(loop_result.get("max_new_skip_count", 0)),
+        "idempotent_skip_count": int(loop_result.get("idempotent_skip_count", 0)),
+        "stale_replay_used_count": int(loop_result["stale_replay_used_count"]),
+        "open_order_replay_used_count": int(loop_result["open_order_replay_used_count"]),
+        "max_positions_blocked": bool(loop_result.get("max_positions_blocked", False)),
+        "today_ymd": str(loop_result["today_ymd"]),
+        "pending_carry_rows": loop_result["pending_carry_rows"],
+        "portfolio_state": _get_dict(loop_result, "portfolio_state", fallback_portfolio_state or {}),
+        "t2_cash_checks": _get_list(loop_result, "t2_cash_checks", fallback_t2_cash_checks or []),
+        "entry_decisions": loop_result.get("entry_decisions", []),
+        "fail_closed_triggered": bool(loop_result.get("fail_closed_triggered", False)),
+        "fail_closed_reason": str(loop_result.get("fail_closed_reason", "")),
+    }
+
+
+def _print_entry_fill_summary_v2(loop_result: Dict[str, Any]) -> None:
+    fail_closed = bool(loop_result.get("fail_closed_triggered", False))
+    fail_closed_reason = str(loop_result.get("fail_closed_reason", ""))
+    summary_keys = (
+        "ttl_expired_count",
+        "retry_blocked_count",
+        "exec_quality_blocked_count",
+        "quote_stale_blocked_count",
+        "close_cutoff_blocked_count",
+        "partial_fill_expired_count",
+    )
+    if not fail_closed and not any(loop_result.get(key, 0) > 0 for key in summary_keys):
+        return
+    print(
+        f"[FILL_SUMMARY_V2] ttl_expired={loop_result.get('ttl_expired_count',0)} "
+        f"retry_blocked={loop_result.get('retry_blocked_count',0)} "
+        f"exec_quality_blocked={loop_result.get('exec_quality_blocked_count',0)} "
+        f"quote_stale_blocked={loop_result.get('quote_stale_blocked_count',0)} "
+        f"close_cutoff_blocked={loop_result.get('close_cutoff_blocked_count',0)} "
+        f"partial_fill_expired={loop_result.get('partial_fill_expired_count',0)} "
+        f"fail_closed={fail_closed if fail_closed else 'no'}"
+        f"{(' fail_closed_reason=' + fail_closed_reason) if fail_closed else ''}"
+    )
 
 
 def _process_entry_rows(

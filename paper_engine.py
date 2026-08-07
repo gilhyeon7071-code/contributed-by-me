@@ -103,8 +103,10 @@ from paper_engine.entry import (
     _evaluate_entry_guards,
     _init_entry_loop_state,
     _minimum_quantity_verification_cfg,
+    _normalize_entry_loop_result,
     _prepare_entry_candidate_pool,
     _prepare_pretrade_runtime,
+    _print_entry_fill_summary_v2,
     _process_entry_rows,
     _write_entry_decision_layers_snapshot,
     _write_entry_signal_snapshot,
@@ -1987,54 +1989,34 @@ def main() -> int:
         max_positions_override_allowed=bool(max_positions_override_allowed),
         loop_state=loop_state,
     )
-    fills_new = loop_result['fills_new']
-    trades_new = loop_result['trades_new']
-    new_count = int(loop_result['new_count'])
-    new_notional_krw = float(loop_result['new_notional_krw'])
-    surge_new_count = int(loop_result.get('surge_new_count', 0))
-    surge_notional_krw = float(loop_result.get('surge_notional_krw', 0.0))
-    split_notional_krw = float(loop_result.get('split_notional_krw', 0.0))
-    evaluated_count = int(loop_result['evaluated_count'])
-    no_next_day_count = int(loop_result['no_next_day_count'])
-    entry_ready_count = int(loop_result['entry_ready_count'])
-    cap_block_count = int(loop_result['cap_block_count'])
-    processed_skip_count = int(loop_result['processed_skip_count'])
-    max_new_skip_count = int(loop_result.get('max_new_skip_count', 0))
-    idempotent_skip_count = int(loop_result.get('idempotent_skip_count', 0))
-    stale_replay_used_count = int(loop_result['stale_replay_used_count'])
-    open_order_replay_used_count = int(loop_result['open_order_replay_used_count'])
-    max_positions_blocked = bool(loop_result.get('max_positions_blocked', False))
-    today_ymd = str(loop_result['today_ymd'])
-    pending_carry_rows = loop_result['pending_carry_rows']
-    state = _get_dict(loop_result, "portfolio_state", state)
-    t2_cash_checks: List[Dict[str, Any]] = cast(List[Dict[str, Any]], _get_list(loop_result, "t2_cash_checks"))
-    entry_decisions = loop_result.get("entry_decisions", [])
-    _lr_fc = bool(loop_result.get('fail_closed_triggered', False))
-    _lr_fc_reason = str(loop_result.get('fail_closed_reason', ''))
-    if _lr_fc:
-        print(
-            f"[FILL_SUMMARY_V2] ttl_expired={loop_result.get('ttl_expired_count',0)} "
-            f"retry_blocked={loop_result.get('retry_blocked_count',0)} "
-            f"exec_quality_blocked={loop_result.get('exec_quality_blocked_count',0)} "
-            f"quote_stale_blocked={loop_result.get('quote_stale_blocked_count',0)} "
-            f"close_cutoff_blocked={loop_result.get('close_cutoff_blocked_count',0)} "
-            f"partial_fill_expired={loop_result.get('partial_fill_expired_count',0)} "
-            f"fail_closed={_lr_fc} fail_closed_reason={_lr_fc_reason}"
-        )
-    else:
-        _any_v2 = any(loop_result.get(k, 0) > 0 for k in (
-            'ttl_expired_count','retry_blocked_count','exec_quality_blocked_count',
-            'quote_stale_blocked_count','close_cutoff_blocked_count','partial_fill_expired_count'))
-        if _any_v2:
-            print(
-                f"[FILL_SUMMARY_V2] ttl_expired={loop_result.get('ttl_expired_count',0)} "
-                f"retry_blocked={loop_result.get('retry_blocked_count',0)} "
-                f"exec_quality_blocked={loop_result.get('exec_quality_blocked_count',0)} "
-                f"quote_stale_blocked={loop_result.get('quote_stale_blocked_count',0)} "
-                f"close_cutoff_blocked={loop_result.get('close_cutoff_blocked_count',0)} "
-                f"partial_fill_expired={loop_result.get('partial_fill_expired_count',0)} "
-                f"fail_closed=no"
-            )
+    entry_loop = _normalize_entry_loop_result(
+        loop_result,
+        fallback_portfolio_state=state,
+        fallback_t2_cash_checks=t2_cash_checks,
+    )
+    fills_new = entry_loop["fills_new"]
+    trades_new = entry_loop["trades_new"]
+    new_count = int(entry_loop["new_count"])
+    new_notional_krw = float(entry_loop["new_notional_krw"])
+    surge_new_count = int(entry_loop["surge_new_count"])
+    surge_notional_krw = float(entry_loop["surge_notional_krw"])
+    split_notional_krw = float(entry_loop["split_notional_krw"])
+    evaluated_count = int(entry_loop["evaluated_count"])
+    no_next_day_count = int(entry_loop["no_next_day_count"])
+    entry_ready_count = int(entry_loop["entry_ready_count"])
+    cap_block_count = int(entry_loop["cap_block_count"])
+    processed_skip_count = int(entry_loop["processed_skip_count"])
+    max_new_skip_count = int(entry_loop["max_new_skip_count"])
+    idempotent_skip_count = int(entry_loop["idempotent_skip_count"])
+    stale_replay_used_count = int(entry_loop["stale_replay_used_count"])
+    open_order_replay_used_count = int(entry_loop["open_order_replay_used_count"])
+    max_positions_blocked = bool(entry_loop["max_positions_blocked"])
+    today_ymd = str(entry_loop["today_ymd"])
+    pending_carry_rows = entry_loop["pending_carry_rows"]
+    state = cast(Dict[str, Any], entry_loop["portfolio_state"])
+    t2_cash_checks = cast(List[Dict[str, Any]], entry_loop["t2_cash_checks"])
+    entry_decisions = entry_loop["entry_decisions"]
+    _print_entry_fill_summary_v2(loop_result)
     _paper_engine_phase_trace("entry_signal_snapshot_before", decisions=len(entry_decisions) if isinstance(entry_decisions, list) else -1)
     _write_entry_signal_snapshot(
         rows=(entry_decisions if isinstance(entry_decisions, list) else []),
@@ -2312,24 +2294,29 @@ def main() -> int:
             max_positions_override_allowed=bool(max_positions_override_allowed),
             loop_state=loop_state_recheck,
         )
-        fills_new = recheck_result['fills_new']
-        trades_new = recheck_result['trades_new']
-        new_count = int(recheck_result['new_count'])
-        new_notional_krw = float(recheck_result['new_notional_krw'])
-        surge_new_count = int(recheck_result.get('surge_new_count', 0))
-        surge_notional_krw = float(recheck_result.get('surge_notional_krw', 0.0))
-        split_notional_krw = float(recheck_result.get('split_notional_krw', 0.0))
-        evaluated_count = int(recheck_result['evaluated_count'])
-        no_next_day_count = int(recheck_result['no_next_day_count'])
-        entry_ready_count = int(recheck_result['entry_ready_count'])
-        cap_block_count = int(recheck_result['cap_block_count'])
-        processed_skip_count = int(recheck_result['processed_skip_count'])
-        idempotent_skip_count = int(recheck_result.get('idempotent_skip_count', 0))
-        stale_replay_used_count = int(recheck_result['stale_replay_used_count'])
-        open_order_replay_used_count = int(recheck_result['open_order_replay_used_count'])
-        pending_carry_rows = recheck_result['pending_carry_rows']
-        state = _get_dict(recheck_result, "portfolio_state", state)
-        t2_cash_checks = cast(List[Dict[str, Any]], _get_list(recheck_result, "t2_cash_checks", t2_cash_checks))
+        recheck_loop = _normalize_entry_loop_result(
+            recheck_result,
+            fallback_portfolio_state=state,
+            fallback_t2_cash_checks=t2_cash_checks,
+        )
+        fills_new = recheck_loop["fills_new"]
+        trades_new = recheck_loop["trades_new"]
+        new_count = int(recheck_loop["new_count"])
+        new_notional_krw = float(recheck_loop["new_notional_krw"])
+        surge_new_count = int(recheck_loop["surge_new_count"])
+        surge_notional_krw = float(recheck_loop["surge_notional_krw"])
+        split_notional_krw = float(recheck_loop["split_notional_krw"])
+        evaluated_count = int(recheck_loop["evaluated_count"])
+        no_next_day_count = int(recheck_loop["no_next_day_count"])
+        entry_ready_count = int(recheck_loop["entry_ready_count"])
+        cap_block_count = int(recheck_loop["cap_block_count"])
+        processed_skip_count = int(recheck_loop["processed_skip_count"])
+        idempotent_skip_count = int(recheck_loop["idempotent_skip_count"])
+        stale_replay_used_count = int(recheck_loop["stale_replay_used_count"])
+        open_order_replay_used_count = int(recheck_loop["open_order_replay_used_count"])
+        pending_carry_rows = recheck_loop["pending_carry_rows"]
+        state = cast(Dict[str, Any], recheck_loop["portfolio_state"])
+        t2_cash_checks = cast(List[Dict[str, Any]], recheck_loop["t2_cash_checks"])
         print(
             f"[ENTRY_RECHECK_AFTER_EXIT] result new_count={new_count} "
             f"entry_ready={entry_ready_count} open_positions={len(still_open)}"
