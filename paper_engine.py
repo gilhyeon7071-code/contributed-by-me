@@ -108,9 +108,7 @@ from paper_engine.entry import (
     _prepare_pretrade_runtime,
     _print_entry_fill_summary_v2,
     _process_entry_rows,
-    _write_entry_decision_layers_snapshot,
-    _write_entry_signal_snapshot,
-    _write_normal_entry_fill_quality_report,
+    _write_entry_runtime_snapshots_and_reports,
     _write_p1_gate_status,
     apply_p1_entry_controls,
     final_entry_decision,
@@ -1813,27 +1811,15 @@ def main() -> int:
         _scale_zero_causes = risk_orch_ctx.get("scale_zero_causes", []) if isinstance(risk_orch_ctx, dict) else []
         cdf["_scale_zero_causes"] = ",".join(str(x) for x in _scale_zero_causes) if isinstance(_scale_zero_causes, list) else str(_scale_zero_causes or "")
     elif isinstance(cdf, pd.DataFrame) and cdf.empty:
-        _write_entry_signal_snapshot(
-            rows=[],
-            d_ref_ymd=str(d_ref_ymd),
-            rank_col=str(rank_col or ""),
-        )
-        _write_entry_decision_layers_snapshot(
+        _write_entry_runtime_snapshots_and_reports(
             candidate_df=cdf,
-            entry_decision_rows=[],
+            full_candidate_df_for_report=_full_candidate_df_for_report,
+            entry_decisions=[],
             d_ref_ymd=str(d_ref_ymd),
             rank_col=str(rank_col or ""),
             risk_gate_runtime=(risk_gate_runtime if isinstance(risk_gate_runtime, dict) else {}),
-        )
-        _write_normal_entry_fill_quality_report(
-            candidate_df=_full_candidate_df_for_report,
-            entry_decision_rows=[],
-            d_ref_ymd=str(d_ref_ymd),
-            rank_col=str(rank_col or ""),
-        )
-        _write_surge_realtime_shadow_runtime_snapshot(
-            entry_decision_rows=[],
-            d_ref_ymd=str(d_ref_ymd),
+            write_surge_realtime_shadow_runtime_snapshot=_write_surge_realtime_shadow_runtime_snapshot,
+            trace_enabled=False,
         )
 
     pretrade_runtime = _prepare_pretrade_runtime(
@@ -2017,36 +2003,15 @@ def main() -> int:
     t2_cash_checks = cast(List[Dict[str, Any]], entry_loop["t2_cash_checks"])
     entry_decisions = entry_loop["entry_decisions"]
     _print_entry_fill_summary_v2(loop_result)
-    _paper_engine_phase_trace("entry_signal_snapshot_before", decisions=len(entry_decisions) if isinstance(entry_decisions, list) else -1)
-    _write_entry_signal_snapshot(
-        rows=(entry_decisions if isinstance(entry_decisions, list) else []),
-        d_ref_ymd=str(d_ref_ymd),
-        rank_col=str(rank_col or ""),
-    )
-    _paper_engine_phase_trace("entry_signal_snapshot_after")
-    _paper_engine_phase_trace("entry_decision_layers_before", candidates=len(cdf))
-    _write_entry_decision_layers_snapshot(
+    _write_entry_runtime_snapshots_and_reports(
         candidate_df=cdf,
-        entry_decision_rows=(entry_decisions if isinstance(entry_decisions, list) else []),
+        full_candidate_df_for_report=_full_candidate_df_for_report,
+        entry_decisions=entry_decisions,
         d_ref_ymd=str(d_ref_ymd),
         rank_col=str(rank_col or ""),
         risk_gate_runtime=(risk_gate_runtime if isinstance(risk_gate_runtime, dict) else {}),
+        write_surge_realtime_shadow_runtime_snapshot=_write_surge_realtime_shadow_runtime_snapshot,
     )
-    _paper_engine_phase_trace("entry_decision_layers_after")
-    _paper_engine_phase_trace("normal_entry_fill_quality_before")
-    _write_normal_entry_fill_quality_report(
-        candidate_df=_full_candidate_df_for_report,
-        entry_decision_rows=(entry_decisions if isinstance(entry_decisions, list) else []),
-        d_ref_ymd=str(d_ref_ymd),
-        rank_col=str(rank_col or ""),
-    )
-    _paper_engine_phase_trace("normal_entry_fill_quality_after")
-    _paper_engine_phase_trace("surge_realtime_shadow_runtime_before")
-    _write_surge_realtime_shadow_runtime_snapshot(
-        entry_decision_rows=(entry_decisions if isinstance(entry_decisions, list) else []),
-        d_ref_ymd=str(d_ref_ymd),
-    )
-    _paper_engine_phase_trace("surge_realtime_shadow_runtime_after")
     entry_fill_rows_runtime = len(
         [
             row

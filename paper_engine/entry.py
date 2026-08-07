@@ -146,6 +146,7 @@ __all__ = [
     '_record_entry_t2_cash_if_needed',
     '_normalize_entry_loop_result',
     '_print_entry_fill_summary_v2',
+    '_write_entry_runtime_snapshots_and_reports',
     '_process_entry_rows',
     'derive_fx_entry_status',
     'apply_fx_filter',
@@ -187,6 +188,7 @@ from paper_engine.common import (
     _get_dict,
     _get_list,
     _append_reduction_multiplier,
+    _paper_engine_phase_trace,
 )
 from paper_engine.guards import _detect_explicit_market_events
 from paper_engine.io import (
@@ -7867,6 +7869,56 @@ def _print_entry_fill_summary_v2(loop_result: Dict[str, Any]) -> None:
         f"fail_closed={fail_closed if fail_closed else 'no'}"
         f"{(' fail_closed_reason=' + fail_closed_reason) if fail_closed else ''}"
     )
+
+
+def _write_entry_runtime_snapshots_and_reports(
+    *,
+    candidate_df: pd.DataFrame,
+    full_candidate_df_for_report: pd.DataFrame,
+    entry_decisions: Any,
+    d_ref_ymd: str,
+    rank_col: str,
+    risk_gate_runtime: Any,
+    write_surge_realtime_shadow_runtime_snapshot: Callable[..., None],
+    trace_enabled: bool = True,
+) -> None:
+    entry_decision_rows = entry_decisions if isinstance(entry_decisions, list) else []
+    risk_gate = risk_gate_runtime if isinstance(risk_gate_runtime, dict) else {}
+    if trace_enabled:
+        _paper_engine_phase_trace("entry_signal_snapshot_before", decisions=len(entry_decision_rows))
+    _write_entry_signal_snapshot(
+        rows=entry_decision_rows,
+        d_ref_ymd=str(d_ref_ymd),
+        rank_col=str(rank_col or ""),
+    )
+    if trace_enabled:
+        _paper_engine_phase_trace("entry_signal_snapshot_after")
+        _paper_engine_phase_trace("entry_decision_layers_before", candidates=len(candidate_df))
+    _write_entry_decision_layers_snapshot(
+        candidate_df=candidate_df,
+        entry_decision_rows=entry_decision_rows,
+        d_ref_ymd=str(d_ref_ymd),
+        rank_col=str(rank_col or ""),
+        risk_gate_runtime=risk_gate,
+    )
+    if trace_enabled:
+        _paper_engine_phase_trace("entry_decision_layers_after")
+        _paper_engine_phase_trace("normal_entry_fill_quality_before")
+    _write_normal_entry_fill_quality_report(
+        candidate_df=full_candidate_df_for_report,
+        entry_decision_rows=entry_decision_rows,
+        d_ref_ymd=str(d_ref_ymd),
+        rank_col=str(rank_col or ""),
+    )
+    if trace_enabled:
+        _paper_engine_phase_trace("normal_entry_fill_quality_after")
+        _paper_engine_phase_trace("surge_realtime_shadow_runtime_before")
+    write_surge_realtime_shadow_runtime_snapshot(
+        entry_decision_rows=entry_decision_rows,
+        d_ref_ymd=str(d_ref_ymd),
+    )
+    if trace_enabled:
+        _paper_engine_phase_trace("surge_realtime_shadow_runtime_after")
 
 
 def _process_entry_rows(
