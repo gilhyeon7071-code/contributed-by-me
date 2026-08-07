@@ -4,6 +4,45 @@ Split out from the legacy ``paper_engine.py`` as Phase 5 of the module refactor.
 """
 from __future__ import annotations
 
+
+__all__ = [
+    '_write_empty_pending_signals_file',
+    '_archive_entry_source_row',
+    '_atomic_write_csv_with_backup',
+    '_backfill_horizon_note_in_fills',
+    '_reconcile_open_positions_with_fills',
+    '_recovery_action_hint',
+    '_lineage_from_row',
+    '_recover_open_positions',
+    '_partition_replay_orders_for_recovery',
+    '_load_replay_orders_raw',
+    '_load_pending_signals',
+    '_filter_pending_by_trading_age',
+    '_revalidate_pending_signals',
+    '_load_replay_orders',
+    '_save_pending_signals',
+    '_write_pending_status',
+    '_build_entry_exit_lifecycle',
+    '_build_state_machine_summary',
+    '_build_symbol_stop_summary',
+    '_collect_persisted_today_runtime_metrics',
+    '_collect_persisted_today_order_artifacts',
+    '_next_available_legacy_trade_id',
+    '_recover_missing_sell_trades_legacy',
+    '_write_ops_alert',
+    'append_rows',
+    '_append_rows_atomic',
+    '_restore_backup_file',
+    '_sync_new_fills_to_live_bridge',
+    '_compute_current_open_notional',
+    '_count_open_position_slots',
+    '_recalculate_open_notional_and_alert',
+    '_apply_sector_rebalance',
+    '_prioritize_open_positions_for_sell',
+    '_process_position_rows',
+    '_process_open_positions_and_rebalance',
+]
+
 import csv
 import json
 import math

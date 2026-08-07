@@ -6,6 +6,26 @@ Split out from the legacy ``paper_engine.py`` as Phase 2 of the module refactor.
 
 from __future__ import annotations
 
+
+__all__ = [
+    'ensure_dirs',
+    'read_header',
+    'detect_schema',
+    '_write_dashboard_compat_csv',
+    'ensure_csv',
+    '_migrate_legacy_trades_header_if_needed',
+    '_default_state',
+    '_normalize_state_payload',
+    'load_state',
+    '_json_safe',
+    'save_state',
+    '_latest_lob_row_for_code',
+    '_load_intraday_history_for_ymd',
+    '_intraday_price_window_since_entry',
+    '_derive_d_from_fills_path',
+    '_write_market_event_guard_status',
+]
+
 import csv
 import json
 import os

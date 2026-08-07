@@ -7,6 +7,22 @@ were moved here in Phase 3c (3/3).
 
 from __future__ import annotations
 
+
+__all__ = [
+    'evaluate_cross_source_integrity',
+    'evaluate_sigma_outlier_guard',
+    'evaluate_execution_health_guard',
+    '_production_risk_stage',
+    '_production_risk_max_stage',
+    'evaluate_production_risk_playbook_guard',
+    'evaluate_global_outlier_watcher',
+    'evaluate_macro_news_guard',
+    'evaluate_backtest_validation_guard',
+    '_detect_explicit_market_events',
+    'count_kill_switch_streak_days',
+    'compute_adaptive_kill_cap',
+]
+
 import json
 import math
 import os

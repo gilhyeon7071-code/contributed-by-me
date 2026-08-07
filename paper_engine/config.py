@@ -8,6 +8,16 @@ the module refactor.
 
 from __future__ import annotations
 
+
+__all__ = [
+    '_deep_merge_dict',
+    '_parse_override_value',
+    '_set_nested_key',
+    '_apply_env_kv_overrides',
+    '_apply_env_config_overrides',
+    'load_config',
+]
+
 import json
 import os
 import re

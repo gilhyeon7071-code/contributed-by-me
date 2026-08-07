@@ -6,6 +6,55 @@ Split out from the legacy ``paper_engine.py`` as Phase 6 of the module refactor.
 
 from __future__ import annotations
 
+
+__all__ = [
+    'SellOrderRequest',
+    'SellOrderStatusView',
+    'PaperSellOrderAdapter',
+    '_latest_p0_daily_check_report',
+    'load_latest_p0_risk_off',
+    '_build_risk_reason_details',
+    'load_latest_p0_snapshot',
+    '_load_latest_pnl_summary_for_ddm',
+    '_align_p0_snapshot_with_latest_pnl_for_ddm',
+    'load_latest_macro_snapshot',
+    '_build_trend_overlay_2026_context',
+    '_write_replay_quarantine',
+    '_prune_replay_queue_after_quarantine',
+    '_replay_queue_has_lineage_gaps',
+    '_replay_queue_regeneration_reason',
+    '_summarize_replay_queue_scan',
+    '_file_meta_brief',
+    '_collect_replay_regeneration_input_files',
+    '_infer_latest_fill_asof',
+    '_expected_eval_candidates',
+    '_ensure_expected_eval_template',
+    '_replay_regeneration_preflight_issue',
+    '_replay_regeneration_action_hints',
+    '_run_replay_queue_regeneration',
+    '_write_replay_queue_status',
+    '_sync_rootb_replay_summary',
+    '_reconcile_replay_runtime_artifacts',
+    '_write_recovery_status',
+    '_build_order_pre_validation_summary',
+    '_build_order_lifecycle_summary',
+    '_build_order_amend_cancel_summary',
+    '_build_order_chain_ssot_summary',
+    '_build_order_recovery_replay_summary',
+    '_build_order_session_rule_summary',
+    '_build_order_validation_report',
+    '_build_sell_adapter_summary',
+    '_write_replay_consistency_status',
+    '_run_replay_consistency_remediation',
+    '_replay_consistency_remediation_hints',
+    '_refresh_replay_consistency',
+    '_build_ops_alert_and_carryover',
+    '_persist_state_and_runtime_status',
+    'read_latest_stable_params',
+    '_stable_params_usable',
+    '_max_date8_from_candidates',
+]
+
 import json
 import math
 import re

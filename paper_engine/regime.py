@@ -6,6 +6,13 @@ the market-regime decision tree from the main engine body.
 
 from __future__ import annotations
 
+
+__all__ = [
+    'load_latest_gate_snapshot',
+    'resolve_bear_sizing_confirmation',
+    'resolve_market_regime',
+]
+
 import json
 import os
 import re

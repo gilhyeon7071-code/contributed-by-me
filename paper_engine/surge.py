@@ -6,6 +6,25 @@ entry decisions, LOB slippage, type-policy overrides, and sizing logic.
 """
 from __future__ import annotations
 
+
+__all__ = [
+    '_surge_realtime_shadow_fields',
+    '_write_surge_realtime_shadow_runtime_snapshot',
+    '_surge_lob_slippage_pct',
+    '_surge_type_policy_decision',
+    '_surge_type_overrides_for_position',
+    '_normalize_surge_position_policy_fields',
+    '_surge_market_event_block_reason',
+    '_compute_dynamic_max_new_surge',
+    '_overheat_qty_decision',
+    '_surge_execution_quality_qty_decision',
+    '_calc_surge_reversal_signals',
+    '_surge_after_state_from_active_label',
+    '_load_surge_active_response_alert_rows',
+    '_load_surge_live_readiness_audit_rows',
+    '_inject_surge_immediate_candidates',
+]
+
 import json
 import math
 import re

@@ -7,6 +7,46 @@ risk exits, and surge reversal exit logic.
 """
 from __future__ import annotations
 
+
+__all__ = [
+    '_paper_exit_ts',
+    '_entry_order_remaining_qty_for_sell',
+    '_resolve_hold_close_drop_guard_cfg',
+    '_evaluate_hold_close_drop_guard',
+    '_get_sell_rules',
+    '_resolve_stop_loss_pct',
+    '_resolve_trailing_pct',
+    '_resolve_trailing_activation_pct',
+    '_calc_surge_intraday_reversal_exit',
+    '_resolve_take_profit_plan',
+    '_resolve_position_max_hold_days',
+    '_check_fundamental_risk',
+    '_hydrate_position_exit_tags_from_fills',
+    '_calc_surge_exit_severity',
+    '_resolve_surge_exit_ratio_pct',
+    '_evaluate_technical_exit',
+    '_evaluate_market_risk_exit',
+    '_process_single_position_exit',
+    '_collect_persisted_today_sell_artifacts',
+    '_build_sell_order_lifecycle_summary',
+    '_build_partial_exit_policy_summary',
+    '_build_sell_recovery_chain_summary',
+    '_build_sell_validation_report',
+    '_build_legacy_derisk_summary',
+    '_legacy_trade_sig',
+    '_extract_signal_date',
+    '_normalize_partial_sell_order_id',
+    '_sell_lifecycle_signature',
+    '_dedupe_partial_exit_fills',
+    '_dedupe_sell_fills_by_lifecycle_signature',
+    '_dedupe_recovered_trades_legacy',
+    '_dedupe_partial_exit_trades_legacy',
+    '_dedupe_trades_by_note_identity_legacy',
+    '_dedupe_sell_trades_by_lifecycle_signature_legacy',
+    '_write_intraday_residual_overnight_guard_shadow',
+    '_apply_intraday_residual_overnight_guard_exits',
+]
+
 import json
 import re
 from datetime import datetime
