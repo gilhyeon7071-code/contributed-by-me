@@ -49,6 +49,7 @@ __all__ = [
     '_replay_consistency_remediation_hints',
     '_refresh_replay_consistency',
     '_build_ops_alert_and_carryover',
+    '_build_entry_runtime_ops_summary',
     '_persist_state_and_runtime_status',
     'read_latest_stable_params',
     '_stable_params_usable',
@@ -78,6 +79,7 @@ from paper_engine.common import (
     _to_int,
     _get_dict,
     _get_list,
+    _paper_engine_phase_trace,
     compute_participation_slo,
 )
 from paper_engine.io import (
@@ -1971,6 +1973,106 @@ def _build_ops_alert_and_carryover(
         "expected_min_fills": int(expected_min_fills),
         "ops_alert": ops_alert,
     }
+
+def _build_entry_runtime_ops_summary(
+    *,
+    fills_new: List[Any],
+    schema: str,
+    ops_enabled: bool,
+    ops_policy: Dict[str, Any],
+    pending_carry_rows: List[Dict[str, Any]],
+    carry_max_age: int,
+    px: pd.DataFrame,
+    market_regime: str,
+    regime_info: Dict[str, Any],
+    config: Dict[str, Any],
+    max_new: int,
+    max_new_zero_reason: str,
+    candidate_df: pd.DataFrame,
+    price_universe_codes: int,
+    evaluated_count: int,
+    entry_ready_count: int,
+    new_count: int,
+    no_next_day_count: int,
+    cap_block_count: int,
+    processed_skip_count: int,
+    max_new_skip_count: int,
+    idempotent_skip_count: int,
+    stale_replay_used_count: int,
+    open_order_replay_used_count: int,
+    entry_decisions: List[Dict[str, Any]],
+    entry_candidate_df: Optional[pd.DataFrame],
+    universe_shrink_candidates: bool,
+    open_slot_count: int,
+    max_positions: int,
+    max_positions_meta: Optional[Dict[str, Any]],
+    replay_enabled: bool,
+) -> Dict[str, Any]:
+    entry_fill_rows_runtime = len(
+        [
+            row
+            for row in (fills_new or [])
+            if len(row) >= 3 and str(row[2] if schema == "legacy" else row[4]).strip().upper() == "BUY"
+        ]
+    )
+    _paper_engine_phase_trace("ops_alert_carryover_before", entry_ready=entry_ready_count, fills=entry_fill_rows_runtime)
+    ops_summary = _build_ops_alert_and_carryover(
+        ops_enabled=bool(ops_enabled),
+        ops_policy=ops_policy,
+        pending_carry_rows=pending_carry_rows,
+        carry_max_age=int(carry_max_age),
+        px=px,
+        market_regime=str(market_regime or ""),
+        regime_info=regime_info,
+        config=config,
+        max_new=int(max_new),
+        max_new_zero_reason=str(max_new_zero_reason or ""),
+        candidate_count=int(len(candidate_df)),
+        price_universe_codes=int(price_universe_codes),
+        evaluated_count=int(evaluated_count),
+        entry_ready_count=int(entry_ready_count),
+        new_count=int(new_count),
+        filled_count=int(entry_fill_rows_runtime),
+        no_next_day_count=int(no_next_day_count),
+        cap_block_count=int(cap_block_count),
+        processed_skip_count=int(processed_skip_count),
+        max_new_skip_count=int(max_new_skip_count),
+        idempotent_skip_count=int(idempotent_skip_count),
+        stale_replay_used_count=int(stale_replay_used_count),
+        open_order_replay_used_count=int(open_order_replay_used_count),
+        entry_decisions=entry_decisions,
+        entry_candidate_df=entry_candidate_df,
+        universe_shrink_candidates=bool(universe_shrink_candidates),
+        open_slot_count=int(open_slot_count),
+        max_positions=int(max_positions),
+        max_positions_meta=max_positions_meta,
+    )
+    _paper_engine_phase_trace("ops_alert_carryover_after")
+    expected_min_fills = int(ops_summary.get("expected_min_fills", 0))
+    ops_alert = dict(ops_summary.get("ops_alert") or {})
+    if ops_enabled and (
+        (int(entry_ready_count) > 0 and int(entry_fill_rows_runtime) < int(expected_min_fills))
+        or (len(candidate_df) > 0 and int(no_next_day_count) >= len(candidate_df))
+    ):
+        no_fill_reasons = ops_alert.get("no_fill_reasons") or []
+        no_fill_reason_txt = ",".join(str(x) for x in no_fill_reasons) if no_fill_reasons else "-"
+        print(
+            f"[OPS_ALERT] participation weak: filled={entry_fill_rows_runtime} expected>={expected_min_fills} "
+            f"entry_ready={entry_ready_count} no_next_day={no_next_day_count}/{len(candidate_df)} "
+            f"reasons={no_fill_reason_txt}"
+        )
+    if replay_enabled:
+        print(
+            f"[REPLAY] processed_skip={processed_skip_count} stale_replay_used={stale_replay_used_count} "
+            f"new_fills={entry_fill_rows_runtime}"
+        )
+    return {
+        "entry_fill_rows_runtime": int(entry_fill_rows_runtime),
+        "expected_min_fills": int(expected_min_fills),
+        "ops_alert": ops_alert,
+        "ops_summary": ops_summary,
+    }
+
 def _persist_state_and_runtime_status(
     *,
     state: Dict[str, Any],

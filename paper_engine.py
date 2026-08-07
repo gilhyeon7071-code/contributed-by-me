@@ -177,7 +177,7 @@ from paper_engine.state import (
     _write_replay_queue_status,
     _write_recovery_status,
     _refresh_replay_consistency,
-    _build_ops_alert_and_carryover,
+    _build_entry_runtime_ops_summary,
     _persist_state_and_runtime_status,
 )
 
@@ -2012,16 +2012,9 @@ def main() -> int:
         risk_gate_runtime=(risk_gate_runtime if isinstance(risk_gate_runtime, dict) else {}),
         write_surge_realtime_shadow_runtime_snapshot=_write_surge_realtime_shadow_runtime_snapshot,
     )
-    entry_fill_rows_runtime = len(
-        [
-            row
-            for row in fills_new
-            if len(row) >= 3 and str(row[2] if schema == "legacy" else row[4]).strip().upper() == "BUY"
-        ]
-    )
-
-    _paper_engine_phase_trace("ops_alert_carryover_before", entry_ready=entry_ready_count, fills=entry_fill_rows_runtime)
-    ops_summary = _build_ops_alert_and_carryover(
+    ops_runtime = _build_entry_runtime_ops_summary(
+        fills_new=fills_new,
+        schema=str(schema),
         ops_enabled=bool(ops_enabled),
         ops_policy=ops_policy,
         pending_carry_rows=pending_carry_rows,
@@ -2032,12 +2025,11 @@ def main() -> int:
         config=cfg,
         max_new=int(max_new),
         max_new_zero_reason=str(max_new_zero_reason or ""),
-        candidate_count=int(len(cdf)),
+        candidate_df=cdf,
         price_universe_codes=int(price_universe_codes),
         evaluated_count=int(evaluated_count),
         entry_ready_count=int(entry_ready_count),
         new_count=int(new_count),
-        filled_count=int(entry_fill_rows_runtime),
         no_next_day_count=int(no_next_day_count),
         cap_block_count=int(cap_block_count),
         processed_skip_count=int(processed_skip_count),
@@ -2051,24 +2043,11 @@ def main() -> int:
         open_slot_count=int(open_slot_count),
         max_positions=int(max_positions),
         max_positions_meta=max_positions_meta,
+        replay_enabled=bool(replay_enabled),
     )
-    _paper_engine_phase_trace("ops_alert_carryover_after")
-    expected_min_fills = int(ops_summary.get("expected_min_fills", 0))
-    ops_alert = dict(ops_summary.get("ops_alert") or {})
-
-    if ops_enabled and ((entry_ready_count > 0 and entry_fill_rows_runtime < expected_min_fills) or (len(cdf) > 0 and no_next_day_count >= len(cdf))):
-        no_fill_reasons = ops_alert.get("no_fill_reasons") or []
-        no_fill_reason_txt = ",".join(str(x) for x in no_fill_reasons) if no_fill_reasons else "-"
-        print(
-            f"[OPS_ALERT] participation weak: filled={entry_fill_rows_runtime} expected>={expected_min_fills} "
-            f"entry_ready={entry_ready_count} no_next_day={no_next_day_count}/{len(cdf)} "
-            f"reasons={no_fill_reason_txt}"
-        )
-    if replay_enabled:
-        print(
-            f"[REPLAY] processed_skip={processed_skip_count} stale_replay_used={stale_replay_used_count} "
-            f"new_fills={entry_fill_rows_runtime}"
-        )
+    entry_fill_rows_runtime = int(ops_runtime["entry_fill_rows_runtime"])
+    expected_min_fills = int(ops_runtime["expected_min_fills"])
+    ops_alert = dict(ops_runtime.get("ops_alert") or {})
     _paper_engine_phase_trace("replay_queue_status_before", ops_enabled=bool(ops_enabled))
     replay_queue_status = _write_replay_queue_status(carry_max_age, open_order_replay_used_count) if ops_enabled else {}
     _paper_engine_phase_trace("replay_queue_status_after")
