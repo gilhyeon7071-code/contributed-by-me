@@ -16,6 +16,7 @@ __all__ = [
     '_ddm_is_hard_block',
     '_ddm_select_action',
     '_ddm_forced_sell_ratio_pct',
+    '_apply_drawdown_entry_capacity',
     '_ddm_count_consecutive_loss_days',
     '_ddm_pos_key',
     '_ddm_select_liquidation_targets',
@@ -25,6 +26,7 @@ __all__ = [
 import json
 import math
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -230,6 +232,114 @@ def _ddm_forced_sell_ratio_pct(ddm_action: Any) -> float:
     if ratio_pct <= 0.0:
         return 100.0
     return min(100.0, max(0.0, ratio_pct))
+
+
+def _apply_drawdown_entry_capacity(
+    *,
+    cfg: Dict[str, Any],
+    p0_snapshot: Dict[str, Any],
+    gate_snapshot: Dict[str, Any],
+    trades_path: Path,
+    log_dir: Path,
+    ddm_status_path: Path,
+    max_new: int,
+) -> Dict[str, Any]:
+    ddm_cfg = cfg.get("drawdown_manager") if isinstance(cfg, dict) else {}
+    if not isinstance(ddm_cfg, dict):
+        ddm_cfg = {}
+    ddm_enabled = bool(ddm_cfg.get("enabled", False))
+    consecutive_loss_days = _ddm_count_consecutive_loss_days(trades_path)
+    ddm_context = {
+        "consecutive_loss_days": consecutive_loss_days,
+        "kill_switch_active": bool(
+            (
+                (p0_snapshot.get("kill_switch") if isinstance(p0_snapshot.get("kill_switch"), dict) else {})
+                or {}
+            ).get("triggered", False)
+        ),
+        "risk_off": bool(p0_snapshot.get("risk_off_enabled", False)),
+        "gate_daily": str(gate_snapshot.get("gate_status") or "").upper(),
+    }
+    print(f"[DDM] context={ddm_context}")
+    ddm_action = _ddm_select_action(cfg, p0_snapshot, context=ddm_context)
+    ddm_exposure_cap: Optional[float] = None
+    ddm_force_liquidate_pct = 0.0
+
+    if ddm_enabled:
+        old_max_new = int(max_new)
+        ddm_stage = max(0, int(getattr(ddm_action, "stage_idx", 0) or 0))
+        ddm_cap_new = calc_max_new(old_max_new, ddm_action.new_entry_allowed_pct, ddm_stage)
+        max_new = min(int(max_new), ddm_cap_new)
+        ddm_exposure_cap = ddm_action.max_exposure
+        ddm_force_liquidate_pct = float(ddm_action.liquidate_weakest_pct)
+        ddm_forced_sell_ratio_pct = float(_ddm_forced_sell_ratio_pct(ddm_action))
+        print(
+            "[DDM] mdd_abs=%.4f stage=%s threshold=%.2f entry_pct=%.2f liquidation_selection_pct=%.2f forced_sell_ratio_pct=%.2f exposure_cap=%s max_new=%d->%d"
+            % (
+                ddm_action.current_mdd_abs,
+                str(ddm_action.stage_idx),
+                ddm_action.threshold,
+                ddm_action.new_entry_allowed_pct,
+                ddm_action.liquidate_weakest_pct,
+                ddm_forced_sell_ratio_pct,
+                ("None" if ddm_action.max_exposure is None else f"{ddm_action.max_exposure:.2f}"),
+                old_max_new,
+                max_new,
+            )
+        )
+        try:
+            ddm_status = {
+                "generated_at": datetime.now().isoformat(timespec="seconds"),
+                "source": "paper_engine",
+                "pnl_summary_path": str(log_dir / "paper_pnl_summary_last.json"),
+                "ddm_enabled": bool(ddm_enabled),
+                "current_mdd_abs": float(ddm_action.current_mdd_abs),
+                "metric_basis": str(getattr(ddm_action, "metric_basis", "") or ""),
+                "metric_details": (
+                    getattr(ddm_action, "metric_details", None)
+                    if isinstance(getattr(ddm_action, "metric_details", None), dict)
+                    else {}
+                ),
+                "stage_idx": int(ddm_action.stage_idx),
+                "threshold": float(ddm_action.threshold),
+                "new_entry_allowed_pct": float(ddm_action.new_entry_allowed_pct),
+                "liquidate_weakest_pct": float(ddm_action.liquidate_weakest_pct),
+                "liquidation_selection_pct": float(ddm_action.liquidate_weakest_pct),
+                "forced_sell_ratio_pct": float(ddm_forced_sell_ratio_pct),
+                "ddm_pct_field_semantics": {
+                    "liquidate_weakest_pct": "legacy_alias_for_liquidation_selection_pct",
+                    "liquidation_selection_pct": "weakest_position_selection_pct",
+                    "forced_sell_ratio_pct": "per_selected_position_sell_ratio_pct",
+                    "stage_4_plus": "full_exit_selected_positions_intentional_emergency_escalation",
+                    "dd_ratio_hard": "entry_gate_daily_loss_ratio_independent_from_drawdown_manager_mdd",
+                },
+                "max_exposure": ddm_action.max_exposure,
+                "max_new_before": int(old_max_new),
+                "max_new_after": int(max_new),
+                "context": ddm_context,
+                "p0_snapshot_path": p0_snapshot.get("path") if isinstance(p0_snapshot, dict) else None,
+                "p0_as_of_ymd": p0_snapshot.get("as_of_ymd") if isinstance(p0_snapshot, dict) else None,
+                "pnl_alignment": (
+                    p0_snapshot.get("ddm_pnl_alignment")
+                    if isinstance(p0_snapshot, dict) and isinstance(p0_snapshot.get("ddm_pnl_alignment"), dict)
+                    else {}
+                ),
+            }
+            ddm_status_path.write_text(json.dumps(ddm_status, ensure_ascii=False, indent=2), encoding="utf-8")
+            print(f"[DDM_STATUS] json={ddm_status_path}")
+        except Exception as e:
+            print(f"[DDM_STATUS][WARN] write_failed={type(e).__name__}:{e}")
+
+    return {
+        "ddm_cfg": ddm_cfg,
+        "ddm_enabled": bool(ddm_enabled),
+        "consecutive_loss_days": int(consecutive_loss_days),
+        "ddm_context": ddm_context,
+        "ddm_action": ddm_action,
+        "ddm_exposure_cap": ddm_exposure_cap,
+        "ddm_force_liquidate_pct": float(ddm_force_liquidate_pct),
+        "max_new": int(max_new),
+    }
 
 
 def _ddm_count_consecutive_loss_days(trades_path: Path) -> int:

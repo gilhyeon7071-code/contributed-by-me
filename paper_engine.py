@@ -66,11 +66,8 @@ from paper_engine.io import (
 from paper_engine.drawdown import (
     _ddm_to_float,
     _ddm_pct01,
-    calc_max_new,
     _ddm_extract_vix_proxy,
-    _ddm_select_action,
-    _ddm_forced_sell_ratio_pct,
-    _ddm_count_consecutive_loss_days,
+    _apply_drawdown_entry_capacity,
 )
 from paper_engine.common import (
     _to_float,
@@ -654,87 +651,23 @@ def main() -> int:
             half_cap = 0 if base_max_new <= 0 else max(1, int(math.floor(base_max_new * 0.5)))
             max_new = min(max_new, half_cap)
             print(f"[PAPER_ENGINE] chosen_level={chosen_level} -> CAP new entries to max_new={max_new}")
-    ddm_cfg = cfg.get("drawdown_manager") if isinstance(cfg, dict) else {}
-    if not isinstance(ddm_cfg, dict):
-        ddm_cfg = {}
-    ddm_enabled = bool(ddm_cfg.get("enabled", False))
-    consecutive_loss_days = _ddm_count_consecutive_loss_days(TRADES)
-    ddm_context = {
-        "consecutive_loss_days": consecutive_loss_days,
-        "kill_switch_active": bool(((p0_snapshot.get("kill_switch") if isinstance(p0_snapshot.get("kill_switch"), dict) else {}) or {}).get("triggered", False)),
-        "risk_off": bool(p0_snapshot.get("risk_off_enabled", False)),
-        "gate_daily": str(gate_snapshot.get("gate_status") or "").upper(),
-    }
-    print(f"[DDM] context={ddm_context}")
-    ddm_action = _ddm_select_action(cfg, p0_snapshot, context=ddm_context)
-    ddm_exposure_cap: Optional[float] = None
-    ddm_force_liquidate_pct = 0.0
-
-    if ddm_enabled:
-        old_max_new = max_new
-        ddm_stage = max(0, int(getattr(ddm_action, "stage_idx", 0) or 0))
-        ddm_cap_new = calc_max_new(old_max_new, ddm_action.new_entry_allowed_pct, ddm_stage)
-        max_new = min(max_new, ddm_cap_new)
-        ddm_exposure_cap = ddm_action.max_exposure
-        ddm_force_liquidate_pct = float(ddm_action.liquidate_weakest_pct)
-        ddm_forced_sell_ratio_pct = float(_ddm_forced_sell_ratio_pct(ddm_action))
-        print(
-            "[DDM] mdd_abs=%.4f stage=%s threshold=%.2f entry_pct=%.2f liquidation_selection_pct=%.2f forced_sell_ratio_pct=%.2f exposure_cap=%s max_new=%d->%d"
-            % (
-                ddm_action.current_mdd_abs,
-                str(ddm_action.stage_idx),
-                ddm_action.threshold,
-                ddm_action.new_entry_allowed_pct,
-                ddm_action.liquidate_weakest_pct,
-                ddm_forced_sell_ratio_pct,
-                ("None" if ddm_action.max_exposure is None else f"{ddm_action.max_exposure:.2f}"),
-                old_max_new,
-                max_new,
-            )
-        )
-        try:
-            ddm_status = {
-                "generated_at": datetime.now().isoformat(timespec="seconds"),
-                "source": "paper_engine",
-                "pnl_summary_path": str(LOG_DIR / "paper_pnl_summary_last.json"),
-                "ddm_enabled": bool(ddm_enabled),
-                "current_mdd_abs": float(ddm_action.current_mdd_abs),
-                "metric_basis": str(getattr(ddm_action, "metric_basis", "") or ""),
-                "metric_details": (
-                    getattr(ddm_action, "metric_details", None)
-                    if isinstance(getattr(ddm_action, "metric_details", None), dict)
-                    else {}
-                ),
-                "stage_idx": int(ddm_action.stage_idx),
-                "threshold": float(ddm_action.threshold),
-                "new_entry_allowed_pct": float(ddm_action.new_entry_allowed_pct),
-                "liquidate_weakest_pct": float(ddm_action.liquidate_weakest_pct),
-                "liquidation_selection_pct": float(ddm_action.liquidate_weakest_pct),
-                "forced_sell_ratio_pct": float(ddm_forced_sell_ratio_pct),
-                "ddm_pct_field_semantics": {
-                    "liquidate_weakest_pct": "legacy_alias_for_liquidation_selection_pct",
-                    "liquidation_selection_pct": "weakest_position_selection_pct",
-                    "forced_sell_ratio_pct": "per_selected_position_sell_ratio_pct",
-                    "stage_4_plus": "full_exit_selected_positions_intentional_emergency_escalation",
-                    "dd_ratio_hard": "entry_gate_daily_loss_ratio_independent_from_drawdown_manager_mdd",
-                },
-                "max_exposure": ddm_action.max_exposure,
-                "max_new_before": int(old_max_new),
-                "max_new_after": int(max_new),
-                "context": ddm_context,
-                "p0_snapshot_path": p0_snapshot.get("path") if isinstance(p0_snapshot, dict) else None,
-                "p0_as_of_ymd": p0_snapshot.get("as_of_ymd") if isinstance(p0_snapshot, dict) else None,
-                "pnl_alignment": (
-                    p0_snapshot.get("ddm_pnl_alignment")
-                    if isinstance(p0_snapshot, dict) and isinstance(p0_snapshot.get("ddm_pnl_alignment"), dict)
-                    else {}
-                ),
-            }
-            ddm_status_path = DDM_STATUS_PATH
-            ddm_status_path.write_text(json.dumps(ddm_status, ensure_ascii=False, indent=2), encoding="utf-8")
-            print(f"[DDM_STATUS] json={ddm_status_path}")
-        except Exception as e:
-            print(f"[DDM_STATUS][WARN] write_failed={type(e).__name__}:{e}")
+    ddm_runtime = _apply_drawdown_entry_capacity(
+        cfg=cfg,
+        p0_snapshot=p0_snapshot,
+        gate_snapshot=gate_snapshot,
+        trades_path=TRADES,
+        log_dir=LOG_DIR,
+        ddm_status_path=DDM_STATUS_PATH,
+        max_new=max_new,
+    )
+    ddm_cfg = cast(Dict[str, Any], ddm_runtime.get("ddm_cfg") or {})
+    ddm_enabled = bool(ddm_runtime.get("ddm_enabled", False))
+    consecutive_loss_days = int(ddm_runtime.get("consecutive_loss_days", 0) or 0)
+    ddm_context = cast(Dict[str, Any], ddm_runtime.get("ddm_context") or {})
+    ddm_action = ddm_runtime.get("ddm_action")
+    ddm_exposure_cap = cast(Optional[float], ddm_runtime.get("ddm_exposure_cap"))
+    ddm_force_liquidate_pct = float(ddm_runtime.get("ddm_force_liquidate_pct", 0.0) or 0.0)
+    max_new = int(ddm_runtime.get("max_new", max_new) or 0)
     _capture_max_new_zero("ddm_stage_cap")
 
     max_hold_days = int(cfg.get("max_hold_days", 10))
