@@ -19,6 +19,7 @@ __all__ = [
     'evaluate_macro_news_guard',
     'evaluate_backtest_validation_guard',
     '_detect_explicit_market_events',
+    '_apply_relax_ladder_entry_cap',
     'count_kill_switch_streak_days',
     'compute_adaptive_kill_cap',
 ]
@@ -381,6 +382,62 @@ def evaluate_sigma_outlier_guard(cfg: Dict[str, Any], log_dir: Path) -> Dict[str
             out["decision"] = "ALLOW"
             out["reason"] = "ok"
     return out
+
+
+def _apply_relax_ladder_entry_cap(
+    *,
+    chosen_level: Optional[str],
+    chosen_level_num: Optional[int],
+    adaptive_entry_control: Dict[str, Any],
+    base_max_new: int,
+    max_new: int,
+) -> int:
+    # Relax-ladder safety cap: tighten max_new when candidate filters were overly relaxed.
+    # L6+ can now be a valid auto-relax outcome, so avoid hard-blocking and cap entries instead.
+    if chosen_level_num is None:
+        return int(max_new)
+
+    if chosen_level_num >= 8:
+        try:
+            high_factor = float((adaptive_entry_control or {}).get("dynamic_relax_high_factor", 0.50) or 0.50)
+        except Exception:
+            high_factor = 0.50
+        high_factor = max(0.0, min(1.0, high_factor))
+        high_cap = 0 if base_max_new <= 0 else max(1, int(math.floor(base_max_new * high_factor)))
+        max_new = min(max_new, high_cap)
+        print(
+            f"[PAPER_ENGINE] chosen_level={chosen_level} -> HIGH CAP new entries to max_new={max_new} "
+            f"(high_factor={high_factor:.2f})"
+        )
+    elif chosen_level_num >= 6:
+        try:
+            l6_factor = float((adaptive_entry_control or {}).get("dynamic_relax_l6_factor", 0.25) or 0.25)
+        except Exception:
+            l6_factor = 0.25
+        l6_factor = max(0.0, min(1.0, l6_factor))
+        l6_cap = 0 if base_max_new <= 0 else max(1, int(math.floor(base_max_new * l6_factor)))
+        max_new = min(max_new, l6_cap)
+        print(
+            f"[PAPER_ENGINE] chosen_level={chosen_level} -> CAP new entries to max_new={max_new} "
+            f"(l6_factor={l6_factor:.2f})"
+        )
+    elif chosen_level_num >= 5:
+        try:
+            l5_factor = float((adaptive_entry_control or {}).get("dynamic_relax_l5_factor", 0.10) or 0.10)
+        except Exception:
+            l5_factor = 0.10
+        l5_factor = max(0.0, min(1.0, l5_factor))
+        l5_cap = 0 if base_max_new <= 0 else max(1, int(math.floor(base_max_new * l5_factor)))
+        max_new = min(max_new, l5_cap)
+        print(
+            f"[PAPER_ENGINE] chosen_level={chosen_level} -> DYNAMIC CAP new entries to max_new={max_new} "
+            f"(l5_factor={l5_factor:.2f})"
+        )
+    elif chosen_level_num >= 4:
+        half_cap = 0 if base_max_new <= 0 else max(1, int(math.floor(base_max_new * 0.5)))
+        max_new = min(max_new, half_cap)
+        print(f"[PAPER_ENGINE] chosen_level={chosen_level} -> CAP new entries to max_new={max_new}")
+    return int(max_new)
 
 
 def evaluate_execution_health_guard(cfg: Dict[str, Any]) -> Dict[str, Any]:

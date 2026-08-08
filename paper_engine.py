@@ -152,6 +152,7 @@ from paper_engine.regime import (
 from paper_engine.guards import (
     count_kill_switch_streak_days,
     compute_adaptive_kill_cap,
+    _apply_relax_ladder_entry_cap,
 )
 from paper_engine.risk_orchestration import (
     _compute_risk_orch_scale,
@@ -617,40 +618,13 @@ def main() -> int:
                 max_new = min(base_max_new, rally_probe_max_new)
                 print(f"[REGIME] RALLY -> probe reopen max_new={max_new} under kill_switch block")
 
-    # Relax-ladder safety cap: tighten max_new when candidate filters were overly relaxed.
-    # L6+ can now be a valid auto-relax outcome, so avoid hard-blocking and cap entries instead.
-    if chosen_level_num is not None:
-        if chosen_level_num >= 8:
-            try:
-                high_factor = float((aec or {}).get("dynamic_relax_high_factor", 0.50) or 0.50)
-            except Exception:
-                high_factor = 0.50
-            high_factor = max(0.0, min(1.0, high_factor))
-            high_cap = 0 if base_max_new <= 0 else max(1, int(math.floor(base_max_new * high_factor)))
-            max_new = min(max_new, high_cap)
-            print(f"[PAPER_ENGINE] chosen_level={chosen_level} -> HIGH CAP new entries to max_new={max_new} (high_factor={high_factor:.2f})")
-        elif chosen_level_num >= 6:
-            try:
-                l6_factor = float((aec or {}).get("dynamic_relax_l6_factor", 0.25) or 0.25)
-            except Exception:
-                l6_factor = 0.25
-            l6_factor = max(0.0, min(1.0, l6_factor))
-            l6_cap = 0 if base_max_new <= 0 else max(1, int(math.floor(base_max_new * l6_factor)))
-            max_new = min(max_new, l6_cap)
-            print(f"[PAPER_ENGINE] chosen_level={chosen_level} -> CAP new entries to max_new={max_new} (l6_factor={l6_factor:.2f})")
-        elif chosen_level_num >= 5:
-            try:
-                l5_factor = float((aec or {}).get("dynamic_relax_l5_factor", 0.10) or 0.10)
-            except Exception:
-                l5_factor = 0.10
-            l5_factor = max(0.0, min(1.0, l5_factor))
-            l5_cap = 0 if base_max_new <= 0 else max(1, int(math.floor(base_max_new * l5_factor)))
-            max_new = min(max_new, l5_cap)
-            print(f"[PAPER_ENGINE] chosen_level={chosen_level} -> DYNAMIC CAP new entries to max_new={max_new} (l5_factor={l5_factor:.2f})")
-        elif chosen_level_num >= 4:
-            half_cap = 0 if base_max_new <= 0 else max(1, int(math.floor(base_max_new * 0.5)))
-            max_new = min(max_new, half_cap)
-            print(f"[PAPER_ENGINE] chosen_level={chosen_level} -> CAP new entries to max_new={max_new}")
+    max_new = _apply_relax_ladder_entry_cap(
+        chosen_level=chosen_level,
+        chosen_level_num=chosen_level_num,
+        adaptive_entry_control=aec,
+        base_max_new=base_max_new,
+        max_new=max_new,
+    )
     ddm_runtime = _apply_drawdown_entry_capacity(
         cfg=cfg,
         p0_snapshot=p0_snapshot,
