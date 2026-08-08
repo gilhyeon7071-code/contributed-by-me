@@ -10,6 +10,7 @@ from __future__ import annotations
 __all__ = [
     '_risk_orch_pct01',
     '_risk_orch_recent_trade_stats',
+    '_build_initial_sizing_context',
     '_compute_risk_orch_scale',
 ]
 
@@ -18,7 +19,8 @@ from typing import Any, Dict, List
 
 import pandas as pd
 
-from paper_engine.common import _to_float, _to_int, _get_dict
+from paper_engine.common import _pct01_from_config, _to_float, _to_int, _get_dict
+from paper_engine.drawdown import _ddm_extract_vix_proxy, _ddm_pct01, _ddm_to_float
 from utils.common import read_csv_safe
 
 def _risk_orch_pct01(v: Any, default: float) -> float:
@@ -57,6 +59,130 @@ def _risk_orch_recent_trade_stats(trades_path: Path, lookback_trades: int) -> Di
     tail = ss[ss <= q]
     es = float(tail.mean()) if len(tail) > 0 else 0.0
     return {"edge": edge, "variance": max(var, 0.0), "est_vol": max(est_vol, 0.0), "es": es, "es_alpha": alpha}
+
+
+def _build_initial_sizing_context(
+    *,
+    cfg: Dict[str, Any],
+    p0_snapshot: Dict[str, Any],
+    macro_snapshot: Dict[str, Any],
+    log_dir: Path,
+    ddm_cfg: Dict[str, Any],
+    consecutive_loss_days: int,
+    ddm_exposure_cap: Any,
+    max_new: int,
+    max_positions_meta: Dict[str, Any],
+) -> Dict[str, Any]:
+    capital_total = float(cfg.get("capital_total", 0) or 0)
+    capital_total_configured = float(capital_total)
+    account_equity_for_allocation = None
+    try:
+        _p0_metrics = ((p0_snapshot.get("kill_switch") or {}).get("metrics") or {}) if isinstance(p0_snapshot, dict) else {}
+        _p0_account = _p0_metrics.get("account_basis") if isinstance(_p0_metrics, dict) else None
+        if isinstance(_p0_account, dict) and _p0_account.get("status") == "PASS":
+            account_equity_for_allocation = _to_float(_p0_account.get("equity_est"), 0.0)
+            if account_equity_for_allocation > 0.0 and capital_total_configured > 0.0:
+                capital_total = min(capital_total_configured, float(account_equity_for_allocation))
+                print(
+                    f"[CAPITAL_BASIS] configured={capital_total_configured:.0f} "
+                    f"account_equity={float(account_equity_for_allocation):.0f} "
+                    f"effective={capital_total:.0f} basis=min(configured,account_equity)"
+                )
+    except Exception as e:
+        print(f"[CAPITAL_BASIS][WARN] account_equity_unavailable={type(e).__name__}:{e}")
+
+    max_positions_meta = dict(max_positions_meta or {})
+    max_positions_meta["capital_basis"] = {
+        "configured_capital_total": float(capital_total_configured),
+        "account_equity": (None if account_equity_for_allocation is None else float(account_equity_for_allocation)),
+        "effective_capital_total": float(capital_total),
+        "basis": "min(configured_capital_total,account_equity)" if account_equity_for_allocation else "configured_capital_total",
+    }
+    max_gross_exposure_pct = _risk_orch_pct01(cfg.get("max_gross_exposure_pct", 1.0), 1.0)
+    max_daily_new_exposure_pct = _risk_orch_pct01(cfg.get("max_daily_new_exposure_pct", 1.0), 1.0)
+    capital_budget_policy = cfg.get("capital_budget_policy", {}) if isinstance(cfg.get("capital_budget_policy"), dict) else {}
+    capital_budget_enabled = bool(capital_budget_policy.get("enabled", False))
+    if capital_budget_enabled:
+        budget_gross_cap = max(
+            0.0,
+            min(1.0, _pct01_from_config(capital_budget_policy.get("gross_exposure_pct", 0.55), 0.55)),
+        )
+        old_exp = max_gross_exposure_pct
+        max_gross_exposure_pct = min(max_gross_exposure_pct, budget_gross_cap)
+        print(
+            f"[BUDGET_POLICY] enabled=true gross_exposure {old_exp:.3f}->{max_gross_exposure_pct:.3f} "
+            f"basic={_pct01_from_config(capital_budget_policy.get('basic_alloc_pct', 0.40), 0.40):.3f} "
+            f"surge={_pct01_from_config(capital_budget_policy.get('surge_alloc_pct', 0.06), 0.06):.3f} "
+            f"split={_pct01_from_config(capital_budget_policy.get('split_alloc_pct', 0.18), 0.18):.3f} "
+            f"recovery={_pct01_from_config(capital_budget_policy.get('recovery_alloc_pct', 0.10), 0.10):.3f} "
+            f"reserve={_pct01_from_config(capital_budget_policy.get('reserve_alloc_pct', 0.20), 0.20):.3f}"
+        )
+    macro_exposure_mult = _risk_orch_pct01((macro_snapshot or {}).get("exposure_multiplier", 1.0), 1.0)
+    if macro_exposure_mult < 1.0:
+        old_exp = max_gross_exposure_pct
+        max_gross_exposure_pct = min(max_gross_exposure_pct, max_gross_exposure_pct * macro_exposure_mult)
+        print(f"[MACRO] exposure_multiplier={macro_exposure_mult:.3f} -> gross_exposure {old_exp:.3f}->{max_gross_exposure_pct:.3f}")
+
+    def _apply_budget_defensive_floor(old_exp: float, current_exp: float, current_max_new: int) -> tuple[float, int]:
+        if not capital_budget_enabled:
+            return float(current_exp), int(current_max_new)
+        defensive_floor = max(
+            0.0,
+            min(
+                1.0,
+                _pct01_from_config(
+                    capital_budget_policy.get("defensive_floor_exposure_pct", 0.45),
+                    0.45,
+                ),
+            ),
+        )
+        if 0.0 < defensive_floor < old_exp and current_exp < defensive_floor:
+            current_exp = old_exp
+            defensive_max_new = max(0, _to_int(capital_budget_policy.get("defensive_max_new", 1), 1))
+            if defensive_max_new > 0:
+                old_max_new = int(current_max_new)
+                current_max_new = min(int(current_max_new), defensive_max_new)
+                print(
+                    f"[BUDGET_DDM_BAND] floor={defensive_floor:.3f} cap={current_exp:.3f} "
+                    f"defensive_max_new={defensive_max_new} max_new {old_max_new}->{current_max_new}"
+                )
+        return float(current_exp), int(current_max_new)
+
+    cons_loss_thr = int(_ddm_to_float(ddm_cfg.get("consecutive_loss_days_threshold", 3), 3))
+    cons_loss_mult = _ddm_pct01(ddm_cfg.get("consecutive_loss_exposure_multiplier", 0.5), 0.5)
+    if consecutive_loss_days >= max(1, cons_loss_thr):
+        old_exp = max_gross_exposure_pct
+        max_gross_exposure_pct = max(0.0, min(1.0, max_gross_exposure_pct * cons_loss_mult))
+        max_gross_exposure_pct, max_new = _apply_budget_defensive_floor(old_exp, max_gross_exposure_pct, int(max_new))
+        print(f"[DDM] consecutive_loss_days={consecutive_loss_days} >= {cons_loss_thr} -> gross_exposure {old_exp:.3f}->{max_gross_exposure_pct:.3f}")
+
+    if ddm_exposure_cap is not None:
+        old_exp = max_gross_exposure_pct
+        max_gross_exposure_pct = min(max_gross_exposure_pct, _ddm_pct01(ddm_exposure_cap, max_gross_exposure_pct))
+        max_gross_exposure_pct, max_new = _apply_budget_defensive_floor(old_exp, max_gross_exposure_pct, int(max_new))
+        print(f"[DDM] stage exposure cap applied: {old_exp:.3f}->{max_gross_exposure_pct:.3f}")
+
+    position_size_multiplier = 1.0
+    vix_proxy = _ddm_extract_vix_proxy(macro_snapshot, log_dir)
+    vix_thr = _ddm_to_float(ddm_cfg.get("vix_proxy_threshold", 30.0), 30.0)
+    high_vol_mult = _ddm_pct01(ddm_cfg.get("high_vol_position_size_multiplier", 0.7), 0.7)
+    if vix_proxy is not None and vix_proxy > vix_thr:
+        position_size_multiplier = min(position_size_multiplier, high_vol_mult)
+        print(f"[DDM] vix_proxy={vix_proxy:.2f} > {vix_thr:.2f} -> position_size_multiplier={position_size_multiplier:.2f}")
+
+    return {
+        "capital_total": float(capital_total),
+        "capital_total_configured": float(capital_total_configured),
+        "account_equity_for_allocation": account_equity_for_allocation,
+        "max_positions_meta": max_positions_meta,
+        "max_gross_exposure_pct": float(max_gross_exposure_pct),
+        "max_daily_new_exposure_pct": float(max_daily_new_exposure_pct),
+        "capital_budget_policy": capital_budget_policy,
+        "capital_budget_enabled": bool(capital_budget_enabled),
+        "max_new": int(max_new),
+        "position_size_multiplier": float(position_size_multiplier),
+        "vix_proxy": vix_proxy,
+    }
 
 
 def _compute_risk_orch_scale(

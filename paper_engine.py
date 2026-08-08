@@ -64,9 +64,6 @@ from paper_engine.io import (
     _write_dashboard_compat_csv,
 )
 from paper_engine.drawdown import (
-    _ddm_to_float,
-    _ddm_pct01,
-    _ddm_extract_vix_proxy,
     _apply_drawdown_entry_capacity,
 )
 from paper_engine.common import (
@@ -153,6 +150,7 @@ from paper_engine.guards import (
     _apply_relax_ladder_entry_cap,
 )
 from paper_engine.risk_orchestration import (
+    _build_initial_sizing_context,
     _compute_risk_orch_scale,
 )
 from paper_engine.settlement import (
@@ -608,116 +606,29 @@ def main() -> int:
             x = x / 100.0
         return max(0.0, min(1.0, x))
 
-    capital_total = float(cfg.get("capital_total", 0) or 0)
-    capital_total_configured = float(capital_total)
-    account_equity_for_allocation = None
-    try:
-        _p0_metrics = ((p0_snapshot.get("kill_switch") or {}).get("metrics") or {}) if isinstance(p0_snapshot, dict) else {}
-        _p0_account = _p0_metrics.get("account_basis") if isinstance(_p0_metrics, dict) else None
-        if isinstance(_p0_account, dict) and _p0_account.get("status") == "PASS":
-            account_equity_for_allocation = _to_float(_p0_account.get("equity_est"), 0.0)
-            if account_equity_for_allocation > 0.0 and capital_total_configured > 0.0:
-                capital_total = min(capital_total_configured, float(account_equity_for_allocation))
-                print(
-                    f"[CAPITAL_BASIS] configured={capital_total_configured:.0f} "
-                    f"account_equity={float(account_equity_for_allocation):.0f} "
-                    f"effective={capital_total:.0f} basis=min(configured,account_equity)"
-                )
-    except Exception as e:
-        print(f"[CAPITAL_BASIS][WARN] account_equity_unavailable={type(e).__name__}:{e}")
-    max_positions_meta["capital_basis"] = {
-        "configured_capital_total": float(capital_total_configured),
-        "account_equity": (None if account_equity_for_allocation is None else float(account_equity_for_allocation)),
-        "effective_capital_total": float(capital_total),
-        "basis": "min(configured_capital_total,account_equity)" if account_equity_for_allocation else "configured_capital_total",
-    }
-    max_gross_exposure_pct = _pct01(cfg.get("max_gross_exposure_pct", 1.0), 1.0)
-    max_daily_new_exposure_pct = _pct01(cfg.get("max_daily_new_exposure_pct", 1.0), 1.0)
-    capital_budget_policy = cfg.get("capital_budget_policy", {}) if isinstance(cfg.get("capital_budget_policy"), dict) else {}
-    capital_budget_enabled = bool(capital_budget_policy.get("enabled", False))
-    if capital_budget_enabled:
-        budget_gross_cap = max(
-            0.0,
-            min(1.0, _pct01_from_config(capital_budget_policy.get("gross_exposure_pct", 0.55), 0.55)),
-        )
-        old_exp = max_gross_exposure_pct
-        max_gross_exposure_pct = min(max_gross_exposure_pct, budget_gross_cap)
-        print(
-            f"[BUDGET_POLICY] enabled=true gross_exposure {old_exp:.3f}->{max_gross_exposure_pct:.3f} "
-            f"basic={_pct01_from_config(capital_budget_policy.get('basic_alloc_pct', 0.40), 0.40):.3f} "
-            f"surge={_pct01_from_config(capital_budget_policy.get('surge_alloc_pct', 0.06), 0.06):.3f} "
-            f"split={_pct01_from_config(capital_budget_policy.get('split_alloc_pct', 0.18), 0.18):.3f} "
-            f"recovery={_pct01_from_config(capital_budget_policy.get('recovery_alloc_pct', 0.10), 0.10):.3f} "
-            f"reserve={_pct01_from_config(capital_budget_policy.get('reserve_alloc_pct', 0.20), 0.20):.3f}"
-        )
+    initial_sizing = _build_initial_sizing_context(
+        cfg=cfg,
+        p0_snapshot=p0_snapshot,
+        macro_snapshot=macro_snapshot,
+        log_dir=LOG_DIR,
+        ddm_cfg=ddm_cfg,
+        consecutive_loss_days=int(consecutive_loss_days),
+        ddm_exposure_cap=ddm_exposure_cap,
+        max_new=int(max_new),
+        max_positions_meta=max_positions_meta,
+    )
+    capital_total = float(initial_sizing.get("capital_total", 0.0) or 0.0)
+    capital_total_configured = float(initial_sizing.get("capital_total_configured", capital_total) or 0.0)
+    account_equity_for_allocation = initial_sizing.get("account_equity_for_allocation")
+    max_positions_meta = cast(Dict[str, Any], initial_sizing.get("max_positions_meta") or max_positions_meta)
+    max_gross_exposure_pct = float(initial_sizing.get("max_gross_exposure_pct", 1.0) or 0.0)
+    max_daily_new_exposure_pct = float(initial_sizing.get("max_daily_new_exposure_pct", 1.0) or 0.0)
+    capital_budget_policy = cast(Dict[str, Any], initial_sizing.get("capital_budget_policy") or {})
+    capital_budget_enabled = bool(initial_sizing.get("capital_budget_enabled", False))
+    max_new = int(initial_sizing.get("max_new", max_new) or 0)
+    position_size_multiplier = float(initial_sizing.get("position_size_multiplier", 1.0) or 1.0)
+    vix_proxy = initial_sizing.get("vix_proxy")
     max_per_sector_runtime = int(cfg.get("max_per_sector", 0) or 0)
-    macro_exposure_mult = _pct01((macro_snapshot or {}).get("exposure_multiplier", 1.0), 1.0)
-    if macro_exposure_mult < 1.0:
-        old_exp = max_gross_exposure_pct
-        max_gross_exposure_pct = min(max_gross_exposure_pct, max_gross_exposure_pct * macro_exposure_mult)
-        print(f"[MACRO] exposure_multiplier={macro_exposure_mult:.3f} -> gross_exposure {old_exp:.3f}->{max_gross_exposure_pct:.3f}")
-
-    cons_loss_thr = int(_ddm_to_float(ddm_cfg.get("consecutive_loss_days_threshold", 3), 3))
-    cons_loss_mult = _ddm_pct01(ddm_cfg.get("consecutive_loss_exposure_multiplier", 0.5), 0.5)
-    if consecutive_loss_days >= max(1, cons_loss_thr):
-        old_exp = max_gross_exposure_pct
-        max_gross_exposure_pct = max(0.0, min(1.0, max_gross_exposure_pct * cons_loss_mult))
-        if capital_budget_enabled:
-            defensive_floor = max(
-                0.0,
-                min(
-                    1.0,
-                    _pct01_from_config(
-                        capital_budget_policy.get("defensive_floor_exposure_pct", 0.45),
-                        0.45,
-                    ),
-                ),
-            )
-            if 0.0 < defensive_floor < old_exp and max_gross_exposure_pct < defensive_floor:
-                max_gross_exposure_pct = old_exp
-                defensive_max_new = max(0, _to_int(capital_budget_policy.get("defensive_max_new", 1), 1))
-                if defensive_max_new > 0:
-                    old_max_new = int(max_new)
-                    max_new = min(int(max_new), defensive_max_new)
-                    print(
-                        f"[BUDGET_DDM_BAND] floor={defensive_floor:.3f} cap={max_gross_exposure_pct:.3f} "
-                        f"defensive_max_new={defensive_max_new} max_new {old_max_new}->{max_new}"
-                    )
-        print(f"[DDM] consecutive_loss_days={consecutive_loss_days} >= {cons_loss_thr} -> gross_exposure {old_exp:.3f}->{max_gross_exposure_pct:.3f}")
-
-    if ddm_exposure_cap is not None:
-        old_exp = max_gross_exposure_pct
-        max_gross_exposure_pct = min(max_gross_exposure_pct, _ddm_pct01(ddm_exposure_cap, max_gross_exposure_pct))
-        if capital_budget_enabled:
-            defensive_floor = max(
-                0.0,
-                min(
-                    1.0,
-                    _pct01_from_config(
-                        capital_budget_policy.get("defensive_floor_exposure_pct", 0.45),
-                        0.45,
-                    ),
-                ),
-            )
-            if 0.0 < defensive_floor < old_exp and max_gross_exposure_pct < defensive_floor:
-                max_gross_exposure_pct = old_exp
-                defensive_max_new = max(0, _to_int(capital_budget_policy.get("defensive_max_new", 1), 1))
-                if defensive_max_new > 0:
-                    old_max_new = int(max_new)
-                    max_new = min(int(max_new), defensive_max_new)
-                    print(
-                        f"[BUDGET_DDM_BAND] floor={defensive_floor:.3f} cap={max_gross_exposure_pct:.3f} "
-                        f"defensive_max_new={defensive_max_new} max_new {old_max_new}->{max_new}"
-                    )
-        print(f"[DDM] stage exposure cap applied: {old_exp:.3f}->{max_gross_exposure_pct:.3f}")
-
-    position_size_multiplier = 1.0
-    vix_proxy = _ddm_extract_vix_proxy(macro_snapshot, LOG_DIR)
-    vix_thr = _ddm_to_float(ddm_cfg.get("vix_proxy_threshold", 30.0), 30.0)
-    high_vol_mult = _ddm_pct01(ddm_cfg.get("high_vol_position_size_multiplier", 0.7), 0.7)
-    if vix_proxy is not None and vix_proxy > vix_thr:
-        position_size_multiplier = min(position_size_multiplier, high_vol_mult)
-        print(f"[DDM] vix_proxy={vix_proxy:.2f} > {vix_thr:.2f} -> position_size_multiplier={position_size_multiplier:.2f}")
 
     gap_up_max_pct_runtime = float(cfg.get("gap_up_max_pct", 0.0) or 0.0)
     entry_gap_down_stop_pct_runtime = float(cfg.get("entry_gap_down_stop_pct", 0.0) or 0.0)
