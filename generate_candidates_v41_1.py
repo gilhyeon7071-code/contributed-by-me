@@ -181,6 +181,42 @@ def _find_krx_parquets() -> list[Path]:
     return _bounded_krx_glob("krx_daily_*.parquet")
 
 
+def _map_macro_to_candidate_regime(macro_regime: str, fallback_is_bull: bool = False) -> str:
+    regime = str(macro_regime or "").strip().upper()
+    if regime in {"BULL", "RALLY", "RECOVERY"}:
+        return "BULL"
+    if regime in {"BEAR", "CRASH", "RISK_OFF"}:
+        return "BEAR"
+    if regime in {"CORRECTION", "PULLBACK", "VOLATILE"}:
+        return "CORRECTION"
+    if regime in {"SIDEWAYS", "NORMAL"}:
+        return "SIDEWAYS"
+    return "CORRECTION" if bool(fallback_is_bull) else "BEAR"
+
+
+def _should_fail_closed_on_factor_guard(factor_guard: dict) -> tuple[bool, str]:
+    if not isinstance(factor_guard, dict):
+        return False, ""
+    lookahead = factor_guard.get("lookahead")
+    if not isinstance(lookahead, dict):
+        return False, ""
+    try:
+        negative_shift_detected = int(float(lookahead.get("negative_shift_detected", 0) or 0))
+    except Exception:
+        negative_shift_detected = 0
+    if negative_shift_detected <= 0:
+        return False, ""
+    terms = lookahead.get("negative_shift_terms")
+    if isinstance(terms, (list, tuple)):
+        terms_text = ",".join(str(x) for x in terms if str(x).strip())
+    else:
+        terms_text = str(terms or "").strip()
+    reason = "negative_shift_detected"
+    if terms_text:
+        reason = f"{reason}:{terms_text}"
+    return True, reason
+
+
 def _load_data(*, max_gap_sessions: int = 0) -> pd.DataFrame:
     files = _find_krx_parquets()
     if not files:
