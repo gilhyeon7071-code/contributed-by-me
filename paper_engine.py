@@ -82,7 +82,6 @@ from paper_engine.common import (
     PAPER_SESSION_ID,
     _ops_policy,
     compute_dynamic_probe_floor,
-    _is_hard_block_reason,
     _safe_gate_float,
     _safe_gate_int,
     _load_sector_db,
@@ -150,8 +149,7 @@ from paper_engine.regime import (
     resolve_bear_sizing_confirmation,
 )
 from paper_engine.guards import (
-    count_kill_switch_streak_days,
-    compute_adaptive_kill_cap,
+    _apply_risk_off_entry_block,
     _apply_relax_ladder_entry_cap,
 )
 from paper_engine.risk_orchestration import (
@@ -505,100 +503,32 @@ def main() -> int:
         f"'crash_reduce_factor':{bool(crash_reduce_factor_fb)},'crash_min_new':{bool(crash_min_new_fb)}}}"
     )
 
-    kill_streak_days = count_kill_switch_streak_days(LOG_DIR, max_scan_days=30)
-    risk_off_hard = False
-    risk_off_has_kill = False
-    daily_loss_relief_active = False
-    risk_off_zero_stage = "risk_off"
     risk_reason_details: List[Dict[str, Any]] = _build_risk_reason_details(list(risk_off_reasons or []), p0_snapshot)
-    if risk_off_enabled:
-        reasons = list(risk_off_reasons or [])
-        msg = "; ".join(reasons) if reasons else "(no reasons)"
-        for rd in risk_reason_details:
-            print(
-                "[RISK_GATE_REASON] "
-                f"reason={rd.get('reason')} matched={rd.get('matched')} source={rd.get('source')} "
-                f"observed={rd.get('observed')} threshold={rd.get('threshold')} mode={rd.get('mode')}"
-            )
-
-        hard_reasons = [r for r in reasons if _is_hard_block_reason(r)]
-        daily_loss_reasons = [r for r in reasons if is_daily_loss_reason(r)]
-        shadow_ignore_daily_loss = (
-            RUN_LABEL.strip().lower() == "shadow"
-            and bool(ks_cfg.get("shadow_ignore_daily_loss", True))
-        )
-        risk_off_hard = bool(hard_reasons)
-        if hard_reasons:
-            max_new = 0
-            risk_off_zero_stage = "risk_off:hard_data"
-            print(f"[PAPER_ENGINE] risk_off=True -> BLOCK new entries (hard-data). reasons={msg}")
-        elif daily_loss_reasons and (not shadow_ignore_daily_loss):
-            adaptive_used = False
-            if adaptive_enabled and bool(aec.get("kill_switch_override_block", True)):
-                cap_info = compute_adaptive_kill_cap(base_max_new, cfg, p0_snapshot, kill_streak_days)
-                if cap_info is not None:
-                    cap, detail = cap_info
-                    adaptive_used = True
-                    requested_cap = max(0, int(cap))
-                    max_new = 0
-                    risk_off_zero_stage = "risk_off:daily_loss"
-                    if requested_cap > 0:
-                        print(f"[PAPER_ENGINE] risk_off=True -> DAILY_LOSS ADAPTIVE BLOCK fail_closed_cap=0 requested_cap={requested_cap} ({detail}). reasons={msg}")
-                    else:
-                        print(f"[PAPER_ENGINE] risk_off=True -> DAILY_LOSS ADAPTIVE BLOCK ({detail}). reasons={msg}")
-            if not adaptive_used:
-                max_new = 0
-                risk_off_zero_stage = "risk_off:daily_loss"
-                print(f"[PAPER_ENGINE] risk_off=True -> BLOCK new entries (daily-loss). reasons={msg}")
-        elif daily_loss_reasons and shadow_ignore_daily_loss:
-            risk_off_zero_stage = "risk_off:shadow_daily_loss"
-            print(
-                "[PAPER_ENGINE] risk_off=True -> SHADOW ignore daily-loss hard block; "
-                f"fallback to kill_switch policy. reasons={msg}"
-            )
-        elif any("kill_switch" in str(r) for r in reasons):
-            risk_off_has_kill = True
-            adaptive_used = False
-            if adaptive_enabled and bool(aec.get("kill_switch_override_block", True)):
-                cap_info = compute_adaptive_kill_cap(base_max_new, cfg, p0_snapshot, kill_streak_days)
-                if cap_info is not None:
-                    cap, detail = cap_info
-                    adaptive_used = True
-                    requested_cap = max(0, int(cap))
-                    max_new = 0
-                    risk_off_zero_stage = "risk_off:kill_switch"
-                    print(f"[PAPER_ENGINE] risk_off=True -> ADAPTIVE BLOCK fail_closed_cap=0 requested_cap={requested_cap} ({detail}). reasons={msg}")
-            if not adaptive_used:
-                if ks_mode == "REDUCE":
-                    requested_cap = max(ks_min_new, int(math.floor(base_max_new * ks_reduce_factor)))
-                    max_new = 0
-                    risk_off_zero_stage = "risk_off:kill_switch"
-                    print(f"[PAPER_ENGINE] risk_off=True -> BLOCK fail_closed_cap=0 requested_reduce_cap={requested_cap}. reasons={msg}")
-                else:
-                    max_new = 0
-                    risk_off_zero_stage = "risk_off:kill_switch"
-                    print(f"[PAPER_ENGINE] risk_off=True -> BLOCK new entries. reasons={msg}")
-        elif any("crash_risk_off" in str(r) for r in reasons):
-            if crash_mode == "REDUCE":
-                requested_cap = max(crash_min_new, int(math.floor(base_max_new * crash_reduce_factor)))
-                max_new = 0
-                risk_off_zero_stage = "risk_off:crash_risk_off"
-                print(f"[PAPER_ENGINE] risk_off=True -> BLOCK fail_closed_cap=0 requested_reduce_cap={requested_cap}. reasons={msg}")
-            else:
-                max_new = 0
-                risk_off_zero_stage = "risk_off:crash_risk_off"
-                print(f"[PAPER_ENGINE] risk_off=True -> BLOCK new entries. reasons={msg}")
-        else:
-            requested_cap = max(0, min(max_new, 1))
-            max_new = 0
-            risk_off_zero_stage = "risk_off:unclassified"
-            print(f"[PAPER_ENGINE] risk_off=True -> SOFT BLOCK fail_closed_cap=0 requested_cap={requested_cap} (unclassified reason). reasons={msg}")
-        if int(max_new) != 0:
-            print(f"[FAIL_CLOSED] risk_off_active -> force max_new {int(max_new)}->0 reasons={msg}")
-        max_new = 0
-        risk_off_hard = True
-        risk_off_has_kill = False
-        daily_loss_relief_active = False
+    risk_off_entry_block = _apply_risk_off_entry_block(
+        cfg=cfg,
+        p0_snapshot=p0_snapshot,
+        log_dir=LOG_DIR,
+        risk_off_enabled=bool(risk_off_enabled),
+        risk_off_reasons=list(risk_off_reasons or []),
+        risk_reason_details=list(risk_reason_details or []),
+        run_label=str(RUN_LABEL or ""),
+        kill_switch_cfg=ks_cfg,
+        kill_switch_mode=ks_mode,
+        kill_switch_reduce_factor=float(ks_reduce_factor),
+        kill_switch_min_new=int(ks_min_new),
+        crash_mode=crash_mode,
+        crash_reduce_factor=float(crash_reduce_factor),
+        crash_min_new=int(crash_min_new),
+        adaptive_entry_control=aec,
+        adaptive_enabled=bool(adaptive_enabled),
+        base_max_new=int(base_max_new),
+        max_new=int(max_new),
+    )
+    max_new = int(risk_off_entry_block.get("max_new", max_new) or 0)
+    risk_off_hard = bool(risk_off_entry_block.get("risk_off_hard", False))
+    risk_off_has_kill = bool(risk_off_entry_block.get("risk_off_has_kill", False))
+    daily_loss_relief_active = bool(risk_off_entry_block.get("daily_loss_relief_active", False))
+    risk_off_zero_stage = str(risk_off_entry_block.get("risk_off_zero_stage", "risk_off") or "risk_off")
     _capture_max_new_zero(risk_off_zero_stage)
     # Regime policy override (operations matrix)
     if bool(regime_policy.get("enabled", False)):

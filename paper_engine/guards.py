@@ -19,6 +19,7 @@ __all__ = [
     'evaluate_macro_news_guard',
     'evaluate_backtest_validation_guard',
     '_detect_explicit_market_events',
+    '_apply_risk_off_entry_block',
     '_apply_relax_ladder_entry_cap',
     'count_kill_switch_streak_days',
     'compute_adaptive_kill_cap',
@@ -382,6 +383,155 @@ def evaluate_sigma_outlier_guard(cfg: Dict[str, Any], log_dir: Path) -> Dict[str
             out["decision"] = "ALLOW"
             out["reason"] = "ok"
     return out
+
+
+def _apply_risk_off_entry_block(
+    *,
+    cfg: Dict[str, Any],
+    p0_snapshot: Dict[str, Any],
+    log_dir: Path,
+    risk_off_enabled: bool,
+    risk_off_reasons: List[Any],
+    risk_reason_details: List[Dict[str, Any]],
+    run_label: str,
+    kill_switch_cfg: Dict[str, Any],
+    kill_switch_mode: str,
+    kill_switch_reduce_factor: float,
+    kill_switch_min_new: int,
+    crash_mode: str,
+    crash_reduce_factor: float,
+    crash_min_new: int,
+    adaptive_entry_control: Dict[str, Any],
+    adaptive_enabled: bool,
+    base_max_new: int,
+    max_new: int,
+) -> Dict[str, Any]:
+    risk_off_hard = False
+    risk_off_has_kill = False
+    daily_loss_relief_active = False
+    risk_off_zero_stage = "risk_off"
+    if not risk_off_enabled:
+        return {
+            "max_new": int(max_new),
+            "risk_off_hard": bool(risk_off_hard),
+            "risk_off_has_kill": bool(risk_off_has_kill),
+            "daily_loss_relief_active": bool(daily_loss_relief_active),
+            "risk_off_zero_stage": str(risk_off_zero_stage),
+        }
+
+    kill_streak_days = count_kill_switch_streak_days(log_dir, max_scan_days=30)
+    reasons = [str(r) for r in list(risk_off_reasons or [])]
+    msg = "; ".join(reasons) if reasons else "(no reasons)"
+    for rd in risk_reason_details:
+        print(
+            "[RISK_GATE_REASON] "
+            f"reason={rd.get('reason')} matched={rd.get('matched')} source={rd.get('source')} "
+            f"observed={rd.get('observed')} threshold={rd.get('threshold')} mode={rd.get('mode')}"
+        )
+
+    hard_reasons = [r for r in reasons if _is_hard_block_reason(r)]
+    daily_loss_reasons = [r for r in reasons if is_daily_loss_reason(r)]
+    shadow_ignore_daily_loss = (
+        str(run_label or "").strip().lower() == "shadow"
+        and bool(kill_switch_cfg.get("shadow_ignore_daily_loss", True))
+    )
+    risk_off_hard = bool(hard_reasons)
+    if hard_reasons:
+        max_new = 0
+        risk_off_zero_stage = "risk_off:hard_data"
+        print(f"[PAPER_ENGINE] risk_off=True -> BLOCK new entries (hard-data). reasons={msg}")
+    elif daily_loss_reasons and (not shadow_ignore_daily_loss):
+        adaptive_used = False
+        if adaptive_enabled and bool(adaptive_entry_control.get("kill_switch_override_block", True)):
+            cap_info = compute_adaptive_kill_cap(base_max_new, cfg, p0_snapshot, kill_streak_days)
+            if cap_info is not None:
+                cap, detail = cap_info
+                adaptive_used = True
+                requested_cap = max(0, int(cap))
+                max_new = 0
+                risk_off_zero_stage = "risk_off:daily_loss"
+                if requested_cap > 0:
+                    print(
+                        "[PAPER_ENGINE] risk_off=True -> DAILY_LOSS ADAPTIVE BLOCK "
+                        f"fail_closed_cap=0 requested_cap={requested_cap} ({detail}). reasons={msg}"
+                    )
+                else:
+                    print(
+                        f"[PAPER_ENGINE] risk_off=True -> DAILY_LOSS ADAPTIVE BLOCK ({detail}). "
+                        f"reasons={msg}"
+                    )
+        if not adaptive_used:
+            max_new = 0
+            risk_off_zero_stage = "risk_off:daily_loss"
+            print(f"[PAPER_ENGINE] risk_off=True -> BLOCK new entries (daily-loss). reasons={msg}")
+    elif daily_loss_reasons and shadow_ignore_daily_loss:
+        risk_off_zero_stage = "risk_off:shadow_daily_loss"
+        print(
+            "[PAPER_ENGINE] risk_off=True -> SHADOW ignore daily-loss hard block; "
+            f"fallback to kill_switch policy. reasons={msg}"
+        )
+    elif any("kill_switch" in str(r) for r in reasons):
+        risk_off_has_kill = True
+        adaptive_used = False
+        if adaptive_enabled and bool(adaptive_entry_control.get("kill_switch_override_block", True)):
+            cap_info = compute_adaptive_kill_cap(base_max_new, cfg, p0_snapshot, kill_streak_days)
+            if cap_info is not None:
+                cap, detail = cap_info
+                adaptive_used = True
+                requested_cap = max(0, int(cap))
+                max_new = 0
+                risk_off_zero_stage = "risk_off:kill_switch"
+                print(
+                    f"[PAPER_ENGINE] risk_off=True -> ADAPTIVE BLOCK fail_closed_cap=0 "
+                    f"requested_cap={requested_cap} ({detail}). reasons={msg}"
+                )
+        if not adaptive_used:
+            if kill_switch_mode == "REDUCE":
+                requested_cap = max(kill_switch_min_new, int(math.floor(base_max_new * kill_switch_reduce_factor)))
+                max_new = 0
+                risk_off_zero_stage = "risk_off:kill_switch"
+                print(
+                    f"[PAPER_ENGINE] risk_off=True -> BLOCK fail_closed_cap=0 "
+                    f"requested_reduce_cap={requested_cap}. reasons={msg}"
+                )
+            else:
+                max_new = 0
+                risk_off_zero_stage = "risk_off:kill_switch"
+                print(f"[PAPER_ENGINE] risk_off=True -> BLOCK new entries. reasons={msg}")
+    elif any("crash_risk_off" in str(r) for r in reasons):
+        if crash_mode == "REDUCE":
+            requested_cap = max(crash_min_new, int(math.floor(base_max_new * crash_reduce_factor)))
+            max_new = 0
+            risk_off_zero_stage = "risk_off:crash_risk_off"
+            print(
+                f"[PAPER_ENGINE] risk_off=True -> BLOCK fail_closed_cap=0 "
+                f"requested_reduce_cap={requested_cap}. reasons={msg}"
+            )
+        else:
+            max_new = 0
+            risk_off_zero_stage = "risk_off:crash_risk_off"
+            print(f"[PAPER_ENGINE] risk_off=True -> BLOCK new entries. reasons={msg}")
+    else:
+        requested_cap = max(0, min(max_new, 1))
+        max_new = 0
+        risk_off_zero_stage = "risk_off:unclassified"
+        print(
+            f"[PAPER_ENGINE] risk_off=True -> SOFT BLOCK fail_closed_cap=0 "
+            f"requested_cap={requested_cap} (unclassified reason). reasons={msg}"
+        )
+    if int(max_new) != 0:
+        print(f"[FAIL_CLOSED] risk_off_active -> force max_new {int(max_new)}->0 reasons={msg}")
+    max_new = 0
+    risk_off_hard = True
+    risk_off_has_kill = False
+    daily_loss_relief_active = False
+    return {
+        "max_new": int(max_new),
+        "risk_off_hard": bool(risk_off_hard),
+        "risk_off_has_kill": bool(risk_off_has_kill),
+        "daily_loss_relief_active": bool(daily_loss_relief_active),
+        "risk_off_zero_stage": str(risk_off_zero_stage),
+    }
 
 
 def _apply_relax_ladder_entry_cap(
