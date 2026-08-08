@@ -11,11 +11,12 @@ __all__ = [
     '_risk_orch_pct01',
     '_risk_orch_recent_trade_stats',
     '_build_initial_sizing_context',
+    '_apply_post_entry_gate_sizing_adjustments',
     '_compute_risk_orch_scale',
 ]
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List
 
 import pandas as pd
 
@@ -182,6 +183,121 @@ def _build_initial_sizing_context(
         "max_new": int(max_new),
         "position_size_multiplier": float(position_size_multiplier),
         "vix_proxy": vix_proxy,
+    }
+
+
+def _apply_post_entry_gate_sizing_adjustments(
+    *,
+    cfg: Dict[str, Any],
+    market_regime: str,
+    entry_decision_code: str,
+    entry_decision_reason: str,
+    risk_orch_ctx: Dict[str, Any],
+    position_size_multiplier: float,
+    capital_budget_enabled: bool,
+    capital_budget_policy: Dict[str, Any],
+    base_max_new: int,
+    max_new: int,
+    max_gross_exposure_pct: float,
+    paper_validation_sample_cap_func: Callable[[int, str], tuple[int, str]],
+    minimum_quantity_verification_cfg: Dict[str, Any],
+) -> Dict[str, Any]:
+    decision_code = str(entry_decision_code or "").upper()
+    decision_reason = str(entry_decision_reason or "")
+    if decision_code == "BLOCK":
+        if max_new != 0:
+            print(f"[ENTRY_GATE] BLOCK -> force max_new=0 ({decision_reason})")
+        max_new = 0
+        print(
+            "[FAIL_CLOSED] "
+            f"entry_gate_block_propagated=true stop_new_orders=true max_new={int(max_new)} "
+            f"reason={decision_reason}"
+        )
+    elif decision_code == "CAUTION":
+        old_max_new = max_new
+        sample_cap, sample_cap_reason = paper_validation_sample_cap_func(1, decision_code)
+        max_new = min(base_max_new, max(max_new, sample_cap))
+        old_exp = max_gross_exposure_pct
+        caution_gross_cap = 0.50
+        if capital_budget_enabled:
+            caution_gross_cap = max(
+                0.0,
+                min(
+                    1.0,
+                    _pct01_from_config(
+                        capital_budget_policy.get("caution_gross_exposure_pct", 0.55),
+                        0.55,
+                    ),
+                ),
+            )
+        max_gross_exposure_pct = min(max_gross_exposure_pct, caution_gross_cap)
+        print(
+            f"[ENTRY_GATE] CAUTION -> max_new {old_max_new}->{max_new}, "
+            f"gross_exposure {old_exp:.3f}->{max_gross_exposure_pct:.3f} "
+            f"sample_cap={sample_cap} sample_reason={sample_cap_reason}"
+        )
+    elif decision_code == "REDUCE":
+        old_max_new = max_new
+        sample_cap, sample_cap_reason = paper_validation_sample_cap_func(1, decision_code)
+        max_new = min(base_max_new, max(max_new, sample_cap))
+        print(f"[ENTRY_GATE] REDUCE -> max_new {old_max_new}->{max_new} sample_cap={sample_cap} sample_reason={sample_cap_reason}")
+
+    bear_sizing_policy = cfg.get("bear_sizing_policy", {}) if isinstance(cfg.get("bear_sizing_policy"), dict) else {}
+    if bool(bear_sizing_policy.get("enabled", False)):
+        allowed_regimes = {
+            str(x).strip().upper()
+            for x in (bear_sizing_policy.get("market_regimes") or ["BEAR"])
+            if str(x).strip()
+        }
+        allowed_decisions = {
+            str(x).strip().upper()
+            for x in (bear_sizing_policy.get("entry_gate_decisions") or ["CAUTION"])
+            if str(x).strip()
+        }
+        ro_scale_for_bear = max(0.0, min(1.0, _to_float(risk_orch_ctx.get("scale", position_size_multiplier), position_size_multiplier)))
+        max_ro_scale = max(0.0, min(1.0, _to_float(bear_sizing_policy.get("max_risk_orch_scale", 0.50), 0.50)))
+        if (
+            str(market_regime or "").strip().upper() in allowed_regimes
+            and decision_code in allowed_decisions
+            and ro_scale_for_bear <= max_ro_scale
+        ):
+            old_exp = max_gross_exposure_pct
+            bear_gross_cap = max(0.0, min(1.0, _pct01_from_config(bear_sizing_policy.get("gross_exposure_cap_pct", 0.40), 0.40)))
+            max_gross_exposure_pct = min(max_gross_exposure_pct, bear_gross_cap)
+            print(
+                f"[BEAR_SIZING] applied=true gross_exposure {old_exp:.3f}->{max_gross_exposure_pct:.3f} "
+                f"cap={bear_gross_cap:.3f} regime={market_regime} entry_gate={decision_code} "
+                f"risk_orch_scale={ro_scale_for_bear:.3f} max_scale={max_ro_scale:.3f}"
+            )
+        else:
+            print(
+                f"[BEAR_SIZING] applied=false regime={market_regime} entry_gate={decision_code} "
+                f"risk_orch_scale={ro_scale_for_bear:.3f} max_scale={max_ro_scale:.3f}"
+            )
+    if (
+        bool(((cfg.get("risk_orchestration", {}) if isinstance(cfg, dict) else {}).get("dd_stop_validation", {}) or {}).get("enabled", False))
+        and "validation_reduce" in decision_reason
+        and decision_code == "REDUCE"
+    ):
+        _ro_val_cfg2 = ((cfg.get("risk_orchestration", {}) if isinstance(cfg, dict) else {}).get("dd_stop_validation", {}) or {})
+        _ro_val_max_new = max(1, _to_int(_ro_val_cfg2.get("max_new", 1), 1))
+        if max_new < _ro_val_max_new:
+            old_max_new = int(max_new)
+            max_new = min(base_max_new, _ro_val_max_new)
+            print(f"[ENTRY_GATE] validation REDUCE floor max_new {old_max_new}->{max_new}")
+    if (
+        bool(minimum_quantity_verification_cfg.get("enabled", False))
+        and "minimum_quantity_verification" in decision_reason
+        and decision_code == "REDUCE"
+    ):
+        _mqv_max_new = max(1, _to_int(minimum_quantity_verification_cfg.get("max_new", 1), 1))
+        if max_new < _mqv_max_new:
+            old_max_new = int(max_new)
+            max_new = min(base_max_new, _mqv_max_new)
+            print(f"[ENTRY_GATE] minimum quantity verification floor max_new {old_max_new}->{max_new}")
+    return {
+        "max_new": int(max_new),
+        "max_gross_exposure_pct": float(max_gross_exposure_pct),
     }
 
 
