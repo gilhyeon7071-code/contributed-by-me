@@ -78,7 +78,6 @@ from paper_engine.common import (
     RUN_LABEL,
     PAPER_SESSION_ID,
     _ops_policy,
-    compute_dynamic_probe_floor,
     _safe_gate_float,
     _safe_gate_int,
     _load_sector_db,
@@ -152,6 +151,7 @@ from paper_engine.guards import (
 from paper_engine.risk_orchestration import (
     _apply_fx_and_rally_caps,
     _apply_max_positions_precheck,
+    _apply_ops_universe_shrink_recheck,
     _apply_post_entry_gate_sizing_adjustments,
     _build_initial_sizing_context,
     _compute_risk_orch_scale,
@@ -1346,25 +1346,23 @@ def main() -> int:
     ddm_liquidation_targets = pretrade_runtime.get("ddm_liquidation_targets") or set()
     ddm_liquidation_price_mode = str(pretrade_runtime.get("ddm_liquidation_price_mode") or "close")
 
-    price_universe_codes = int(px["code"].nunique()) if ("code" in px.columns and len(px) > 0) else 0
-    shrink_min_price_codes = max(0, _to_int(ops_policy.get("universe_shrink_min_price_codes", 0), 0))
-    if ops_enabled and shrink_min_price_codes > 0 and price_universe_codes > 0 and price_universe_codes <= shrink_min_price_codes:
-        universe_shrink_candidates = True
-        print(f"[OPS] universe_shrink detected: price_codes={price_universe_codes} <= {shrink_min_price_codes}")
-        probe_floor2 = compute_dynamic_probe_floor(
-            base_max_new=base_max_new,
-            market_regime=market_regime,
-            regime_info=regime_info,
-            cfg=cfg,
-            risk_off_hard=risk_off_hard,
-            universe_shrink=True,
-        )
-        if probe_floor2 > 0 and max_new < probe_floor2:
-            old_max_new = max_new
-            max_new = min(base_max_new, probe_floor2)
-            print(f"[OPS] dynamic_probe_floor(recheck) applied: {old_max_new}->{max_new}")
-        max_new = _enforce_entry_gate_block_max_new(max_new, "post_ops_recheck")
-        _capture_max_new_zero("ops_recheck")
+    ops_recheck = _apply_ops_universe_shrink_recheck(
+        cfg=cfg,
+        ops_enabled=bool(ops_enabled),
+        ops_policy=ops_policy,
+        px=px,
+        universe_shrink_candidates=bool(universe_shrink_candidates),
+        base_max_new=int(base_max_new),
+        max_new=int(max_new),
+        market_regime=str(market_regime or ""),
+        regime_info=regime_info,
+        risk_off_hard=bool(risk_off_hard),
+        enforce_entry_gate_block_max_new_func=_enforce_entry_gate_block_max_new,
+    )
+    max_new = int(ops_recheck.get("max_new", max_new) or 0)
+    universe_shrink_candidates = bool(ops_recheck.get("universe_shrink_candidates", universe_shrink_candidates))
+    if ops_recheck.get("max_new_zero_stage"):
+        _capture_max_new_zero(str(ops_recheck.get("max_new_zero_stage") or ""))
 
     if exit_only_mode:
         max_new = 0

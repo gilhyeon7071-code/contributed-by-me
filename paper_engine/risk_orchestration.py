@@ -14,6 +14,7 @@ __all__ = [
     '_apply_post_entry_gate_sizing_adjustments',
     '_apply_fx_and_rally_caps',
     '_apply_max_positions_precheck',
+    '_apply_ops_universe_shrink_recheck',
     '_compute_risk_orch_scale',
 ]
 
@@ -22,7 +23,7 @@ from typing import Any, Callable, Dict, List
 
 import pandas as pd
 
-from paper_engine.common import _pct01_from_config, _to_float, _to_int, _get_dict
+from paper_engine.common import compute_dynamic_probe_floor, _pct01_from_config, _to_float, _to_int, _get_dict
 from paper_engine.drawdown import _ddm_extract_vix_proxy, _ddm_pct01, _ddm_to_float
 from utils.common import read_csv_safe
 
@@ -566,6 +567,47 @@ def _apply_max_positions_precheck(
         "max_new": int(max_new),
         "max_positions_meta": max_positions_meta,
         "max_positions_override_allowed": bool(max_positions_override_allowed),
+        "max_new_zero_stage": str(max_new_zero_stage or ""),
+    }
+
+
+def _apply_ops_universe_shrink_recheck(
+    *,
+    cfg: Dict[str, Any],
+    ops_enabled: bool,
+    ops_policy: Dict[str, Any],
+    px: pd.DataFrame,
+    universe_shrink_candidates: bool,
+    base_max_new: int,
+    max_new: int,
+    market_regime: str,
+    regime_info: Dict[str, Any],
+    risk_off_hard: bool,
+    enforce_entry_gate_block_max_new_func: Callable[[int, str], int],
+) -> Dict[str, Any]:
+    price_universe_codes = int(px["code"].nunique()) if ("code" in px.columns and len(px) > 0) else 0
+    shrink_min_price_codes = max(0, _to_int(ops_policy.get("universe_shrink_min_price_codes", 0), 0))
+    max_new_zero_stage = ""
+    if ops_enabled and shrink_min_price_codes > 0 and price_universe_codes > 0 and price_universe_codes <= shrink_min_price_codes:
+        universe_shrink_candidates = True
+        print(f"[OPS] universe_shrink detected: price_codes={price_universe_codes} <= {shrink_min_price_codes}")
+        probe_floor = compute_dynamic_probe_floor(
+            base_max_new=base_max_new,
+            market_regime=market_regime,
+            regime_info=regime_info,
+            cfg=cfg,
+            risk_off_hard=risk_off_hard,
+            universe_shrink=True,
+        )
+        if probe_floor > 0 and max_new < probe_floor:
+            old_max_new = max_new
+            max_new = min(base_max_new, probe_floor)
+            print(f"[OPS] dynamic_probe_floor(recheck) applied: {old_max_new}->{max_new}")
+        max_new = enforce_entry_gate_block_max_new_func(max_new, "post_ops_recheck")
+        max_new_zero_stage = "ops_recheck"
+    return {
+        "max_new": int(max_new),
+        "universe_shrink_candidates": bool(universe_shrink_candidates),
         "max_new_zero_stage": str(max_new_zero_stage or ""),
     }
 
