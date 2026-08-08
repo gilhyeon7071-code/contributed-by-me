@@ -13,6 +13,7 @@ __all__ = [
     '_build_initial_sizing_context',
     '_apply_post_entry_gate_sizing_adjustments',
     '_apply_fx_and_rally_caps',
+    '_apply_max_positions_precheck',
     '_compute_risk_orch_scale',
 ]
 
@@ -406,6 +407,166 @@ def _apply_fx_and_rally_caps(
         "max_per_sector_runtime": int(max_per_sector_runtime),
         "gap_up_max_pct_runtime": float(gap_up_max_pct_runtime),
         "entry_gap_down_stop_pct_runtime": float(entry_gap_down_stop_pct_runtime),
+    }
+
+
+def _apply_max_positions_precheck(
+    *,
+    cfg: Dict[str, Any],
+    run_label: str,
+    entry_decision_reason: str,
+    open_slot_count: int,
+    max_positions: int,
+    max_new: int,
+    max_positions_meta: Dict[str, Any],
+    capital_total: float,
+    max_gross_exposure_pct: float,
+    capital_budget_enabled: bool,
+    open_pos: List[Dict[str, Any]],
+    open_codes: set[str],
+    load_prices_for_codes_func: Callable[[Dict[str, Any], List[str]], pd.DataFrame],
+    compute_current_open_notional_func: Callable[[List[Dict[str, Any]], pd.DataFrame], float],
+) -> Dict[str, Any]:
+    max_positions_meta = dict(max_positions_meta or {})
+    max_new_zero_stage = ""
+    if max_positions > 0 and int(open_slot_count) >= int(max_positions):
+        mp_override_meta: Dict[str, Any] = {
+            "enabled": False,
+            "applied": False,
+            "mode": "",
+            "reason": "disabled",
+            "open_notional": None,
+            "gross_cap_krw": None,
+            "capital_total": float(capital_total or 0.0),
+        }
+        ro_val_cfg = ((cfg.get("risk_orchestration", {}) if isinstance(cfg, dict) else {}).get("dd_stop_validation", {}) or {})
+        mp_override_cfg = ro_val_cfg.get("max_positions_full_override", {}) if isinstance(ro_val_cfg, dict) else {}
+        if not isinstance(mp_override_cfg, dict):
+            mp_override_cfg = {}
+        mp_override_enabled = bool(mp_override_cfg.get("enabled", False))
+        mp_override_mode = str(mp_override_cfg.get("mode", "gross_exposure_cap") or "gross_exposure_cap").strip().lower()
+        allowed_labels = {
+            str(x).strip().lower()
+            for x in (ro_val_cfg.get("allowed_run_labels") or [])
+            if str(x).strip()
+        }
+        label_allowed = (not allowed_labels) or str(run_label or "").strip().lower() in allowed_labels
+        is_validation_reduce = (
+            bool(ro_val_cfg.get("enabled", False))
+            and str(ro_val_cfg.get("mode", "") or "").strip().lower() in {"reduce", "validation_reduce"}
+            and label_allowed
+            and "validation_reduce" in str(entry_decision_reason or "")
+        )
+        allow_max_positions_override = False
+        if mp_override_enabled and is_validation_reduce and mp_override_mode == "gross_exposure_cap":
+            try:
+                mp_px = load_prices_for_codes_func(cfg, sorted(set(open_codes)))
+                mp_price_ok = (mp_px is not None) and (not mp_px.empty)
+                mp_open_notional = compute_current_open_notional_func(open_pos, mp_px)
+            except Exception:
+                mp_price_ok = False
+                mp_open_notional = 0.0
+            mp_gross_cap = (
+                float(capital_total) * float(max_gross_exposure_pct)
+                if float(capital_total or 0.0) > 0.0
+                else 0.0
+            )
+            mp_reason = "gross_exposure_under_cap"
+            if not mp_price_ok:
+                mp_reason = "price_unavailable"
+            elif mp_gross_cap <= 0:
+                mp_reason = "gross_cap_missing"
+            elif mp_open_notional >= mp_gross_cap:
+                mp_reason = "gross_exposure_cap_reached"
+            mp_override_meta.update(
+                {
+                    "enabled": True,
+                    "mode": mp_override_mode,
+                    "reason": mp_reason,
+                    "price_ok": bool(mp_price_ok),
+                    "open_notional": float(mp_open_notional),
+                    "gross_cap_krw": float(mp_gross_cap),
+                    "gross_exposure_pct": (
+                        float(mp_open_notional) / float(capital_total)
+                        if float(capital_total or 0.0) > 0.0
+                        else None
+                    ),
+                    "max_gross_exposure_pct": float(max_gross_exposure_pct),
+                }
+            )
+            if mp_price_ok and mp_gross_cap > 0 and mp_open_notional < mp_gross_cap:
+                allow_max_positions_override = True
+                mp_override_meta["applied"] = True
+        elif capital_budget_enabled:
+            try:
+                mp_px = load_prices_for_codes_func(cfg, sorted(set(open_codes)))
+                mp_price_ok = (mp_px is not None) and (not mp_px.empty)
+                mp_open_notional = compute_current_open_notional_func(open_pos, mp_px)
+            except Exception:
+                mp_price_ok = False
+                mp_open_notional = 0.0
+            mp_gross_cap = (
+                float(capital_total) * float(max_gross_exposure_pct)
+                if float(capital_total or 0.0) > 0.0
+                else 0.0
+            )
+            mp_reason = "gross_exposure_under_cap"
+            if not mp_price_ok:
+                mp_reason = "price_unavailable"
+            elif mp_gross_cap <= 0:
+                mp_reason = "gross_cap_missing"
+            elif mp_open_notional >= mp_gross_cap:
+                mp_reason = "gross_exposure_cap_reached"
+            mp_override_meta.update(
+                {
+                    "enabled": True,
+                    "mode": "budget_gross_exposure_cap",
+                    "reason": mp_reason,
+                    "price_ok": bool(mp_price_ok),
+                    "open_notional": float(mp_open_notional),
+                    "gross_cap_krw": float(mp_gross_cap),
+                    "gross_exposure_pct": (
+                        float(mp_open_notional) / float(capital_total)
+                        if float(capital_total or 0.0) > 0.0
+                        else None
+                    ),
+                    "max_gross_exposure_pct": float(max_gross_exposure_pct),
+                }
+            )
+            if mp_price_ok and mp_gross_cap > 0 and mp_open_notional < mp_gross_cap:
+                allow_max_positions_override = True
+                mp_override_meta["applied"] = True
+        elif mp_override_enabled:
+            mp_override_meta.update(
+                {
+                    "enabled": True,
+                    "mode": mp_override_mode,
+                    "reason": "not_validation_reduce",
+                }
+            )
+        max_positions_meta["validation_exposure_override"] = mp_override_meta
+        if allow_max_positions_override:
+            print(
+                f"[ENTRY_MAX_POSITIONS_VALIDATION_OVERRIDE] open_slots={int(open_slot_count)} "
+                f">= max_positions={int(max_positions)} but open_notional={float(mp_override_meta.get('open_notional') or 0.0):.0f} "
+                f"< gross_cap={float(mp_override_meta.get('gross_cap_krw') or 0.0):.0f} -> keep max_new={int(max_new)}"
+            )
+        else:
+            if int(max_new) > 0:
+                print(
+                    f"[ENTRY_MAX_POSITIONS_PRECHECK] open_slots={int(open_slot_count)} "
+                    f">= max_positions={int(max_positions)} -> max_new {int(max_new)}->0"
+                )
+            max_new = 0
+            max_new_zero_stage = "max_positions_full"
+    max_positions_override_allowed = bool(
+        _get_dict(max_positions_meta, "validation_exposure_override").get("applied", False)
+    )
+    return {
+        "max_new": int(max_new),
+        "max_positions_meta": max_positions_meta,
+        "max_positions_override_allowed": bool(max_positions_override_allowed),
+        "max_new_zero_stage": str(max_new_zero_stage or ""),
     }
 
 
