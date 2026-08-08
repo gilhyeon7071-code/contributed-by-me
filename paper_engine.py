@@ -158,7 +158,6 @@ from paper_engine.risk_orchestration import (
 )
 from paper_engine.settlement import (
     _merge_last_t2_state_fields,
-    _record_sell_pending_and_write_t2_status,
 )
 from paper_engine.state import (
     _build_risk_reason_details,
@@ -171,7 +170,7 @@ from paper_engine.state import (
     _write_recovery_status,
     _run_replay_runtime_refresh,
     _build_entry_runtime_ops_summary,
-    _finalize_paper_engine_runtime,
+    _record_t2_and_finalize_paper_engine_runtime,
 )
 
 PAPER_DIR = BASE_DIR / "paper"
@@ -1738,18 +1737,13 @@ def main() -> int:
     if int(write_finalize.get("return_code", 0) or 0) != 0:
         return 2
 
-    _record_sell_pending_and_write_t2_status(
+    _record_t2_and_finalize_paper_engine_runtime(
         state=state,
         cfg=cfg,
         schema=str(schema),
-        fills_new=fills_new,
         runtime_ymd=now_ymd(),
         t2_cash_checks=t2_cash_checks,
-    )
-
-    _finalize_paper_engine_runtime(
         maybe_run_pnl_report_func=maybe_run_pnl_report,
-        summary_schema=str(schema),
         fills_new=fills_new,
         trades_new=trades_new,
         still_open=still_open,

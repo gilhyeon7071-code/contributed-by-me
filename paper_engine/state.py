@@ -53,6 +53,7 @@ __all__ = [
     '_build_entry_runtime_ops_summary',
     '_persist_state_and_runtime_status',
     '_finalize_paper_engine_runtime',
+    '_record_t2_and_finalize_paper_engine_runtime',
     'read_latest_stable_params',
     '_stable_params_usable',
     '_max_date8_from_candidates',
@@ -117,6 +118,7 @@ from paper_engine.positions import (
     _build_symbol_stop_summary,
     _write_pending_status,
 )
+from paper_engine.settlement import _record_sell_pending_and_write_t2_status
 from paper_engine.exit import (
     _build_sell_order_lifecycle_summary,
     _build_partial_exit_policy_summary,
@@ -2419,6 +2421,44 @@ def _finalize_paper_engine_runtime(
     print("[PAPER_ENGINE] dashboard state refreshes via E:/vibe/buffett/tools/vibe_dashboard_state_hourly.ps1 (max 1h delay)")
     print("[PAPER_ENGINE] for immediate refresh run: python E:/vibe/buffett/tools/build_dashboard_state_v2.py")
     print("============================================================")
+
+
+def _record_t2_and_finalize_paper_engine_runtime(
+    *,
+    state: Dict[str, Any],
+    cfg: Dict[str, Any],
+    schema: str,
+    fills_new: List[Any],
+    trades_new: List[Any],
+    runtime_ymd: str,
+    t2_cash_checks: List[Dict[str, Any]],
+    maybe_run_pnl_report_func: Callable[[], None],
+    still_open: List[Dict[str, Any]],
+    stop_loss: float,
+    take_profit: Any,
+    trail_pct: Any,
+    persist_kwargs: Dict[str, Any],
+) -> None:
+    _record_sell_pending_and_write_t2_status(
+        state=state,
+        cfg=cfg,
+        schema=str(schema),
+        fills_new=fills_new,
+        runtime_ymd=str(runtime_ymd),
+        t2_cash_checks=t2_cash_checks,
+    )
+
+    _finalize_paper_engine_runtime(
+        maybe_run_pnl_report_func=maybe_run_pnl_report_func,
+        summary_schema=str(schema),
+        fills_new=fills_new,
+        trades_new=trades_new,
+        still_open=still_open,
+        stop_loss=float(stop_loss),
+        take_profit=take_profit,
+        trail_pct=trail_pct,
+        persist_kwargs=persist_kwargs,
+    )
 
 
 def read_latest_stable_params() -> Dict[str, Any]:
