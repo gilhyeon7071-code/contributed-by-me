@@ -12,6 +12,7 @@ __all__ = [
     '_risk_orch_recent_trade_stats',
     '_build_initial_sizing_context',
     '_apply_post_entry_gate_sizing_adjustments',
+    '_apply_fx_and_rally_caps',
     '_compute_risk_orch_scale',
 ]
 
@@ -298,6 +299,113 @@ def _apply_post_entry_gate_sizing_adjustments(
     return {
         "max_new": int(max_new),
         "max_gross_exposure_pct": float(max_gross_exposure_pct),
+    }
+
+
+def _apply_fx_and_rally_caps(
+    *,
+    fx_policy: Dict[str, Any],
+    fx_ctx: Dict[str, Any],
+    fx_status: str,
+    regime_policy: Dict[str, Any],
+    market_regime: str,
+    max_new: int,
+    max_gross_exposure_pct: float,
+    max_daily_new_exposure_pct: float,
+    max_per_sector_runtime: int,
+    gap_up_max_pct_runtime: float,
+    entry_gap_down_stop_pct_runtime: float,
+) -> Dict[str, Any]:
+    if bool(fx_policy.get("enabled", False)) and fx_ctx:
+        fx_vol_band = str(fx_ctx.get("volatility_band") or "").upper()
+        fx_three_day_extreme = bool(fx_ctx.get("three_day_extreme"))
+        fx_daily_abs_change = _to_float(fx_ctx.get("daily_abs_change"), 0.0)
+        try:
+            weak_fx_level = float(fx_policy.get("weak_fx_export_bias_level", 1450.0) or 1450.0)
+        except Exception:
+            weak_fx_level = 1450.0
+        try:
+            strong_fx_level = float(fx_policy.get("strong_fx_domestic_bias_level", 1380.0) or 1380.0)
+        except Exception:
+            strong_fx_level = 1380.0
+        _ = (weak_fx_level, strong_fx_level)
+        if fx_status == "EXTREME_HARD":
+            print(
+                f"[FX] EXTREME_HARD: daily_abs_change={fx_daily_abs_change:.2f} "
+                f"avg_abs_change_20={fx_ctx.get('avg_abs_change_20')}"
+            )
+        elif fx_status == "EXTREME_SOFT":
+            print(
+                f"[FX] EXTREME_SOFT: daily_abs_change={fx_daily_abs_change:.2f} "
+                f"avg_abs_change_20={fx_ctx.get('avg_abs_change_20')}"
+            )
+        elif fx_status == "CAUTION":
+            print(
+                f"[FX] CAUTION: daily_abs_change={fx_daily_abs_change:.2f} "
+                f"avg_abs_change_20={fx_ctx.get('avg_abs_change_20')}"
+            )
+        elif fx_vol_band == "HIGH":
+            try:
+                high_vol_cap = int(fx_policy.get("high_vol_reduce_max_new_to", 1) or 1)
+            except Exception:
+                high_vol_cap = 1
+            old_max_new = max_new
+            max_new = min(max_new, max(0, high_vol_cap))
+            print(f"[FX] high volatility cap applied: {old_max_new}->{max_new}")
+        if bool(fx_policy.get("three_day_extreme_force_defensive", True)) and fx_three_day_extreme:
+            old_exp = max_gross_exposure_pct
+            max_gross_exposure_pct = min(max_gross_exposure_pct, 0.35)
+            print(f"[FX] three_day_extreme defensive gross cap: {old_exp:.3f}->{max_gross_exposure_pct:.3f}")
+
+    if bool(regime_policy.get("enabled", False)) and market_regime == "RALLY":
+        max_gross_exposure_pct = min(
+            max_gross_exposure_pct,
+            _risk_orch_pct01(regime_policy.get("rally_max_gross_exposure_pct", max_gross_exposure_pct), max_gross_exposure_pct),
+        )
+        max_daily_new_exposure_pct = min(
+            max_daily_new_exposure_pct,
+            _risk_orch_pct01(regime_policy.get("rally_max_daily_new_exposure_pct", max_daily_new_exposure_pct), max_daily_new_exposure_pct),
+        )
+        try:
+            rally_mps = int(regime_policy.get("rally_max_per_sector", max_per_sector_runtime) or max_per_sector_runtime)
+            if rally_mps > 0:
+                if max_per_sector_runtime > 0:
+                    max_per_sector_runtime = min(max_per_sector_runtime, rally_mps)
+                else:
+                    max_per_sector_runtime = rally_mps
+        except Exception:
+            pass
+
+        try:
+            rally_gap_up = float(regime_policy.get("rally_gap_up_max_pct", gap_up_max_pct_runtime) or gap_up_max_pct_runtime)
+            if rally_gap_up > 0:
+                if gap_up_max_pct_runtime > 0:
+                    gap_up_max_pct_runtime = min(gap_up_max_pct_runtime, rally_gap_up)
+                else:
+                    gap_up_max_pct_runtime = rally_gap_up
+        except Exception:
+            pass
+
+        try:
+            rally_gap_down = float(regime_policy.get("rally_entry_gap_down_stop_pct", entry_gap_down_stop_pct_runtime) or entry_gap_down_stop_pct_runtime)
+            if rally_gap_down > 0:
+                entry_gap_down_stop_pct_runtime = max(entry_gap_down_stop_pct_runtime, abs(rally_gap_down))
+        except Exception:
+            pass
+
+        print(
+            f"[REGIME] RALLY caps -> gross={max_gross_exposure_pct:.3f} daily={max_daily_new_exposure_pct:.3f} "
+            f"max_per_sector={max_per_sector_runtime} gap_up={gap_up_max_pct_runtime:.3f} "
+            f"gap_down_stop={entry_gap_down_stop_pct_runtime:.3f}"
+        )
+
+    return {
+        "max_new": int(max_new),
+        "max_gross_exposure_pct": float(max_gross_exposure_pct),
+        "max_daily_new_exposure_pct": float(max_daily_new_exposure_pct),
+        "max_per_sector_runtime": int(max_per_sector_runtime),
+        "gap_up_max_pct_runtime": float(gap_up_max_pct_runtime),
+        "entry_gap_down_stop_pct_runtime": float(entry_gap_down_stop_pct_runtime),
     }
 
 
