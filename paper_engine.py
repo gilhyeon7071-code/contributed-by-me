@@ -100,6 +100,7 @@ from paper_engine.entry import (
     _prepare_pretrade_runtime,
     _print_entry_fill_summary_v2,
     _process_entry_rows,
+    _run_post_exit_entry_recheck,
     _write_entry_runtime_snapshots_and_reports,
     _write_p1_gate_status,
     apply_p1_entry_controls,
@@ -1614,93 +1615,79 @@ def main() -> int:
     still_open = residual_runtime["still_open"]
     next_seq = int(residual_runtime["next_seq"])
 
-    if (not exit_only_mode) and max_positions_blocked and max_positions > 0 and len(still_open) < max_positions and len(cdf) > 0 and new_count < max_new:
-        slots_after_exit = max(0, int(max_positions) - int(len(still_open)))
-        print(
-            f"[ENTRY_RECHECK_AFTER_EXIT] triggered=1 slots_after_exit={slots_after_exit} "
-            f"open_after_exit={len(still_open)} max_positions={max_positions}"
-        )
-        current_open_notional = _compute_current_open_notional(still_open, px)
-        open_codes_after_exit = {str(pos.get("code", "")).zfill(6) for pos in still_open}
-        loop_state_recheck = {
-            "fills_new": fills_new,
-            "trades_new": trades_new,
-            "new_count": int(new_count),
-            "new_notional_krw": float(new_notional_krw),
-            "surge_new_count": int(surge_new_count),
-            "surge_notional_krw": float(surge_notional_krw),
-            "split_notional_krw": float(split_notional_krw),
-            "evaluated_count": int(evaluated_count),
-            "no_next_day_count": int(no_next_day_count),
-            "entry_ready_count": int(entry_ready_count),
-            "cap_block_count": int(cap_block_count),
-            "processed_skip_count": int(processed_skip_count),
-            "idempotent_skip_count": int(idempotent_skip_count),
-            "stale_replay_used_count": int(stale_replay_used_count),
-            "open_order_replay_used_count": int(open_order_replay_used_count),
-            "max_positions_blocked": False,
-            "today_ymd": str(today_ymd),
-            "pending_carry_rows": pending_carry_rows,
-            "entry_decision_code": str(entry_decision_code or ""),
-            "entry_decision_reason": str(entry_decision_reason or ""),
-            "p0_rolling_dd_abs": loop_state.get("p0_rolling_dd_abs", 0.0),
-            "p0_rolling_dd_source": loop_state.get("p0_rolling_dd_source", "p0.kill_switch.metrics.max_drawdown_pct"),
-            "_same_code_day_buy_counts": loop_state.get("_same_code_day_buy_counts", {}),
-            "portfolio_state": state,
-            "t2_cash_checks": t2_cash_checks,
-        }
-        recheck_result = _process_entry_rows(
-            cdf,
-            max_new=int(max_new),
-            max_new_surge=int(max_new_surge),
-            capital_total=float(capital_total),
-            max_positions=int(max_positions),
-            schema=str(schema),
-            config=cfg,
-            prices_df=px,
-            fee_pct=float(fee_pct),
-            slip_pct=float(slip_pct),
-            gap_up_max_pct_runtime=float(gap_up_max_pct_runtime),
-            entry_gap_down_stop_pct_runtime=float(entry_gap_down_stop_pct_runtime),
-            stop_loss=float(stop_loss),
-            take_profit=take_profit,
-            trail_pct=trail_pct,
-            same_close_entry_mode=bool(same_close_entry_mode),
-            intraday_realtime_mode=bool(intraday_realtime_mode),
-            processed_signals=processed_signals,
-            committed_signal_keys=committed_signal_keys,
-            replay_enabled=bool(replay_enabled),
-            replay_global_ok=bool(replay_global_ok),
-            replay_min_age_days=int(replay_min_age_days),
-            replay_order_id_include_entry_day=bool(replay_order_id_include_entry_day),
-            ops_enabled=bool(ops_enabled),
-            ops_policy=ops_policy,
-            carryover_market_gate_block=bool(carryover_market_gate_block),
-            carryover_revalidate_summary=carryover_revalidate_summary,
-            market_regime=str(market_regime or ''),
-            risk_off_enabled=bool(risk_off_enabled),
-            block_same_sector_entry=bool(block_same_sector_entry),
-            entry_sector_col=str(entry_sector_col or ''),
-            blocked_sector_value=str(blocked_sector_value or ''),
-            sector_concentration=float(sector_concentration),
-            gross_cap_krw=gross_cap_krw,
-            daily_new_cap_krw=daily_new_cap_krw,
-            current_open_notional=float(current_open_notional),
-            position_size_multiplier=float(position_size_multiplier),
-            fundamentals_db=fundamentals_db,
-            sector_db=sector_db,
-            trend_overlay_ctx=trend_overlay_ctx,
-            existing_fill_order_ids=existing_fill_order_ids,
-            open_pos=still_open,
-            open_codes=open_codes_after_exit,
-            max_positions_override_allowed=bool(max_positions_override_allowed),
-            loop_state=loop_state_recheck,
-        )
-        recheck_loop = _normalize_entry_loop_result(
-            recheck_result,
-            fallback_portfolio_state=state,
-            fallback_t2_cash_checks=t2_cash_checks,
-        )
+    post_exit_recheck = _run_post_exit_entry_recheck(
+        candidate_df=cdf,
+        exit_only_mode=bool(exit_only_mode),
+        max_positions_blocked=bool(max_positions_blocked),
+        max_positions=int(max_positions),
+        still_open=still_open,
+        new_count=int(new_count),
+        max_new=int(max_new),
+        max_new_surge=int(max_new_surge),
+        capital_total=float(capital_total),
+        schema=str(schema),
+        config=cfg,
+        prices_df=px,
+        fee_pct=float(fee_pct),
+        slip_pct=float(slip_pct),
+        gap_up_max_pct_runtime=float(gap_up_max_pct_runtime),
+        entry_gap_down_stop_pct_runtime=float(entry_gap_down_stop_pct_runtime),
+        stop_loss=float(stop_loss),
+        take_profit=take_profit,
+        trail_pct=trail_pct,
+        same_close_entry_mode=bool(same_close_entry_mode),
+        intraday_realtime_mode=bool(intraday_realtime_mode),
+        processed_signals=processed_signals,
+        committed_signal_keys=committed_signal_keys,
+        replay_enabled=bool(replay_enabled),
+        replay_global_ok=bool(replay_global_ok),
+        replay_min_age_days=int(replay_min_age_days),
+        replay_order_id_include_entry_day=bool(replay_order_id_include_entry_day),
+        ops_enabled=bool(ops_enabled),
+        ops_policy=ops_policy,
+        carryover_market_gate_block=bool(carryover_market_gate_block),
+        carryover_revalidate_summary=carryover_revalidate_summary,
+        market_regime=str(market_regime or ''),
+        risk_off_enabled=bool(risk_off_enabled),
+        block_same_sector_entry=bool(block_same_sector_entry),
+        entry_sector_col=str(entry_sector_col or ''),
+        blocked_sector_value=str(blocked_sector_value or ''),
+        sector_concentration=float(sector_concentration),
+        gross_cap_krw=gross_cap_krw,
+        daily_new_cap_krw=daily_new_cap_krw,
+        current_open_notional=float(current_open_notional),
+        position_size_multiplier=float(position_size_multiplier),
+        fundamentals_db=fundamentals_db,
+        sector_db=sector_db,
+        trend_overlay_ctx=trend_overlay_ctx,
+        existing_fill_order_ids=existing_fill_order_ids,
+        open_codes=open_codes,
+        max_positions_override_allowed=bool(max_positions_override_allowed),
+        fills_new=fills_new,
+        trades_new=trades_new,
+        new_notional_krw=float(new_notional_krw),
+        surge_new_count=int(surge_new_count),
+        surge_notional_krw=float(surge_notional_krw),
+        split_notional_krw=float(split_notional_krw),
+        evaluated_count=int(evaluated_count),
+        no_next_day_count=int(no_next_day_count),
+        entry_ready_count=int(entry_ready_count),
+        cap_block_count=int(cap_block_count),
+        processed_skip_count=int(processed_skip_count),
+        idempotent_skip_count=int(idempotent_skip_count),
+        stale_replay_used_count=int(stale_replay_used_count),
+        open_order_replay_used_count=int(open_order_replay_used_count),
+        today_ymd=str(today_ymd),
+        pending_carry_rows=pending_carry_rows,
+        entry_decision_code=str(entry_decision_code or ""),
+        entry_decision_reason=str(entry_decision_reason or ""),
+        loop_state=loop_state,
+        portfolio_state=state,
+        t2_cash_checks=t2_cash_checks,
+    )
+    current_open_notional = float(post_exit_recheck.get("current_open_notional", current_open_notional) or 0.0)
+    if bool(post_exit_recheck.get("applied", False)):
+        recheck_loop = cast(Dict[str, Any], post_exit_recheck.get("recheck_loop") or {})
         fills_new = recheck_loop["fills_new"]
         trades_new = recheck_loop["trades_new"]
         new_count = int(recheck_loop["new_count"])
@@ -1719,10 +1706,6 @@ def main() -> int:
         pending_carry_rows = recheck_loop["pending_carry_rows"]
         state = cast(Dict[str, Any], recheck_loop["portfolio_state"])
         t2_cash_checks = cast(List[Dict[str, Any]], recheck_loop["t2_cash_checks"])
-        print(
-            f"[ENTRY_RECHECK_AFTER_EXIT] result new_count={new_count} "
-            f"entry_ready={entry_ready_count} open_positions={len(still_open)}"
-        )
 
     fills_header = LEGACY_FILLS_HEADER if schema == "legacy" else V411_FILLS_HEADER
     trades_header = LEGACY_TRADES_HEADER if schema == "legacy" else V411_TRADES_HEADER
