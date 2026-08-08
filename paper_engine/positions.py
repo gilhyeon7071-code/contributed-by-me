@@ -36,6 +36,7 @@ __all__ = [
     '_sync_new_fills_to_live_bridge',
     '_append_fills_trades_with_rollback',
     '_finalize_written_fills_runtime_state',
+    '_write_and_finalize_fills_trades_runtime',
     '_compute_current_open_notional',
     '_count_open_position_slots',
     '_recalculate_open_notional_and_alert',
@@ -2432,6 +2433,102 @@ def _finalize_written_fills_runtime_state(
         "ops_alert": ops_alert,
         "entry_fill_rows_final": int(entry_fill_rows_final),
         "current_open_notional": float(current_open_notional),
+    }
+
+def _write_and_finalize_fills_trades_runtime(
+    *,
+    schema: str,
+    fills_path: Path,
+    trades_path: Path,
+    fills_new: List[List[Any]],
+    trades_new: List[List[Any]],
+    fills_header: List[str],
+    trades_header: List[str],
+    prices_df: pd.DataFrame,
+    write_dashboard_compat_csv: Callable[[str], None],
+    stop_loss: float,
+    take_profit: Any,
+    trail_pct: Any,
+    still_open: List[Dict[str, Any]],
+    ops_alert: Dict[str, Any],
+    current_open_notional: float,
+    gross_cap_krw: Optional[float],
+    ops_enabled: bool,
+    audit_ymd: str,
+    log_pipeline_event_func: Callable[..., Any],
+    count_rows_func: Callable[[Path], int],
+) -> Dict[str, Any]:
+    write_txn_result = _append_fills_trades_with_rollback(
+        fills_path=fills_path,
+        trades_path=trades_path,
+        fills_new=fills_new,
+        trades_new=trades_new,
+        schema=str(schema),
+        fills_header=fills_header,
+        trades_header=trades_header,
+        prices_df=prices_df,
+        write_dashboard_compat_csv=write_dashboard_compat_csv,
+    )
+    fills_new = cast(List[List[Any]], write_txn_result.get("fills_new", fills_new))
+    if schema == "v41.1" and bool(write_txn_result.get("dashboard_compat_updated", False)):
+        print(
+            f"[DASHBOARD_COMPAT] legacy copies updated: {fills_path.parent / 'fills_dashboard_compat.csv'}, "
+            f"{trades_path.parent / 'trades_dashboard_compat.csv'}"
+        )
+    if int(write_txn_result.get("return_code", 0) or 0) != 0:
+        return {
+            "return_code": 2,
+            "fills_new": fills_new,
+            "trades_new": trades_new,
+            "still_open": still_open,
+            "ops_alert": ops_alert,
+            "current_open_notional": float(current_open_notional),
+            "write_txn_result": write_txn_result,
+        }
+
+    written_finalize = _finalize_written_fills_runtime_state(
+        schema=str(schema),
+        fills_path=fills_path,
+        fills_new=fills_new,
+        still_open=still_open,
+        stop_loss=float(stop_loss),
+        take_profit=take_profit,
+        trail_pct=trail_pct,
+        ops_alert=ops_alert,
+        prices_df=prices_df,
+        current_open_notional=float(current_open_notional),
+        gross_cap_krw=gross_cap_krw,
+        ops_enabled=bool(ops_enabled),
+    )
+    still_open = cast(List[Dict[str, Any]], written_finalize["still_open"])
+    ops_alert = dict(written_finalize.get("ops_alert") or {})
+    current_open_notional = float(written_finalize.get("current_open_notional", current_open_notional))
+    log_pipeline_event_func(
+        stage="paper_engine_main",
+        batch_label="[7/9]",
+        event="END",
+        date=audit_ymd,
+        output_files={
+            "fills": {"path": str(fills_path), "new_rows": int(len(fills_new)), "total_rows": count_rows_func(fills_path)},
+            "trades": {"path": str(trades_path), "new_rows": int(len(trades_new)), "total_rows": count_rows_func(trades_path)},
+        },
+        metrics={
+            "fills_new": int(len(fills_new)),
+            "trades_new": int(len(trades_new)),
+            "ops_alert_filled": int(ops_alert.get("filled", 0) or 0),
+            "schema": schema,
+        },
+        status="PASS",
+    )
+    return {
+        "return_code": 0,
+        "fills_new": fills_new,
+        "trades_new": trades_new,
+        "still_open": still_open,
+        "ops_alert": ops_alert,
+        "current_open_notional": float(current_open_notional),
+        "write_txn_result": write_txn_result,
+        "written_finalize": written_finalize,
     }
 
 def _compute_current_open_notional(open_pos: List[Dict[str, Any]], px: pd.DataFrame) -> float:

@@ -133,12 +133,11 @@ from paper_engine.exit import (
     _run_intraday_residual_overnight_runtime,
 )
 from paper_engine.positions import (
-    _append_fills_trades_with_rollback,
-    _finalize_written_fills_runtime_state,
     _recover_open_positions,
     _compute_current_open_notional,
     _count_open_position_slots,
     _run_open_positions_rebalance_runtime,
+    _write_and_finalize_fills_trades_runtime,
 )
 from paper_engine.regime import (
     resolve_market_regime,
@@ -1709,57 +1708,35 @@ def main() -> int:
 
     fills_header = LEGACY_FILLS_HEADER if schema == "legacy" else V411_FILLS_HEADER
     trades_header = LEGACY_TRADES_HEADER if schema == "legacy" else V411_TRADES_HEADER
-    write_txn_result = _append_fills_trades_with_rollback(
+    write_finalize = _write_and_finalize_fills_trades_runtime(
+        schema=str(schema),
         fills_path=FILLS,
         trades_path=TRADES,
         fills_new=fills_new,
         trades_new=trades_new,
-        schema=str(schema),
         fills_header=fills_header,
         trades_header=trades_header,
         prices_df=px,
         write_dashboard_compat_csv=_write_dashboard_compat_csv,
-    )
-    fills_new = cast(List[List[Any]], write_txn_result.get("fills_new", fills_new))
-    if schema == "v41.1" and bool(write_txn_result.get("dashboard_compat_updated", False)):
-        print(f"[DASHBOARD_COMPAT] legacy copies updated: {FILLS.parent / 'fills_dashboard_compat.csv'}, "
-              f"{TRADES.parent / 'trades_dashboard_compat.csv'}")
-    if int(write_txn_result.get("return_code", 0) or 0) != 0:
-        return 2
-    written_finalize = _finalize_written_fills_runtime_state(
-        schema=str(schema),
-        fills_path=FILLS,
-        fills_new=fills_new,
-        still_open=still_open,
         stop_loss=float(stop_loss),
         take_profit=take_profit,
         trail_pct=trail_pct,
+        still_open=still_open,
         ops_alert=ops_alert,
-        prices_df=px,
         current_open_notional=float(current_open_notional),
         gross_cap_krw=gross_cap_krw,
         ops_enabled=bool(ops_enabled),
+        audit_ymd=str(_audit_ymd),
+        log_pipeline_event_func=log_pipeline_event,
+        count_rows_func=count_rows,
     )
-    still_open = cast(List[Dict[str, Any]], written_finalize["still_open"])
-    ops_alert = dict(written_finalize.get("ops_alert") or {})
-    current_open_notional = float(written_finalize.get("current_open_notional", current_open_notional))
-    log_pipeline_event(
-        stage="paper_engine_main",
-        batch_label="[7/9]",
-        event="END",
-        date=_audit_ymd,
-        output_files={
-            "fills": {"path": str(FILLS), "new_rows": int(len(fills_new)), "total_rows": count_rows(FILLS)},
-            "trades": {"path": str(TRADES), "new_rows": int(len(trades_new)), "total_rows": count_rows(TRADES)},
-        },
-        metrics={
-            "fills_new": int(len(fills_new)),
-            "trades_new": int(len(trades_new)),
-            "ops_alert_filled": int(ops_alert.get("filled", 0) or 0),
-            "schema": schema,
-        },
-        status="PASS",
-    )
+    fills_new = cast(List[List[Any]], write_finalize.get("fills_new", fills_new))
+    trades_new = cast(List[List[Any]], write_finalize.get("trades_new", trades_new))
+    still_open = cast(List[Dict[str, Any]], write_finalize.get("still_open", still_open))
+    ops_alert = dict(write_finalize.get("ops_alert") or ops_alert)
+    current_open_notional = float(write_finalize.get("current_open_notional", current_open_notional))
+    if int(write_finalize.get("return_code", 0) or 0) != 0:
+        return 2
 
     _record_sell_pending_and_write_t2_status(
         state=state,
