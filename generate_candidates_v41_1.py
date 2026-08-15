@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 STOC Candidate Generator (v41.1) - Candidate 0媛?諛⑹?(?먮룞 ?꾪솕 ?ы븿)
 
@@ -37,6 +37,24 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 import re
+
+def _atomic_write_text(path: Path, text: str, *, encoding: str = "utf-8") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp_path.write_text(text, encoding=encoding)
+    tmp_path.replace(path)
+
+
+def _atomic_write_csv(path: Path, df: pd.DataFrame) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    df.to_csv(tmp_path, index=False, encoding="utf-8-sig")
+    tmp_path.replace(path)
+
+
+def _atomic_write_json(path: Path, payload: object) -> None:
+    _atomic_write_text(path, json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
 
 # 濡쒓퉭 ?ㅼ젙
 logging.basicConfig(
@@ -83,14 +101,23 @@ RISK_DIR.mkdir(parents=True, exist_ok=True)
 DEFAULT_PARAMS = {
     "rs_lim": 0.05,
     "v_accel_lim": 2.50,
+    "v_accel_max": 5.00,     # upper bound: exclude extreme acceleration
+    "defense_bear_rs_slope_min": 0.0,  # bear/crash regime: min rs_slope (0 = neutral)
+    "defense_bear_disable_entry": 0.0,  # 1.0 => skip all entries in bear/crash/stress regime
     "stretch_max": 1.19,
     "value_min": 1_000_000_000.0,
     "atr_max": 0.12,     # ATR14/close (pct)
     "rsi_max": 70.0,     # avoid overbought entries
     "require_macd_golden": 0.0,  # 1.0 => require MACD golden cross
     "vol_close_corr_min": 0.0,   # rolling corr(close, volume)
-    "near_52w_high_gap_max": 0.05,  # within 5% of 52w high
+    "near_52w_high_gap_max": 0.25,  # within 25% of 52w high (relaxed from 5%)
     "min_listing_days": 126.0,   # about 6 months
+    # rule_e market/sector defense (2026-08-14). -1.0 => disabled (no-op).
+    # Ported from optimize_params_v41_1.py::_select_day_candidates_operational so that
+    # stable_params_v41_1.json values are actually honored in production.
+    "mkt_ret20_min": -1.0,   # market 20d return must exceed this
+    "mkt_ret60_min": -1.0,   # market 60d return must exceed this
+    "sector_rs_min": -1.0,   # (sector 20d return - market 20d return) must exceed this
     "w_rs": 0.20,
     "w_rs_slope": 0.55,
     "w_v_accel": 0.25,
@@ -111,6 +138,9 @@ DEFAULT_PARAMS = {
 PARAM_EXPORT_KEYS = [
     "rs_lim",
     "v_accel_lim",
+    "v_accel_max",
+    "defense_bear_rs_slope_min",
+    "defense_bear_disable_entry",
     "stretch_max",
     "value_min",
     "atr_max",
@@ -119,6 +149,9 @@ PARAM_EXPORT_KEYS = [
     "vol_close_corr_min",
     "near_52w_high_gap_max",
     "min_listing_days",
+    "mkt_ret20_min",
+    "mkt_ret60_min",
+    "sector_rs_min",
     "w_rs",
     "w_rs_slope",
     "w_v_accel",
@@ -319,6 +352,11 @@ def _normalize_params(p: dict) -> dict:
     x["near_52w_high_gap_max"] = min(max(fnum(x["near_52w_high_gap_max"], DEFAULT_PARAMS["near_52w_high_gap_max"]), 0.0), 0.50)
     x["min_listing_days"] = min(max(fnum(x["min_listing_days"], DEFAULT_PARAMS["min_listing_days"]), 0.0), 1000.0)
 
+    # rule_e thresholds: clamp to [-1.0, 1.0]. -1.0 is the "disabled" sentinel, so the
+    # lower bound must stay exactly -1.0 and 0.0 must survive as a real threshold.
+    for _k in ("mkt_ret20_min", "mkt_ret60_min", "sector_rs_min"):
+        x[_k] = min(max(fnum(x[_k], DEFAULT_PARAMS[_k]), -1.0), 1.0)
+
     # technical score weights normalize
     w_rs = fnum(x["w_rs"], DEFAULT_PARAMS["w_rs"])
     w_sl = fnum(x["w_rs_slope"], DEFAULT_PARAMS["w_rs_slope"])
@@ -399,6 +437,7 @@ def _compute_factors(df: pd.DataFrame):
     df["market"] = df["market"].fillna("").astype(str).str.upper().str.strip()
     overall_idx = df.groupby("date", as_index=True)["close"].mean().sort_index()
     overall_ret_20 = overall_idx.pct_change(20)
+    overall_ret_60 = overall_idx.pct_change(60)
     overall_bull = overall_idx > overall_idx.rolling(60).mean()
 
     market_idx = (
@@ -488,6 +527,55 @@ def _compute_factors(df: pd.DataFrame):
     df["atr14_pct"] = df["atr14"] / (df["close"] + 1e-9)
     df["ret1_pct"] = df.groupby("price_history_key", sort=False)["close"].pct_change(1) * 100.0
 
+    # --- rule_e market / sector defense factors (2026-08-14) ---
+    # Definitions are copied from optimize_params_v41_1.py::compute_factors(), which is the
+    # code that produced stable_params_v41_1.json. Do NOT switch these to the all-market
+    # index without also changing the optimizer: report_backtest_v41_1.py uses the
+    # all-market index for mkt_ret20 and therefore already disagrees with the optimizer.
+    #   mkt_ret20 = per-market (KOSPI/KOSDAQ) 20d return, all-market fallback  [optimizer m_ret20]
+    #   mkt_ret60 = all-market 60d return                                      [optimizer m_ret60]
+    #   sector_rs = sector 20d return - mkt_ret20                              [optimizer sector_rs]
+    df["mkt_ret20"] = df["m_ret_20"]
+    df["mkt_ret60"] = df["date"].map(overall_ret_60)
+
+    if "sector_code" not in df.columns:
+        # Unrestricted map: the optimizer builds its sector index from the full symbol panel,
+        # not from ALLOWED_SECTOR_CODES, so the sector index composition must match.
+        _sc_map = _build_sector_code_map(restrict_allowed=False)
+        if _sc_map.empty:
+            df["sector_code"] = ""
+        else:
+            # Join on a temporary zero-filled key: df["code"] must not be rewritten here,
+            # since everything downstream keys off its existing form.
+            df["_sc_key"] = df["code"].astype(str).str.zfill(6)
+            df = df.merge(
+                _sc_map.rename(columns={"code": "_sc_key"}),
+                on="_sc_key",
+                how="left",
+                sort=False,
+            ).drop(columns=["_sc_key"], errors="ignore")
+
+    df["sector_code"] = df["sector_code"].fillna("").astype(str).str.strip()
+    _sector_rows = df[df["sector_code"].ne("")]
+    if _sector_rows.empty:
+        df["sector_ret20"] = np.nan
+        df["sector_rs"] = np.nan
+    else:
+        sector_idx = (
+            _sector_rows
+            .groupby(["sector_code", "date"], as_index=False)["close"]
+            .mean()
+            .sort_values(["sector_code", "date"])
+        )
+        sector_idx["sector_ret20"] = sector_idx.groupby("sector_code")["close"].pct_change(20)
+        df = df.merge(
+            sector_idx[["sector_code", "date", "sector_ret20"]],
+            on=["sector_code", "date"],
+            how="left",
+            sort=False,
+        )
+        df["sector_rs"] = df["sector_ret20"] - df["mkt_ret20"]
+
     # latest date + bull flag
     # --- AS_OF selection: prefer latest date with sufficient universe size ---
     MIN_UNI = 2000
@@ -534,11 +622,34 @@ def _compute_factors(df: pd.DataFrame):
 
     return df, latest_dt, is_bull
 
+
+def _rule_e_threshold(p: dict, key: str):
+    """Return the rule_e threshold for `key`, or None when the filter is disabled.
+
+    -1.0 is the disabled sentinel. 0.0 is a real threshold and must not be swallowed,
+    so this never uses `float(p.get(key) or default)`.
+    """
+    raw = p.get(key, -1.0)
+    if raw is None:
+        return None
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(val) or val <= -1.0:
+        return None
+    return val
+
+
 def _diag_counts(today: pd.DataFrame, p: dict, n_all: int) -> dict:
     return {
         "rows_today": int(len(today)),
         "rs_pass": int((today["rs"] > float(p["rs_lim"])).sum()),
         "v_accel_pass": int((today["v_accel"] > float(p["v_accel_lim"])).sum()),
+        # NOTE: v_accel_max is intentionally NOT enforced in production
+        # _select_candidates (HEAD 2026-08-08 behavior). Keep it out of the
+        # diagnostic counts so the log does not claim a filter is active when it
+        # is not.
         "stretch_pass": int((today["stretch"] < float(p["stretch_max"])).sum()),
         "value_pass": int((today["value"] > float(p["value_min"])).sum()),
         "atr_pass": int((today["atr14_pct"] < float(p["atr_max"])).sum()),
@@ -547,8 +658,25 @@ def _diag_counts(today: pd.DataFrame, p: dict, n_all: int) -> dict:
         "volcorr_pass": int((today["vol_close_corr20"] >= float(p["vol_close_corr_min"])).sum()),
         "high52_pass": int((today["high_52w_gap"] <= float(p["near_52w_high_gap_max"])).sum()),
         "listing_pass": int((today["listing_days"] >= float(p["min_listing_days"])).sum()),
+        **_rule_e_diag_counts(today, p),
         "all_pass": int(n_all),
     }
+
+
+def _rule_e_diag_counts(today: pd.DataFrame, p: dict) -> dict:
+    """Per-gate pass counts for rule_e, so a 0-candidate day is attributable."""
+    out = {}
+    for col, key, label in (
+        ("mkt_ret20", "mkt_ret20_min", "mkt_ret20_pass"),
+        ("mkt_ret60", "mkt_ret60_min", "mkt_ret60_pass"),
+        ("sector_rs", "sector_rs_min", "sector_rs_pass"),
+    ):
+        thr = _rule_e_threshold(p, key)
+        if thr is None or col not in today.columns:
+            out[label] = int(len(today))  # gate disabled => everything passes
+        else:
+            out[label] = int((today[col] > thr).sum())
+    return out
 
 def _select_candidates(today: pd.DataFrame, p: dict) -> pd.DataFrame:
     require_macd = float((p.get("require_macd_golden") if p.get("require_macd_golden") is not None else 0.0)) >= 0.5
@@ -565,6 +693,40 @@ def _select_candidates(today: pd.DataFrame, p: dict) -> pd.DataFrame:
     )
     if require_macd:
         cond = cond & (today["macd_golden"] == True)
+
+    # rule_e market/sector defense (restored 2026-08-15).
+    #
+    # These three gates were wired into production on 2026-08-14 as a deliberate
+    # policy: "do not trade this market today". They were lost on 2026-08-15 when
+    # _select_candidates was rolled back to the 08-08 revision to undo an
+    # unrelated regression -- a shared candidate core had introduced v_accel_max
+    # and the bear gate into production, and v_accel_lim 6.6 > v_accel_max 5.0
+    # made the filter an empty set. Only v_accel_max and the bear gate were meant
+    # to go; rule_e is restored here on its own.
+    #
+    # Semantics match _apply_sector_prefilter_union()'s soft gate and
+    # report_backtest_v41_1.py:778-783 exactly: strict >, so NaN is excluded, and
+    # -1.0 (via _rule_e_threshold) means disabled. Without this the union fallback
+    # was stricter than the main path it exists to widen.
+    #
+    # rule_e is intentionally NOT relaxed by _relax_ladder(): it is a market-level
+    # gate, not a per-name threshold.
+    for _col, _key in (
+        ("mkt_ret20", "mkt_ret20_min"),
+        ("mkt_ret60", "mkt_ret60_min"),
+        ("sector_rs", "sector_rs_min"),
+    ):
+        _thr = _rule_e_threshold(p, _key)
+        if _thr is None:
+            continue
+        if _col not in today.columns:
+            # Do not fail silently. A missing factor column would disable an active
+            # policy gate without a trace -- the exact failure mode that cost the
+            # 2026-08 audit weeks.
+            print(f"[WARN] rule_e {_key} active but column '{_col}' missing; gate NOT applied")
+            continue
+        cond = cond & (pd.to_numeric(today[_col], errors="coerce") > _thr)
+
     return today[cond].copy()
 
 
@@ -1443,7 +1605,7 @@ def _apply_fundamental_overlay(candidates: pd.DataFrame, p: dict, market_regime:
     fund_score = (pd.to_numeric(out.get("fundamental_score", np.nan), errors="coerce").fillna(50.0) / 100.0).clip(0.0, 1.0)
     out["final_score"] = (tech_score * w_tech + fund_score * w_fund).clip(0.0, 1.0)
     return out
-def _build_sector_code_map() -> pd.DataFrame:
+def _build_sector_code_map(restrict_allowed: bool = True) -> pd.DataFrame:
     if (not SECTOR_SSOT_PATH.exists()) or (not SECTOR_MAP_PATH.exists()):
         return pd.DataFrame(columns=["code", "sector_code"])
     try:
@@ -1459,7 +1621,10 @@ def _build_sector_code_map() -> pd.DataFrame:
 
     out = ssot.merge(mp[["krx_sector", "sector_code"]], on="krx_sector", how="left")
     out["sector_code"] = out["sector_code"].astype(str).str.strip()
-    out = out[out["sector_code"].isin(ALLOWED_SECTOR_CODES)].copy()
+    if restrict_allowed:
+        out = out[out["sector_code"].isin(ALLOWED_SECTOR_CODES)].copy()
+    else:
+        out = out[out["sector_code"].ne("") & out["sector_code"].ne("nan")].copy()
     return out[["code", "sector_code"]].drop_duplicates("code")
 
 
@@ -1549,6 +1714,10 @@ def _apply_sector_prefilter_union(today: pd.DataFrame, candidates: pd.DataFrame,
 
     pool = today.copy()
     pool["code"] = pool["code"].astype(str).str.zfill(6)
+    # _compute_factors() now attaches an unrestricted sector_code for rule_e's sector index.
+    # Drop it before merging so this restricted (ALLOWED_SECTOR_CODES) map stays authoritative
+    # here and the merge does not split into sector_code_x / sector_code_y.
+    pool = pool.drop(columns=["sector_code"], errors="ignore")
     pool = pool.merge(sc_map, on="code", how="left")
     pool["sector_code"] = pool["sector_code"].astype(str).str.strip()
     pool = pool[pool["sector_code"].isin(ALLOWED_SECTOR_CODES)].copy()
@@ -1576,6 +1745,18 @@ def _apply_sector_prefilter_union(today: pd.DataFrame, candidates: pd.DataFrame,
         & (pd.to_numeric(pool["rsi14"], errors="coerce") <= rsi_soft)
         & (pd.to_numeric(pool["listing_days"], errors="coerce") >= listing_soft)
     )
+    # rule_e is a market-level "do not trade today" gate, so the union fallback must respect
+    # it too. Without this the fallback re-injects names on exactly the days rule_e closed,
+    # and those rows are NOT reliably blocked downstream: paper_engine/entry.py's
+    # observe-only mask needs candidate_origin, which keep_cols drops from the exported CSV.
+    for _col, _key in (
+        ("mkt_ret20", "mkt_ret20_min"),
+        ("mkt_ret60", "mkt_ret60_min"),
+        ("sector_rs", "sector_rs_min"),
+    ):
+        _thr = _rule_e_threshold(p, _key)
+        if _thr is not None and _col in pool.columns:
+            gate = gate & (pd.to_numeric(pool[_col], errors="coerce") > _thr)
     pool = pool[gate].copy()
     if pool.empty:
         info["reason"] = "no_pool_after_soft_gate"
@@ -1811,6 +1992,16 @@ def main() -> int:
     print(f"[PARAM] watch exclude_admin={int(params['exclude_administrative'])} exclude_warning={int(params['exclude_investment_warning'])} exclude_risk={int(params['exclude_investment_risk'])} caution_penalty={params['watch_penalty_caution']:.2f}")
     print(f"[PARAM] junk enable={int(params['junk_risk_enable'])} hard_exclude={int(params['junk_hard_exclude'])} hard_th={params['junk_hard_threshold']:.1f} penalty_max={params['junk_penalty_max']:.2f}")
 
+    def _rule_e_fmt(key: str) -> str:
+        thr = _rule_e_threshold(params, key)
+        return "OFF" if thr is None else f"{thr:+.4f}"
+
+    print(
+        f"[PARAM] rule_e mkt_ret20_min={_rule_e_fmt('mkt_ret20_min')} "
+        f"mkt_ret60_min={_rule_e_fmt('mkt_ret60_min')} "
+        f"sector_rs_min={_rule_e_fmt('sector_rs_min')} (not relaxed by ladder)"
+    )
+
     df_raw = _load_data()
     if df_raw.empty:
         return 2
@@ -1964,12 +2155,12 @@ def main() -> int:
     if candidates.empty:
         # empty output (schema fixed)
         cols = ["no","date","code","name","market","market_regime","close","value","market_cap","listed_shares","rs","rs_slope","stretch","v_accel","atr14_pct","rsi14","macd_golden","vol_close_corr20","high_52w_gap","listing_days","score","fundamental_score","fundamental_grade","final_score","junk_risk_score","junk_risk_grade","junk_flags","krx_admin","krx_warning","krx_risk","krx_caution","relax_level"]
-        pd.DataFrame(columns=cols).to_csv(out_path, index=False, encoding="utf-8-sig")
-        latest_ptr.write_text(out_path.name, encoding="utf-8")
+        _atomic_write_csv(out_path, pd.DataFrame(columns=cols))
+        _atomic_write_text(latest_ptr, out_path.name, encoding="utf-8")
         print("[FIX17] latest_data kept (no candidates) -> NOT overwriting candidates_latest_data.csv")
         meta['as_of_select'] = dict(as_of_select)
         meta['as_of_select']['src'] = 'generate_candidates_v41_1.py'  # standard_check expects as_of_select.src
-        write_json(latest_meta_path, meta)
+        _atomic_write_json(latest_meta_path, meta)
 
         # print
         diag0 = attempts[-1]["diag"] if attempts else {}
@@ -2017,20 +2208,20 @@ def main() -> int:
     top.insert(0, "no", range(1, len(top) + 1))
 
     # columns order
-    keep_cols = ["no","date","code","name","market","market_regime","close","value","market_cap","listed_shares","ret1_pct","rs","rs_slope","stretch","v_accel","atr14_pct","rsi14","macd_golden","vol_close_corr20","high_52w_gap","listing_days","ma60_support_bounce","trend_smoothness","price_vol_divergence","score","fundamental_score","fundamental_grade","final_score","junk_risk_score","junk_risk_grade","junk_flags","krx_admin","krx_warning","krx_risk","krx_caution","relax_level"]
+    keep_cols = ["no","date","code","name","market","market_regime","close","value","market_cap","listed_shares","ret1_pct","rs","rs_slope","stretch","v_accel","atr14_pct","rsi14","macd_golden","vol_close_corr20","high_52w_gap","listing_days","ma60_support_bounce","trend_smoothness","price_vol_divergence","score","fundamental_score","fundamental_grade","final_score","junk_risk_score","junk_risk_grade","junk_flags","krx_admin","krx_warning","krx_risk","krx_caution","relax_level","candidate_origin","natural_pass","observe_only","observe_only_reason"]
     for c in keep_cols:
         if c not in top.columns:
             top[c] = np.nan
     top = top[keep_cols]
 
-    top.to_csv(out_path, index=False, encoding="utf-8-sig")
-    latest_ptr.write_text(out_path.name, encoding="utf-8")
-    top.to_csv(latest_data_path, index=False, encoding="utf-8-sig")
+    _atomic_write_csv(out_path, top)
+    _atomic_write_text(latest_ptr, out_path.name, encoding="utf-8")
+    _atomic_write_csv(latest_data_path, top)
     meta['watch_soft_penalty'] = watch_soft_info
     meta['junk_risk'] = junk_info
     meta['as_of_select'] = as_of_select
     meta['as_of_select']['src'] = 'generate_candidates_v41_1.py'  # standard_check expects as_of_select.src
-    write_json(latest_meta_path, meta)
+    _atomic_write_json(latest_meta_path, meta)
 
     _log_candidate_summary(today, chosen_level, chosen_params, top, as_of_ymd)
 
