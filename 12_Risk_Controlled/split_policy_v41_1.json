@@ -1,0 +1,5 @@
+{
+  "train_end": "2022-12-31",
+  "val_end": "2024-12-31",
+  "notes": "IS<=train_end, VAL<=val_end, else OOS. 2026-08-15: train_end 2023-12-31 -> 2022-12-31. With 1-year rolling windows the old boundary left VAL with a single 27-trade fold, so the selection objective rested on one window. The new boundary yields IS 3 / VAL 2 / OOS 2. val_end is unchanged, so the OOS holdout set is identical."
+}

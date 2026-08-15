@@ -77,7 +77,8 @@ artifacts/
 9_MasterAlpha/
 10_Validation_Report/
 11_Autonomous_Evolution/
-12_Risk_Controlled/
+12_Risk_Controlled/*
+!12_Risk_Controlled/split_policy_v41_1.json
 13_Elite_Results/
 16_Audit_Report/
 
