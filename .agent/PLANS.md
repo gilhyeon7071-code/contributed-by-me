@@ -1166,4 +1166,4 @@ restored[col] = (
   - `68e049e0` chore: remove stale temp file `tools/_tmp_check_summary.py`
   - `8266c7fb` feat(paper_engine): BEAR live recovery override and entry robustness
   - `66b97d6d` feat(pipeline): rewrite post-trade, broker integration, and daily batch orchestration
-- `.agent/PLANS.md`는 여전히 미커밋(이 블록 갱신 포함). 추가 정리 후 별도 커밋 예정.
+- 이 블록은 `b966e138`에 포함되어 커밋 완료. 이후 갱신 시점에 따라 새 커밋 대상.
