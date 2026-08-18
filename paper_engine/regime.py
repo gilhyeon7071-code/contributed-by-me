@@ -251,6 +251,12 @@ def resolve_market_regime(
     allow_rally_on_volatile = bool(pol.get("allow_rally_on_macro_volatile", True))
     allow_rally_when_macro_risk_off = bool(pol.get("allow_rally_when_macro_risk_off", True))
     gate_daily_prefer = bool(pol.get("gate_daily_prefer", True))
+    p0_bear_live_recovery_enabled = bool(pol.get("p0_bear_live_recovery_enabled", True))
+    p0_bear_live_recovery_day_ret_min = _to_float(pol.get("p0_bear_live_recovery_day_ret_min", 0.0), 0.0)
+    p0_bear_live_recovery_macro_regimes = {
+        str(x or "").upper()
+        for x in (pol.get("p0_bear_live_recovery_macro_regimes") or ["NORMAL", "RALLY", "RECOVERY"])
+    }
 
     if gate_daily_prefer and isinstance(gate_snapshot, dict):
         gate_regime = str(gate_snapshot.get("regime") or "").upper()
@@ -342,12 +348,27 @@ def resolve_market_regime(
             out["reasons"].append("dayret_rally")
             return out
 
+    p0_bear_live_recovery = bool(
+        p0_bear_live_recovery_enabled
+        and p0_market_regime == "BEAR"
+        and gate_daily_status == "PASS"
+        and not risk_off_enabled
+        and macro_regime in p0_bear_live_recovery_macro_regimes
+        and day_ret is not None
+        and day_ret >= p0_bear_live_recovery_day_ret_min
+    )
+    if p0_bear_live_recovery:
+        out["reasons"].append("p0_bear_live_recovery_confirmed")
+
     if p0_bear_promote_enabled and p0_market_regime == "BEAR":
-        if (not p0_bear_allowed_macro_regimes) or (macro_regime in p0_bear_allowed_macro_regimes):
+        if p0_bear_live_recovery:
+            out["reasons"].append("p0_bear_not_promoted_live_recovery")
+        elif (not p0_bear_allowed_macro_regimes) or (macro_regime in p0_bear_allowed_macro_regimes):
             out["regime"] = "BEAR"
             out["reasons"].append("p0_bear_promoted")
             return out
-        out["reasons"].append(f"p0_bear_not_promoted:macro={macro_regime or 'UNKNOWN'}")
+        else:
+            out["reasons"].append(f"p0_bear_not_promoted:macro={macro_regime or 'UNKNOWN'}")
 
     out["reasons"].append("normal_by_default")
     return out

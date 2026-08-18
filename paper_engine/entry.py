@@ -537,6 +537,8 @@ def final_entry_decision(
     rally_day_ret_min: float = 0.025,
     rate_hike_fear_reduce_day_ret_floor: float = -0.015,
     allow_bear_rally_override: bool = True,
+    allow_bear_live_recovery_override: bool = True,
+    bear_live_recovery_day_ret_min: float = 0.0,
 ) -> Dict[str, str]:
     def _resolve_final_regime(
         p0_regime: str,
@@ -566,6 +568,15 @@ def final_entry_decision(
 
         if p0_u == "BEAR":
             if bool(allow_bear_rally_override) and (day_ret_v is not None) and (day_ret_v >= float(rally_day_ret_min)):
+                return "ALLOW"
+            if (
+                bool(allow_bear_live_recovery_override)
+                and macro_u in {"NORMAL", "RALLY"}
+                and gate_u == "PASS"
+                and not bool(risk_off_flag)
+                and (day_ret_v is not None)
+                and (day_ret_v >= float(bear_live_recovery_day_ret_min))
+            ):
                 return "ALLOW"
             return "CAUTION"
 
@@ -3933,6 +3944,11 @@ def _apply_entry_normal_lob_fill_price_gate(
             "reason": "NORMAL_LOB_FILL_PRICE_MISSING",
             "decision_reason": "NORMAL_LOB_FILL_PRICE_MISSING",
         }
+    normal_close_basis_entry_price = (
+        float(normal_close_basis_entry_price)
+        if normal_close_basis_entry_price is not None
+        else float(entry_price)
+    )
 
     print(
         f"[NORMAL_LOB_FILL_PRICE_APPLIED] code={code} "
@@ -4262,6 +4278,37 @@ def _resolve_split2_target_position_gate(
     return {"blocked": True, "target_position": None, "reason": "SPLIT2ND_NO_OPEN_POSITION"}
 
 
+def _resolve_entry_take_profit_pct(
+    row: Dict[str, Any],
+    cfg: Dict[str, Any],
+    take_profit: Any,
+    *,
+    is_surge_immediate: bool,
+    has_surge_type_policy: bool,
+) -> float:
+    resolved = _to_float(take_profit, None)
+    if resolved is not None:
+        return float(resolved)
+
+    surge_like = bool(is_surge_immediate or has_surge_type_policy)
+    if surge_like:
+        for key in ("surge_type_tp_pct", "exit_take_profit_pct"):
+            resolved = _to_float(row.get(key), None)
+            if resolved is not None:
+                return float(resolved)
+        surge_exit_policy = cfg.get("surge_exit_policy") if isinstance(cfg, dict) else {}
+        if isinstance(surge_exit_policy, dict):
+            resolved = _to_float(surge_exit_policy.get("take_profit_pct"), None)
+            if resolved is not None:
+                return float(resolved)
+
+    resolved = _to_float(cfg.get("take_profit_pct"), None) if isinstance(cfg, dict) else None
+    if resolved is not None:
+        return float(resolved)
+
+    raise ValueError("take_profit_pct_missing")
+
+
 def _commit_entry_fill_and_position(
     *,
     row: Dict[str, Any],
@@ -4386,7 +4433,13 @@ def _commit_entry_fill_and_position(
         entry_ts_value=entry_ts_value,
         row_entry_timing=row_entry_timing,
         entry_price=float(entry_price),
-        take_profit=float(take_profit),
+        take_profit=_resolve_entry_take_profit_pct(
+            row,
+            cfg,
+            take_profit,
+            is_surge_immediate=is_surge_immediate,
+            has_surge_type_policy=has_surge_type_policy,
+        ),
         stop_loss=float(stop_loss),
         trail_pct=float(trail_pct),
         row_slip_pct=float(row_slip_pct),
@@ -5989,9 +6042,12 @@ def _apply_signal_and_sector_caps(
             print("[CAP] ranking column missing (need final_score or score); cap_signal_top_n ignored")
 
     if max_per_sector > 0:
-        sector_col = "sector_code" if "sector_code" in candidate_df.columns else None
+        sector_col = next(
+            (col for col in ("sector_code", "krx_sector", "sector") if col in candidate_df.columns),
+            None,
+        )
         if not sector_col:
-            print("[CAP] max_per_sector set but sector_code column missing; ignored")
+            print("[CAP] max_per_sector set but sector column missing; ignored")
         else:
             candidate_df["_sector_key"] = candidate_df[sector_col].astype(str).str.strip()
             miss = (candidate_df["_sector_key"] == "") | (candidate_df["_sector_key"].str.lower() == "nan")
@@ -6227,6 +6283,9 @@ def _prepare_pretrade_runtime(
     ddm_cfg: Dict[str, Any],
     ddm_force_liquidate_pct: float,
 ) -> Dict[str, Any]:
+    if "code" not in candidate_df.columns:
+        candidate_df = candidate_df.copy()
+        candidate_df["code"] = pd.Series(dtype="object")
     entry_sector_col = "sector_code" if "sector_code" in candidate_df.columns else ("sector" if "sector" in candidate_df.columns else None)
     code_to_sector: Dict[str, str] = {}
     if entry_sector_col:
@@ -6871,7 +6930,7 @@ def _apply_sector_corr_hrp_qty_adjustment(
     row_sector_for_corr: str,
     allow_block: bool,
 ) -> Dict[str, Any]:
-    result = {
+    result: Dict[str, Any] = {
         "blocked": False,
         "reason": "",
         "qty": int(qty),
@@ -6909,7 +6968,7 @@ def _apply_sector_corr_hrp_qty_adjustment(
         old_qty = int(new_qty)
         new_qty = max(1, int(math.floor(float(new_qty) * corr_reduce_mult)))
         if new_qty < old_qty:
-            result["reduce_count"] = int(result["reduce_count"]) + 1
+            result["reduce_count"] = int(result.get("reduce_count", 0) or 0) + 1
             print(
                 f"[SECTOR_CORR_REDUCE] code={code} sector={row_sector_for_corr} "
                 f"corr_score={corr_score:.3f} qty={old_qty}->{new_qty} mult={corr_reduce_mult:.2f}"
@@ -6932,7 +6991,7 @@ def _apply_sector_corr_hrp_qty_adjustment(
         old_qty = int(new_qty)
         new_qty = max(1, int(math.floor(float(new_qty) * hrp_mult)))
         if new_qty < old_qty:
-            result["reduce_count"] = int(result["reduce_count"]) + 1
+            result["reduce_count"] = int(result.get("reduce_count", 0) or 0) + 1
             hrp_w = float(
                 _to_float(
                     (sector_corr_ctx.get("sector_hrp_weight", {}) or {}).get(row_sector_for_corr, 0.0),
@@ -8197,6 +8256,7 @@ def _process_entry_rows(
     portfolio_state: Dict[str, Any] = _get_dict(loop_state, "portfolio_state")
     t2_cash_checks: List[Any] = _get_list(loop_state, "t2_cash_checks")
     _fc_propagate = bool(ops_policy.get('fail_closed_propagate_block', True)) if isinstance(ops_policy, dict) else True
+    _exec_q_max = float(ops_policy.get("exec_quality_max_slippage_pct", 0.0)) if isinstance(ops_policy, dict) else 0.0
     tctx = trend_overlay_ctx if isinstance(trend_overlay_ctx, dict) else {}
     t_enabled = bool(tctx.get("enabled", False))
     t_ai_codes = tctx.get("ai_focus_codes", set()) if isinstance(tctx.get("ai_focus_codes", set()), set) else set()
@@ -9066,11 +9126,12 @@ def _process_entry_rows(
                     f"[OPEN_CHASE_BLOCK] code={code} chase={float(chase_pct):.4f} "
                     f"> max={max_chase_pct:.4f} entry={entry_price:.2f} "
                     f"open={float(_open_chase_guard.get('open_price') or 0.0):.2f}"
-                )
+            )
             if bool(_open_chase_action.get("adaptive_allowed", False)):
+                _open_chase_adaptive_row = _open_chase_action.get("adaptive_row")
                 _mark_adaptive_good_stock(
                     r,
-                    _open_chase_action.get("adaptive_row") if isinstance(_open_chase_action.get("adaptive_row"), dict) else {},
+                    _open_chase_adaptive_row if isinstance(_open_chase_adaptive_row, dict) else {},
                     reason,
                     "OPEN_CHASE_SOFTENED_TO_PROBE",
                 )
@@ -9448,7 +9509,7 @@ def _process_entry_rows(
                 gap=gap,
                 gap_entry_price=gap_entry_price,
                 prev_close=prev_close,
-                gap_ref_date=gap_ref_date,
+                gap_ref_date=str(gap_ref_date or ""),
                 entry_gap_down_stop_pct_runtime=entry_gap_down_stop_pct_runtime,
                 use_same_close_today=use_same_close_today,
                 fallback_stage=fallback_stage,
@@ -9932,7 +9993,6 @@ def _process_entry_rows(
             fallback_note=fallback_note,
             is_split_2nd=is_split_2nd,
         )
-        note_parts = list(note_context.get("note_parts", []) or [])
         note_text = str(note_context.get("note_text", "") or "")
         horizon_label = str(note_context.get("horizon_label", "") or "")
 
@@ -10230,8 +10290,10 @@ def load_candidates_execution_gate(log_dir: Path) -> Dict[str, Any]:
     if not isinstance(obj, dict):
         return {"ok": False, "reason": "meta_not_object", "explicit": True}
 
-    quality_gate = obj.get("quality_gate") if isinstance(obj.get("quality_gate"), dict) else {}
-    stable_gate = obj.get("stable_param_gate") if isinstance(obj.get("stable_param_gate"), dict) else {}
+    quality_gate_raw = obj.get("quality_gate")
+    stable_gate_raw = obj.get("stable_param_gate")
+    quality_gate: Dict[Any, Any] = quality_gate_raw if isinstance(quality_gate_raw, dict) else {}
+    stable_gate: Dict[Any, Any] = stable_gate_raw if isinstance(stable_gate_raw, dict) else {}
     official = quality_gate.get("official_use_allowed")
     stable_ok = stable_gate.get("ok")
     reasons: List[str] = []

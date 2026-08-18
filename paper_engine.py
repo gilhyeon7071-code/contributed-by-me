@@ -38,7 +38,6 @@ from utils.common import (
     is_daily_loss_reason,
     norm_code,
     now_ymd,
-    read_csv_safe,
 )
 from utils.pipeline_audit import log_pipeline_event, count_rows
 from paper_engine.config import load_config, _path_from_env, _deep_merge_dict
@@ -70,9 +69,7 @@ from paper_engine.common import (
     _to_float,
     _to_int,
     _truthy,
-    _pct01_from_config,
     now_ts,
-    _extract_ymd_from_ts_text,
     _load_fundamentals_db,
     _concat_drop_all_na_columns,
     RUN_LABEL,
@@ -81,9 +78,7 @@ from paper_engine.common import (
     _safe_gate_float,
     _safe_gate_int,
     _load_sector_db,
-    _paper_engine_phase_trace,
     _get_dict,
-    _get_list,
 )
 from paper_engine.entry import (
     BASE_DIR,
@@ -189,9 +184,6 @@ BACKTEST_DEFERRED_VALIDATION_STATUS_PATH = _path_from_env(
 
 
 # latest_file helper is imported from utils.common.
-
-# read_csv_safe helper is imported from utils.common.
-
 
 def main() -> int:
     parser = argparse.ArgumentParser(
@@ -568,7 +560,6 @@ def main() -> int:
     ddm_cfg = cast(Dict[str, Any], ddm_runtime.get("ddm_cfg") or {})
     ddm_enabled = bool(ddm_runtime.get("ddm_enabled", False))
     consecutive_loss_days = int(ddm_runtime.get("consecutive_loss_days", 0) or 0)
-    ddm_context = cast(Dict[str, Any], ddm_runtime.get("ddm_context") or {})
     ddm_action = ddm_runtime.get("ddm_action")
     ddm_exposure_cap = cast(Optional[float], ddm_runtime.get("ddm_exposure_cap"))
     ddm_force_liquidate_pct = float(ddm_runtime.get("ddm_force_liquidate_pct", 0.0) or 0.0)
@@ -612,8 +603,6 @@ def main() -> int:
         max_positions_meta=max_positions_meta,
     )
     capital_total = float(initial_sizing.get("capital_total", 0.0) or 0.0)
-    capital_total_configured = float(initial_sizing.get("capital_total_configured", capital_total) or 0.0)
-    account_equity_for_allocation = initial_sizing.get("account_equity_for_allocation")
     max_positions_meta = cast(Dict[str, Any], initial_sizing.get("max_positions_meta") or max_positions_meta)
     max_gross_exposure_pct = float(initial_sizing.get("max_gross_exposure_pct", 1.0) or 0.0)
     max_daily_new_exposure_pct = float(initial_sizing.get("max_daily_new_exposure_pct", 1.0) or 0.0)
@@ -741,6 +730,8 @@ def main() -> int:
         rally_day_ret_min=_to_float(regime_policy.get("rally_day_ret_min", 0.025), 0.025),
         rate_hike_fear_reduce_day_ret_floor=_to_float(regime_policy.get("rate_hike_fear_reduce_day_ret_floor", -0.015), -0.015),
         allow_bear_rally_override=bool(regime_policy.get("allow_bear_rally_override", True)),
+        allow_bear_live_recovery_override=bool(regime_policy.get("p0_bear_live_recovery_enabled", True)),
+        bear_live_recovery_day_ret_min=_to_float(regime_policy.get("p0_bear_live_recovery_day_ret_min", 0.0), 0.0),
     )
     entry_decision_code = str(entry_decision.get("decision") or "ALLOW").upper()
     entry_decision_reason = str(entry_decision.get("reason") or "")
@@ -1342,6 +1333,11 @@ def main() -> int:
     gross_cap_krw = pretrade_runtime.get("gross_cap_krw")
     daily_new_cap_krw = pretrade_runtime.get("daily_new_cap_krw")
     px: pd.DataFrame = pretrade_runtime.get("px") if isinstance(pretrade_runtime.get("px"), pd.DataFrame) else pd.DataFrame()
+    if "code" in px.columns:
+        _price_codes = px["code"].map(norm_code)
+        price_universe_codes = int(_price_codes[_price_codes.astype(bool)].nunique())
+    else:
+        price_universe_codes = 0
     current_open_notional = float(pretrade_runtime.get("current_open_notional", 0.0) or 0.0)
     ddm_liquidation_targets = pretrade_runtime.get("ddm_liquidation_targets") or set()
     ddm_liquidation_price_mode = str(pretrade_runtime.get("ddm_liquidation_price_mode") or "close")
@@ -1465,6 +1461,7 @@ def main() -> int:
         max_positions_override_allowed=bool(max_positions_override_allowed),
         loop_state=loop_state,
     )
+    t2_cash_checks: List[Dict[str, Any]] = []
     entry_loop = _normalize_entry_loop_result(
         loop_result,
         fallback_portfolio_state=state,
@@ -1535,8 +1532,6 @@ def main() -> int:
         max_positions_meta=max_positions_meta,
         replay_enabled=bool(replay_enabled),
     )
-    entry_fill_rows_runtime = int(ops_runtime["entry_fill_rows_runtime"])
-    expected_min_fills = int(ops_runtime["expected_min_fills"])
     ops_alert = dict(ops_runtime.get("ops_alert") or {})
     replay_sync_result = _run_replay_runtime_refresh(
         ops_enabled=bool(ops_enabled),
@@ -1609,8 +1604,6 @@ def main() -> int:
         existing_trade_sigs=existing_trade_sigs,
         next_seq_start=int(next_seq),
     )
-    residual_guard_shadow = residual_runtime["residual_guard_shadow"]
-    residual_guard_exit = residual_runtime["residual_guard_exit"]
     still_open = residual_runtime["still_open"]
     next_seq = int(residual_runtime["next_seq"])
 
