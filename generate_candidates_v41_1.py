@@ -1746,9 +1746,9 @@ def _apply_sector_prefilter_union(today: pd.DataFrame, candidates: pd.DataFrame,
         & (pd.to_numeric(pool["listing_days"], errors="coerce") >= listing_soft)
     )
     # rule_e is a market-level "do not trade today" gate, so the union fallback must respect
-    # it too. Without this the fallback re-injects names on exactly the days rule_e closed,
-    # and those rows are NOT reliably blocked downstream: paper_engine/entry.py's
-    # observe-only mask needs candidate_origin, which keep_cols drops from the exported CSV.
+    # it too. Without this the fallback re-injects names on exactly the days rule_e closed.
+    # candidate_origin is kept in keep_cols (line 2211) so the observe-only mask can use it,
+    # but end-to-end observe-only enforcement still needs runtime verification.
     for _col, _key in (
         ("mkt_ret20", "mkt_ret20_min"),
         ("mkt_ret60", "mkt_ret60_min"),

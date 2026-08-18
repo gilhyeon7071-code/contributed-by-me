@@ -831,3 +831,339 @@ hypertime_score = base_score + 0.01 * recent_weighted
 - 정책 검증 PASS. 08-14에 결정된 rule_e 정책으로 복귀. `v_accel_max`/bear는 복원하지 않아 롤백 의도 유지.
 - FAIL-CLOSED 검증 PASS. 컬럼 누락 시 무증상 통과 대신 WARN.
 - 회귀 검증 PARTIAL. rule_e OFF(-1.0) 설정에서 게이트가 no-op임을 합성 프레임으로 확인했으나, 생산 파이프라인 전체 실행 회귀는 미수행.
+
+## 2026-08-15 (7) 감사 스레드 커밋 + .gitignore 추적 공백
+
+### 커밋
+- 브랜치 `codex/alignment-quality-next`. 기본 브랜치가 아니다.
+- HEAD가 2026-08-08이었고 그 이후 변경이 전부 working tree에 쌓여 있었다. 08-14 rule_e 배선, 08-15 감사 작업 전체가 미커밋 상태였다.
+
+| 커밋 | 내용 | 규모 |
+|---|---|---|
+| 421823a4 | recovery(audit): restore rule_e gates in production candidate path | 5파일 2420+/235- |
+| 8068b186 | feat(backtest): add sector_rs filter and analysis scaffolding (2026-08-14) | 1파일 1141+/150- |
+
+- 421823a4 포함 파일: generate_candidates_v41_1.py(215), optimize_params_v41_1.py(1310), utils/stable_params_gate.py(199), strategy_core.py(98 신규), .agent/PLANS.md(833 신규).
+- report_backtest_v41_1.py는 mtime 08-14 09:38로 오늘 작업과 무관함을 확인하고(strategy_core / provenance / min_oos_worst_fold 참조 0건) 별도 커밋으로 분리했다.
+- "rule_e 복원만의 최소 커밋"은 불가능했다. HEAD가 08-08이라 generate_candidates_v41_1.py 한 파일만 커밋해도 215라인, 즉 08-14 rule_e 배선 / sector_code merge 수정 / keep_cols candidate_origin 복원 / 08-15 통합과 롤백 / rule_e 재복원이 통째로 들어간다. 이 환경은 interactive add를 지원하지 않고, 얽힌 215라인의 수동 분리는 위험 대비 실익이 없다고 판단했다.
+- 핵심 파일 working tree 잔여 0건. tools/ 미추적 608건 + 수정 73건, krx_daily_archive/ 86건은 이번에 손대지 않았다.
+
+### 발견 - 설정 파일이 버전 관리 밖에 있다
+- `.gitignore:80`이 `12_Risk_Controlled/`를 통째로 제외한다. 결과적으로 다음 두 파일이 추적되지 않는다.
+  - `12_Risk_Controlled/split_policy_v41_1.json`
+  - `12_Risk_Controlled/stable_params_v41_1.json`
+- split_policy는 산출물이 아니라 **설정**이다. IS/VAL/OOS 경계를 정하며, 오늘 (2) 블록에서 train_end를 2023-12-31 -> 2022-12-31로 바꿨다. 그 변경이 421823a4에 들어가지 않았다.
+- 결과: 코드는 커밋됐는데 그 코드의 동작을 결정하는 설정은 추적되지 않는다. 이 커밋을 체크아웃해도 같은 fold 구성이 재현되지 않는다. 원본은 backup/20260815_hpo_objective_rebuild/20260815_113039/ 에만 있다.
+- 이는 (3) 블록에서 규명한 "stable 저장값 재현 불가"와 같은 계열의 문제다. 재현에 필요한 입력이 버전 관리 밖에 있으면 재현 실패의 원인을 사후에 특정할 수 없다.
+- 판단: stable_params_v41_1.json은 산출물이므로 제외 유지가 맞다. split_policy_v41_1.json은 `.gitignore`에 예외(`!12_Risk_Controlled/split_policy_v41_1.json`)를 넣어 추적하는 것이 맞다고 본다. 다만 .gitignore 변경은 사용자 결정 사항이라 적용하지 않았다.
+
+### 검증 항목 판정
+- 기능 검증 PASS. 커밋 2건 생성 확인, HEAD 상세 및 포함 파일 목록 확인.
+- 정합성 검증 PASS. report_backtest 분리 근거를 mtime과 참조 0건으로 확인.
+- 운영 반영 검증 NA. 커밋은 이력 작업이며 운영 산출물을 변경하지 않는다.
+- 정책 검증 PASS. 기본 브랜치가 아닌 작업 브랜치에 커밋.
+- FAIL-CLOSED 검증 NA.
+- 회귀 검증 PASS. 커밋 후 핵심 5파일 working tree 잔여 0건 확인.
+
+### RootB 확인 (AGENTS.md 15)
+- E:\vibe\buffett\PLANS.md 최종 수정 2026-08-13 10:30. 오늘 작업은 대시보드/화면/상태 JSON/React를 건드리지 않았다.
+- 세션 중 RootB는 읽기만 했다(selection_metrics 소비처 조사, 결과는 백업 .bak 1건뿐으로 소비처 없음).
+- 따라서 RootB PLANS에 기록할 내용 없음.
+
+### 미기록 상태
+- 이 (7) 블록 자체는 커밋 이후에 추가되었으므로 421823a4에 포함되지 않는다. 다음 커밋 대상이다.
+
+## 2026-08-15 (8) 거래 빈도 제약 진단 검증 - 수치 정확, 해석 3건 정정
+
+### 대상
+- 다른 세션이 산출한 제약 비용 ablation. 원본: `2_Logs/frequency_constraint_diag_latest.json` (10 시나리오, mtime 08-15 15:07).
+- 본 블록은 그 결과를 read-only로 검증한 기록이다. 코드/산출물 변경 없음.
+
+### 수치 검증 - 일치
+- 보고된 표는 JSON과 정확히 일치한다. 전사 오류 없음.
+- 독립 재현 결과도 일치했다. 전체 세션 1624 (보고서 all_days와 동일), `current` 13일/13건, `rule_e_off` 105일/110건.
+- 즉 측정 자체는 신뢰할 수 있다. 문제는 측정 조건과 그로부터 끌어낸 해석이다.
+
+### 정정 1 - 래더 미적용. 생산 경로가 아니다
+- live stable은 `use_relax_ladder=1.0`이다. 생산 `_select_candidates`는 항상 `_relax_ladder()` L0~L9를 순회해 최초로 후보가 나오는 레벨을 채택한다. 보고서는 L0만 측정했다.
+
+| 시나리오 | 래더 미적용(보고서) | 래더 적용(생산 실제) |
+|---|---|---|
+| current (rule_e ON) | 13일 / 13건 | **159일 / 188건** |
+| rule_e OFF | 105일 / 110건 | **1117일 / 1497건** |
+
+- 차이가 각각 12.2배, 10.6배다.
+- 따라서 다음 두 결론이 뒤집힌다.
+  - "현재 생산 경로는 rule_e 때문에 연 2건 수준" -> 실제는 **연 약 23건**(159일 / 6.4년).
+  - "연 20~40건 목표를 달성하려면 rule_e를 끄거나 완화해야 한다" -> **rule_e를 켠 상태로 이미 그 범위 안에 있다.** 제약 변경 없이 목표가 충족된다.
+- `current` 시나리오의 연도별 2022=0 / 2023=0 / 2026=0도 L0 전용 측정의 산물이다. 실제 08-13 생산 산출 CSV에는 후보 23행이 존재했다.
+- 이는 (6) 블록에서 미해결로 남긴 "후보 발생일 숫자가 기록마다 다르다"의 직접적인 원인이기도 하다. 62 / 105 / 22 / 142 가 모두 다른 이유는 래더 적용 여부가 명시되지 않았기 때문이다.
+
+### 정정 2 - bear 게이트는 중복이 아니라 미배선
+- 토글 무영향 자체는 재현된다. `defense_bear_disable_entry` 1.0 -> 13일/13건, 0.0 -> 13일/13건.
+- 그러나 원인이 다르다. 오늘 13:52 통합을 롤백할 때 생산 `_select_candidates`에서 bear 게이트 코드가 제거됐고, (6) 블록에서 rule_e만 복원했다. **파라미터를 읽는 코드가 존재하지 않으므로** 토글이 아무 일도 하지 못한다.
+- 보고서 해석: "rule_e가 이미 해당 날짜를 차단하고 있어 bear 전면 차단은 현재 중복 게이트".
+- 실제: bear 게이트는 생산에서 **꺼져 있다**. 다시 켜면 후보는 더 줄어든다. 그리고 최적화기(strategy_core)는 여전히 적용하므로 이 축의 최적화기-생산 괴리는 미해결 상태다.
+- "중복이므로 무시 가능"으로 읽으면 위험하다. 판단 근거가 성립하지 않는다.
+
+### 정정 3 - 229건은 부풀려진 값이 아니라 눌린 값
+- 보고서: "08-14 stable의 backtest 229건/6.4년은 union fallback KeyError로 부풀려진 수치".
+- 방향이 반대다. (3) 블록 실측 기준:
+
+| 상태 | 총 거래 |
+|---|---|
+| 저장값 (KeyError 상태) | 229 |
+| KeyError 수정 후 | 2354 |
+| KeyError 재현 | 229 (7/7 fold 일치) |
+
+- KeyError는 폴백을 죽여 거래를 **줄였다**. 229는 폴백이 죽었을 때 나오는 값이다.
+- 부풀려진 것은 거래 수가 아니라 **PF**다. 덜 거래해서 성과가 좋아 보였다(인증 oos_pf 1.4640 -> 수정 후 0.7852).
+
+### 검증하지 못한 것
+- "후보/년 x 0.3~0.6 = 실제 진입 건수" 환산 계수는 근거가 제시되지 않았다. `max_pos=6` / `hold=13`에서 어떻게 도출됐는지 확인 불가.
+- 후보와 진입 사이에는 positive_entry_criteria, execution_pool, 섹터 적격성, top_score_cap, 각종 guard가 더 있다. 단일 계수로 환산될 가능성은 낮다.
+
+### 수정된 판단
+- 래더를 적용하면 현 제약 그대로 후보 약 23건/년이다. **"연 20~40건" 기준에서 후보 생성 단계는 이미 병목이 아니다.**
+- 병목은 그 아래다. 후보 188건이 실제 진입/체결 몇 건이 되는지가 규명되지 않았다. project_1data_entry_rate_decay에 기록된 "순수 전략 진입 4개월간 76% 감소"가 가리키는 지점과 같다.
+- 다음 측정 대상은 제약 완화가 아니라 **후보 -> 진입 -> 체결 구간의 감쇠**다.
+
+### 측정 규약 (앞으로 이 지표를 인용할 때)
+- 후보 발생일/후보 수를 적을 때는 반드시 다음 3개를 함께 명시한다. 하나라도 빠지면 다른 기록과 비교 불가다.
+  1. 측정 창 (시작~종료, 세션 수)
+  2. 래더 적용 여부 (L0 단독인지 L0~L9 순회인지)
+  3. 섹터 유니온 폴백 포함 여부
+
+### 검증 항목 판정
+- 기능 검증 PASS. 1624 세션 전체에서 보고 수치 독립 재현.
+- 정합성 검증 FAIL(대상 보고서 기준). 측정 경로가 생산과 다르고, 해석 3건이 사실과 어긋난다. 수치 자체는 정확하다.
+- 운영 반영 검증 NA. 읽기 전용 검증이며 코드/산출물 변경 없음.
+- 정책 검증 NA.
+- FAIL-CLOSED 검증 NA.
+- 회귀 검증 NA.
+
+## 2026-08-15 (9) 후보 -> 체결 전환 3단 조인 검증
+
+### 대상
+- 다른 세션이 보고한 "후보 137건 -> BUY 2건(1.5%), 같은 기간 다른 전략 BUY 379건(v41.1 기여 0.6%)" 및 결정 원장 기반 차단 사유 분석.
+- 본 블록은 read-only 검증이다. 코드/산출물 변경 없음.
+
+### 사용한 소스
+- 후보: `2_Logs/candidates_v41_1_YYYYMMDD.csv` 13개 파일 (20260714~20260812), 총 137행. 보고서 수치와 일치.
+- 체결: `paper/fills.csv` 1007행 (BUY 381 / SELL 626).
+- 조인 키: fills의 `note`에 담긴 `signal_date=YYYYMMDD` + `code`. 진입 타이밍 추정(D / D+1)에 의존하지 않는 정확 키다.
+
+### 정정 1 - "379건"은 기간 불일치다
+- 후보 signal_date 범위: 2026-07-14 ~ 08-12 (약 1개월)
+- BUY signal_date 범위: 2025-12-24 ~ 2026-08-07 (약 7.5개월)
+- 381건은 7.5개월 전체 수치다. 후보 창과 동일 기간으로 맞추면 BUY는 **37건**이다.
+
+| 항목 | 보고서 | 실측 |
+|---|---|---|
+| v41.1 후보 | 137건 | 137건 (일치) |
+| -> BUY 체결 | 2건 / 1.5% | 2건 / 1.5% (일치) |
+| 같은 창의 다른 경로 BUY | 379건 | **35건** |
+| BUY 중 v41.1 기여 | 0.6% | **5.4%** |
+
+- 9배 차이다. 분모에 후보 아카이브가 존재하지도 않는 6.5개월이 포함돼 있었다.
+
+### 정정 2 - 08-12 후보는 매칭 대상 자체가 없다
+- BUY의 마지막 signal_date는 20260807이다. 20260812 후보 10건은 체결 기록이 존재할 수 없는 구간이다.
+- 유효 창(signal_date <= 20260807)만 보면 후보 127건 중 체결 2건 = 1.6%.
+- 전환율 결론은 조인 방식/창 보정과 무관하게 1.5~1.6%로 유지된다.
+
+### 정정 3 - 결정 원장은 차단률의 근거가 될 수 없다 ((8) 블록 연장)
+- `2_Logs/candidate_decision_outcome_ledger_history.csv` 158,995행의 decision_type 분포: WATCH 131,236 / BLOCK 27,693 / HOLD 62 / **BUY 4**.
+- 15만 9천 행 중 BUY가 4건이다. 이 파일은 후보였으나 진입되지 않은 건을 사후 추적하는 미실현 기회 원장이다(`ret_5m_pct` / `ret_15m_pct` / `ret_next_day_pct` 컬럼이 그 성격을 보여준다).
+- 따라서 "10개 중 0개 진입", "normal 350건이 전부 WATCH/BLOCK"은 사실이지만 차단률의 근거가 아니다. 차단된 것만 모인 파일에서 차단 사유만 나오는 것은 순환이다. 종속변수 기준 표본 선택에 해당한다.
+- source_membership에 `candidate`가 포함된 행은 158,995 중 2,670 (1.68%)뿐이다. 이 원장의 98.3%는 v41.1 후보 파일에서 온 것이 아니다.
+- 보고된 10개 코드 중 5개(010060, 024840, 064400, 066570, 078930)는 `strategy_group=surge`이며 사유가 `surge_candidate_no_policy_exclusion`이다. v41.1 진입 로직의 판단이 아니라 급등 전략의 제외 사유다.
+
+### 유지되는 결론
+- "병목은 후보 생성이 아니라 후보 -> 진입 전환에 있다"는 방향은 맞다. 전환율 1.5~1.6%는 조인 방식을 바꿔도 유지된다.
+- (8) 블록에서 확인한 "래더 적용 시 후보 약 23건/년"과 합치면, 후보 단계는 이미 병목이 아니라는 판단도 유지된다.
+
+### 새로 드러난 사실
+- 같은 창에서 v41.1이 아닌 경로의 BUY가 35건 있다. **시스템은 거래하고 있으며, v41.1 후보를 거의 쓰지 않을 뿐이다.**
+- `fills.csv`의 note는 전부 `signal_date=...;sizing=capital_slot` 형식이라 전략 구분자가 없다. 이 35건의 출처는 이 파일만으로 판별 불가다. 다음 확인 대상이다.
+- `candidates_latest_data.with_final_score.csv`의 08-12 후보 10건은 전부 `execution_pool=False`다. `paper_engine/entry.py`는 `require_execution_pool_when_present=True`이므로 이 단계에서 진입 풀에서 제외된다. 이는 "missed move" 판정보다 앞선 지점이며, 실제 차단 지점 후보다.
+- 같은 파일의 `candidate_origin`은 23행 전부 NaN이다. 08-12 후보 10건이 섹터 유니온 폴백이 아니라는 뜻이므로 관찰전용 마스크는 이 건들과 무관하다.
+
+### 검증 항목 판정
+- 기능 검증 PASS. 137건 / 2건 / 381건을 원본에서 독립 재현.
+- 정합성 검증 FAIL(대상 보고서 기준). 379 대 2 비교가 기간 불일치이며, 결정 원장 기반 차단률 추론이 성립하지 않는다. 전환율 1.5%와 방향성 결론은 유효하다.
+- 운영 반영 검증 NA. 읽기 전용.
+- 정책 검증 NA.
+- FAIL-CLOSED 검증 NA.
+- 회귀 검증 NA.
+
+### 다음
+1. `execution_pool`을 무엇이 어떤 기준으로 False로 정하는지 추적. 현재까지 가장 앞선 차단 후보다.
+2. 같은 창의 비-v41.1 BUY 35건의 출처 규명. v41.1이 아니면 무엇이 실제 매매를 만들고 있는지가 핵심이다.
+3. 비교 규약: 후보와 체결을 비교할 때는 반드시 signal_date 기준 동일 창으로 맞춘다. fills.csv는 후보 아카이브보다 6.5개월 길다.
+
+## 2026-08-15 (10) execution_pool 추적 - v41.1 일반 후보 진입 100% 차단 확인
+
+### 배경
+- (9) 블록에서 후보 -> 체결 전환율 1.5~1.6%를 확인하고, 08-12 후보 10건이 전부 `execution_pool=False`인 것을 차단 후보로 남겼다.
+- 본 블록은 그 값이 어디서 정해지는지 추적한 read-only 기록이다. 코드/산출물 변경 없음.
+
+### 결정 지점 - tools/final_score_merge_daily.py:1461-1469
+- `_restore_lineage_columns()`가 `candidate_origin` / `execution_pool` / `natural_pass` 3개를 처리한다.
+
+```
+restored[col] = (
+    restored[col].astype(str).str.strip().str.lower()
+    .map({"true": "True", "false": "False"})
+    .fillna("False")
+)
+```
+
+- `.map()`이 빈 문자열과 NaN을 NaN으로 흘리고 `.fillna("False")`가 전부 False로 확정한다. 재현: `''` -> False, `nan` -> False, `'True'` -> True, `'False'` -> False.
+
+### 왜 항상 False인가 - 값을 공급하는 쪽이 없다
+- 이 함수는 머지 중인 `df`와 `IN_BASE`(= `2_Logs/candidates_latest_data.csv`) 두 곳에서 값을 찾는다.
+- 베이스 CSV는 36컬럼이며 `execution_pool` / `natural_pass` / `candidate_origin` 셋 다 없다. `generate_candidates_v41_1.py`의 `keep_cols`에 `execution_pool`이 포함된 적이 없다(오늘 추가한 것은 candidate_origin/natural_pass/observe_only 3개뿐이며 execution_pool은 여전히 없다).
+- 따라서 df에도 base에도 값이 없고, 전부 빈 값 -> `fillna("False")` -> 모든 정상 후보가 `execution_pool=False`가 된다.
+- `True`로 설정되는 지점은 세 곳뿐이며 전부 예외 경로다.
+  - `paper_engine/positions.py:1107` 분할진입 2차
+  - `paper_engine/positions.py:1171` 분할진입 마스크
+  - `paper_engine/entry.py:5629` fresh 섹터 폴백
+- 일반 진입 경로에 `execution_pool=True`를 부여하는 코드는 존재하지 않는다.
+
+### 차단 지점
+- `paper_engine/entry.py`의 `require_execution_pool_when_present=True`(config.py:322 기본값) 하에서
+  `entry_mask = execution_pool.isin(["TRUE","1","Y","YES"])` -> 전부 False -> `candidate_df[entry_mask]`로 전량 제거.
+
+### 독립 검증 - 기존 감사 도구 로직 적용
+- `tools/build_final_candidate_elimination_audit.py`(05-26)는 `FINALIST_CODES` 2개 하드코딩이라 그대로 쓸 수 없으나, 탈락 사유 판정 로직을 현재 후보 전체에 적용했다.
+- `candidates_latest_data.with_final_score.csv` 23행 결과:
+
+| 탈락 사유 | 건수 |
+|---|---|
+| `raw_execution_pool_false` | **23 / 23 (100%)** |
+| `final_score_not_positive` | 0 |
+| `union_conditional_entry_pool` | 0 |
+
+- `final_score`는 전부 양수(0.044~0.190)다. 점수 문제도 섹터 유니온 문제도 아니다.
+- 23행 중 9행은 문자열 "False", 14행은 빈 값이며 `_truthy()`가 둘 다 False로 판정한다. `fillna` 경로가 그대로 관측된다.
+- 코드 추적과 감사 도구 로직이라는 독립적인 두 근거가 같은 지점을 가리킨다.
+
+### bought_sometime 6종목 8건의 출처 - 전부 예외 경로
+- 024840 / 064400 / 068270 / 080220 / 161890 / 240810의 BUY 체결을 `paper/fills.csv`의 `note`로 추적했다. note에 `entry_source_kind`가 기록돼 있다.
+
+| 체결일 | 코드 | 경로 | 08-12 후보와 관계 |
+|---|---|---|---|
+| 2026-03-17 | 068270 | 구형(필드 없음) | 5개월 전, 무관 |
+| 2026-04-02 | 240810 | entry_timing=same_close | 4개월 전, 무관 |
+| 2026-04-13 | 240810 | **split_entry=1st**, fallback_stage=1 | 무관 |
+| 2026-06-22 | 080220 | **SURGE_RUNTIME** (surge_immediate=1) | 무관 |
+| 2026-07-03 | 064400 | **INTRADAY_REALTIME** | 무관 |
+| 2026-07-28 | 068270 | **beta_harvest** (regime=CRASH, target_exposure=0.1) | 후보 아님 |
+| 2026-07-28 | 161890 | **beta_harvest** | 후보 아님 |
+| 2026-08-07 | 024840 | **INTRADAY_REALTIME** | 후보 아님 |
+
+- 8건 중 v41.1 일반 진입 경로로 들어온 것은 **0건**이다.
+- 08-12 후보의 signal_date와 일치하는 체결도 0건이다. `bought_sometime` 플래그는 fills 전체 기간(2025-12~2026-08) 기준이라 붙은 것이며, 해당 후보와 무관하다.
+- 경로 분포: INTRADAY_REALTIME 2, beta_harvest 2, SURGE_RUNTIME 1, split_entry 1, 구형/미상 2.
+
+### 판정
+- v41.1 정상 후보는 `execution_pool=False`로 진입 풀에서 100% 제거된다. 실제 매매는 전부 우회 경로(INTRADAY_REALTIME / SURGE_RUNTIME / beta_harvest / split_entry)에서 발생한다.
+- (9) 블록의 "같은 창 비-v41.1 BUY 35건"의 정체가 이것이다.
+- `RECHECK_MISSED_MOVE_CANDIDATE` / `EARLY_BLOCKED_MOVE_WATCH` 등의 사유는 이 필터를 통과한 뒤의 단계다. 실제 차단은 그 앞에서 끝난다.
+- 특히 `beta_harvest`는 전략 시그널이 아니라 레짐 기반 베타 익스포저 관리다. 즉 현재 체결의 상당 부분이 v41.1 전략 판단과 무관한 경로에서 나온다.
+- 이는 project_1data_tradability_pivot 및 feedback_plumbing_fixed_is_not_logic_verified의 기록과 정확히 맞물린다. 한 달간 검증한 v41.1 파라미터/게이트/HPO는 실제 체결에 거의 영향을 주지 않고 있었다.
+
+### 미확정
+- `_restore_lineage_columns()` 뒤에 `execution_pool`을 다시 채우는 단계(`_overlay_stage_columns` 등)가 있는지는 호출 순서를 확인하지 않았다. 다만 결과물이 100% False이므로, 그런 단계가 있더라도 작동하지 않는다는 것은 확정이다.
+- 03-17 / 04-02 두 건은 note에 `entry_source_kind`가 없어 경로 미상이다. 당시 스키마에 그 필드가 없었던 것으로 보인다.
+
+### 검증 항목 판정
+- 기능 검증 PASS. fillna 경로 재현, 베이스 CSV 컬럼 부재 확인, 23/23 단일 사유, 8건 note 추적.
+- 정합성 검증 PASS. 코드 추적과 감사 도구 로직이 독립적으로 같은 결론에 도달.
+- 운영 반영 검증 NA. 읽기 전용.
+- 정책 검증 NA. 변경 없음.
+- FAIL-CLOSED 검증 NA.
+- 회귀 검증 NA.
+
+### 다음
+1. `execution_pool`을 정상 후보에 부여할지 결정. 부여하려면 `generate_candidates_v41_1.py`의 `keep_cols`에 추가하고 값을 산출하는 주체를 정해야 한다. 이는 진입 정책 변경이므로 사용자 결정이 필요하다.
+2. 부여하지 않기로 한다면, v41.1 후보 파일은 매매 입력이 아니라 관찰용이라는 사실을 명시하고 관련 게이트/진단/HPO의 의미를 그 기준으로 다시 정의해야 한다.
+3. `beta_harvest` / `INTRADAY_REALTIME` / `SURGE_RUNTIME` 각 경로의 비중과 성과를 별도로 측정할 필요가 있다. 현재 매매의 실체가 그쪽이다.
+
+## 2026-08-15 (11) [START HERE] 세션 인계 - 상태 스냅샷과 다음 착수점
+
+이 블록만 읽으면 다음 작업을 바로 시작할 수 있도록 정리한 인계 기록이다.
+상세 근거는 같은 날 (1)~(10) 블록에 있다.
+
+### A. 한 달 감사에서 확정된 사실 - 4개
+1. **v41.1은 매매한 적이 없다.** 후보가 `execution_pool=False`로 진입 풀에서 100% 제거된다. 23/23 단일 사유. 코드 추적((10) 블록)과 기존 감사 도구 로직이 독립적으로 같은 결론.
+2. **실제 매매는 다른 경로가 한다.** INTRADAY_REALTIME / SURGE_RUNTIME / beta_harvest / split_entry. 추적한 체결 8건 전부 우회 경로였고 v41.1 일반 경로는 0건.
+3. **v41.1의 모든 성과 수치는 고장난 장치로 측정됐다.** 결함을 고칠 때마다 낮아졌다: oos_pf 1.4640(인증) -> 0.7852(유니온 KeyError 수정) -> 0.6417(생산 동등 필터).
+4. **새 파라미터를 만들 수 없다.** HPO 40개 조합 중 채점 가능 0개. 창 구성상 `HPO_MIN_FOLDS=3` 도달 불가(창1 부분창, 창3은 40/40에서 n=0).
+
+이 넷은 서로 모순되지 않는다. 하나의 그림이다 - 매매하지 않는 전략을 고장난 자로 재고 있었다.
+
+### B. 아직 모르는 것
+- v41.1 아이디어에 알파가 있는지. **유효하게 측정된 적이 없다.** "없다"가 증명된 것이 아니라 "잴 수 없었다"이다.
+- 실제로 매매 중인 경로들(beta_harvest 등)이 돈을 벌고 있는지. **한 번도 안 봤다.**
+
+### C. 현재 상태 (2026-08-15 종료 시점)
+- 브랜치: `codex/alignment-quality-next`
+- 커밋: `421823a4`(감사 5파일) / `8068b186`(report_backtest) / `5e983c4d`(split_policy 추적 전환)
+- 미커밋: `.agent/PLANS.md`를 포함해 tracked 132개, untracked 874개. 08-15 종료 시점에도 이미 존재했음.
+- **운영 파라미터 미변경**: `stable_params_v41_1.json` sha256 `4ed8011346787d3c`, as_of 2026-08-14, promoted=true. 오늘 손대지 않았다.
+- 오늘 변경한 것은 전부 최적화기/게이트/후보생성 코드이며 운영 산출물은 그대로다.
+- v41.1은 이미 꺼져 있는 상태다. 아무 결정을 하지 않으면 그대로 유지된다. 급한 결정 없음.
+
+### D. 오늘 적용된 코드 변경 요약
+- `optimize_params_v41_1.py`
+  - `_fold_selection_metrics()`: OOS fold 전체를 selection에서 분리(split 기준), `n_folds_holdout`/`holdout_windows` 노출
+  - `eval_params()`: `_scored()` 헬퍼로 sentinel fold(n<15)를 모든 집계에서 제외
+  - `base_score`: OOS 계수 제거, `val_pf*1.6 + is_pf*0.8 + val_mean*35 + is_mean*17`
+  - 승격 판정: 곱셈 -> 덧셈 (`PROMOTION_MARGIN_MIN_ABS=0.02`)
+  - `simulate_window()`: 유니온 폴백 호출 제거, rule_e 3키 배선(`_rule_e_param()`)
+  - `_enforce_v_accel_band()` 신규 (v_accel_lim >= v_accel_max 공집합 방지)
+  - 설정 로더 2곳 무증상 폴백 -> `[WARN]`
+- `utils/stable_params_gate.py`: `min_oos_worst_fold_pf`(0.75)/`min_oos_worst_fold_trades`(15) 추가, provenance 스탬프(advisory)
+- `generate_candidates_v41_1.py`: `keep_cols`에 candidate_origin 등 4키 복원, `_select_candidates()`에 rule_e 3게이트 복원(+컬럼 누락 시 WARN)
+- `strategy_core.py`: 신규. 현재 **최적화기 전용**이며 생산은 쓰지 않는다(Phase 3 롤백 상태)
+- `12_Risk_Controlled/split_policy_v41_1.json`: train_end 2023-12-31 -> 2022-12-31  - 주의: `stable_params_v41_1.json`의 `meta.split_policy.train_end`는 2023-12-31 그대로(provenance 스탬프). 따라서 optimizer가 사용하는 라이브 split 경계(2022-12-31)와 `checkfile/build_runtime_evidence.py`가 읽는 동결 스탬프(2023-12-31)가 1년 다름. 두 OOS 수치를 직접 비교하면 안 됨.
+
+### E. 열린 결정 - 2개
+1. **`execution_pool`을 정상 후보에 부여할지.** 이건 버그 수정이 아니라 **v41.1을 처음으로 켜는 것**이다. 부여하려면 `generate_candidates_v41_1.py`의 `keep_cols`에 `execution_pool`을 추가하고 값을 산출할 주체를 정해야 한다. 현재 근거로는 켤 이유가 없다(위 A-3, A-4).
+2. **08-14 stable을 그대로 둘지.** 버그가 인증한 파라미터지만, v41.1이 꺼져 있으므로 실매매에 영향은 없다. 대체 파라미터를 만들 경로도 없다.
+
+### F. 다음 착수점 - 권장 1개
+**실제로 매매 중인 경로의 실현 성과 측정.**
+- 근거: 한 달간 매매하지 않는 전략을 검증했고, 매매하는 경로는 한 번도 보지 않았다. 여기엔 시뮬레이션이 아닌 실측 표본이 있다.
+- 입력: `2_Logs/joined_trades_final_latest.csv` (36행, `pnl_pct`/`pnl_krw_net`/`exit_reason` 보유), `paper/fills.csv` (BUY 381 / SELL 626, 2025-12-24~2026-08-07)
+- 방법: `paper/fills.csv`의 `note`에서 `entry_source_kind`를 추출해 경로별로 분류하고(INTRADAY_REALTIME / SURGE_RUNTIME / beta_harvest / split_entry / 구형), 경로별 실현 손익과 건수를 집계한다. note 파싱 예시는 (10) 블록에 있다.
+- 특징: 새 인프라 불필요, 읽기 전용, 되돌릴 것 없음. 반나절 규모.
+
+### G. 착수 전 반드시 알아야 할 함정 (오늘 실측으로 확인된 것)
+- **측정 규약 3종 명시 필수**((8) 블록): 후보 발생일/후보 수를 인용할 때 (측정 창 / 래더 적용 여부 / 섹터 유니온 포함 여부)를 함께 적는다. 래더 적용 여부만으로 13일 <-> 159일, 6.5~12배가 갈린다.
+- **후보와 체결 비교는 signal_date 기준 동일 창으로 맞춘다**((9) 블록). `fills.csv`는 후보 아카이브보다 6.5개월 길다. 이걸 안 맞춰서 "379 대 2"가 나왔고 실제로는 "35 대 2"였다.
+- **`candidate_decision_outcome_ledger`로 차단률을 계산하지 않는다**((9) 블록). 158,995행 중 BUY 4건뿐인 미실현 기회 원장이다. 차단된 것만 모인 파일에서 차단률을 구하는 것은 순환이다.
+- **가격 패널 zero-padding**: ad-hoc 분석 시 `close > 0` 필터 필수. 단, `generate_candidates_v41_1._load_data()`를 쓰면 무결성 계약이 이미 적용돼 추가 제거 0행이다.
+- **섀도우 원장은 표본이 되지 못한다**: candidate 출처 2,670행 중 선행수익률 유효값은 28건(1%)이고, 고유 거래일이 7일뿐이다. `price_at_decision`은 D 종가보다 중앙값 2% 낮아 진입 기준도 불명확하다. 여기서 나온 수치는 쓰지 않는다.
+
+### H. 미해결 백로그 (잃어버리지 않게)
+| # | 항목 | 크기 |
+|---|---|---|
+| 1 | 최적화기/생산 필터 집합 불일치. Phase 3 롤백 상태이며 **해소가 아니라 미해결** | 큼 |
+| 2 | `_diag_counts()`가 `v_accel_max_pass` 보고 - 생산 미적용 필터라 진단이 거짓 | 작음 |
+| 3 | HPO 창 구조 재설계 (`HPO_MIN_FOLDS=3` 도달 불가) | 중간 |
+| 4 | 데이터 기간 6.4년 (2020-03~), 그중 1년은 구조적으로 사망 | 큼 |
+| 5 | `_compute_factors` vs `compute_factors` 통합 | 큼 |
+| 6 | `ret_close_or_latest_pct` 89.8%가 0 - 사후 추적 배선 미작동 | 중간 |
+| 7 | `report_backtest_v41_1.py`의 mkt_ret20 정의 불일치 (08-14 결함 2번) | 작음 |
+| 8 | generate_candidates 정식 실행 회귀 (candidate_origin CSV 전파 확인) | 작음 |
+| 9 | provenance `data_source_hash`가 parquet 추가 시마다 변함 - advisory라 차단은 없으나 상시 경고 | 작음 |
+
+### I. 커밋
+- 2026-08-18: 미커밋 정리 3건 커밋 완료.
+  - `68e049e0` chore: remove stale temp file `tools/_tmp_check_summary.py`
+  - `8266c7fb` feat(paper_engine): BEAR live recovery override and entry robustness
+  - `66b97d6d` feat(pipeline): rewrite post-trade, broker integration, and daily batch orchestration
+- `.agent/PLANS.md`는 여전히 미커밋(이 블록 갱신 포함). 추가 정리 후 별도 커밋 예정.
