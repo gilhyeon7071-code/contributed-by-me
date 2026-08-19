@@ -37,6 +37,10 @@ import pandas as pd
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 PRICE_DIRS = [BASE_DIR / "krx_daily_archive", BASE_DIR / "_krx_manual"]
+# Wide KOSPI+KOSDAQ file covering 2022-10 ~ 2025-12. The krx_daily_archive is
+# KOSPI-only before 2025, so this is the only source of pre-2025 KOSDAQ, and it
+# retains names delisted since (2022 KOSDAQ 1,993 codes vs 1,493 still listed).
+RAW_WIDE = BASE_DIR / "Raw" / "krx_daily_20221001_20251224.parquet"
 DEFAULT_CACHE = BASE_DIR / "2_Logs" / "research_loop_panel_cache.parquet"
 
 COST_ROUNDTRIP = 0.00358      # production contract, see PLANS 2026-08-18 (2)
@@ -49,13 +53,17 @@ def build_panel(cache: Path, rebuild: bool) -> pd.DataFrame:
         print(f"[panel] cache hit: {cache}  rows={len(panel):,}")
         return panel
 
-    files = []
+    # RAW_WIDE first, then the archive. The archive carries change_rate and the
+    # raw file does not, and the dedupe below keeps the last occurrence, so the
+    # archive's richer rows win wherever the two overlap.
+    files = [str(RAW_WIDE)] if RAW_WIDE.exists() else []
     for d in PRICE_DIRS:
         for p in glob.glob(str(d / "krx_daily_*_clean.parquet")):
             if ".bak" in os.path.basename(p):
                 continue
             files.append(p)
-    print(f"[panel] reading {len(files)} parquet files")
+    print(f"[panel] reading {len(files)} parquet files"
+          f"{' (incl. RAW_WIDE)' if RAW_WIDE.exists() else ''}")
 
     frames = []
     for p in files:
@@ -64,6 +72,8 @@ def build_panel(cache: Path, rebuild: bool) -> pd.DataFrame:
         except Exception as exc:
             print(f"[panel]   SKIP {os.path.basename(p)}: {type(exc).__name__}")
     panel = pd.concat(frames, ignore_index=True)
+    if "change_rate" not in panel.columns:
+        panel["change_rate"] = pd.NA
     print(f"[panel] raw rows: {len(panel):,}")
 
     panel["date"] = panel["date"].astype(str).str.replace("-", "", regex=False).str[:8]
@@ -76,7 +86,10 @@ def build_panel(cache: Path, rebuild: bool) -> pd.DataFrame:
     print(f"[panel] close>0 filter removed {before - len(panel):,} "
           f"({100 * (before - len(panel)) / before:.1f}%) -- weekend zero padding")
 
-    panel = panel.drop_duplicates(subset=["date", "code"], keep="last")
+    # stable sort so rows carrying change_rate land last and survive the dedupe
+    panel["_has_cr"] = panel["change_rate"].notna().astype(int)
+    panel = panel.sort_values(["date", "code", "_has_cr"], kind="mergesort")
+    panel = panel.drop_duplicates(subset=["date", "code"], keep="last").drop(columns=["_has_cr"])
     panel = panel[["date", "code", "close", "value", "change_rate"]].sort_values(["code", "date"])
 
     prev = panel.groupby("code", sort=False)["close"].shift(1)
@@ -94,7 +107,7 @@ def build_panel(cache: Path, rebuild: bool) -> pd.DataFrame:
     mix = panel.drop_duplicates("code")["market"].value_counts().to_dict()
     print(f"[panel] market resolution (distinct codes): {mix}")
 
-    panel = panel[["date", "code", "market", "value", "ret_pct"]]
+    panel = panel[["date", "code", "market", "close", "value", "ret_pct"]]
     cache.parent.mkdir(parents=True, exist_ok=True)
     panel.to_parquet(cache, index=False)
     print(f"[panel] cached -> {cache}")
@@ -104,19 +117,26 @@ def build_panel(cache: Path, rebuild: bool) -> pd.DataFrame:
 def _market_map() -> dict:
     """code -> KOSPI / KOSDAQ.
 
-    The pre-2025 archive is KOSPI-only by construction (verified 2026-08-19:
-    0 KOSDAQ codes in 2020-2024, while 939/984 of today's KOSPI names are
-    present). So a code appearing there was KOSPI at that time, including names
-    that have since delisted -- filtering on "KOSPI today" alone would drop them
-    and reintroduce survivorship. The map is therefore the union of:
-      (a) every code in a pre-2025 KOSPI-only archive file, and
-      (b) every code labelled KOSPI in a file that populates the market column.
+    The krx_daily_archive files for 2020-2024 are KOSPI-only by construction
+    (verified 2026-08-19: 0 KOSDAQ codes, while 939/984 of today's KOSPI names
+    are present). So a code appearing there was KOSPI at the time, including
+    names since delisted -- filtering on "KOSPI today" would drop them and
+    reintroduce survivorship.
+
+    RAW_WIDE breaks that shortcut: it is also pre-2025 and wide, but it DOES
+    carry KOSDAQ and its own market column. Explicit labels therefore win, and
+    the KOSPI-only inference is applied only to unlabelled archive files -- never
+    to RAW_WIDE.
     """
     kospi: set[str] = set()
     kosdaq: set[str] = set()
 
+    sources = [str(RAW_WIDE)] if RAW_WIDE.exists() else []
     for d in PRICE_DIRS:
-        for p in glob.glob(str(d / "krx_daily_*_clean.parquet")):
+        sources.extend(glob.glob(str(d / "krx_daily_*_clean.parquet")))
+
+    for p in sources:
+        if True:
             base = os.path.basename(p)
             if ".bak" in base:
                 continue
@@ -135,9 +155,12 @@ def _market_map() -> dict:
             for code, market in labelled.drop_duplicates("code")[["code", "market"]].itertuples(index=False):
                 (kospi if market == "KOSPI" else kosdaq).add(code)
 
-            # pre-2025 wide archive files are KOSPI-only by construction
+            # pre-2025 UNLABELLED archive files are KOSPI-only by construction.
+            # RAW_WIDE is excluded: it is pre-2025 but carries KOSDAQ explicitly.
+            if p == str(RAW_WIDE):
+                continue
             digits = [t for t in base.replace(".parquet", "").split("_") if t.isdigit() and len(t) == 8]
-            if digits and max(digits) < "20250101":
+            if digits and max(digits) < "20250101" and labelled.empty:
                 kospi.update(cols["code"].unique().tolist())
 
     kospi -= kosdaq  # a code explicitly labelled KOSDAQ wins
@@ -200,6 +223,10 @@ def run_ic_stability(args, rets, signal, forward, eligible, rng) -> int:
     ic_by_day: list[float] = []
     days: list[str] = []
     for day in rets.index:
+        if args.signal_start_date and day < args.signal_start_date:
+            continue
+        if args.signal_end_date and day > args.signal_end_date:
+            continue
         mask = eligible.loc[day]
         if mask.sum() < args.min_names:
             continue
@@ -303,6 +330,10 @@ def run_deciles(args, rets, signal, forward, eligible, rng) -> int:
     dates_used = []
 
     for day in rets.index:
+        if args.signal_start_date and day < args.signal_start_date:
+            continue
+        if args.signal_end_date and day > args.signal_end_date:
+            continue
         mask = eligible.loc[day]
         if mask.sum() < n_buckets * 5:
             continue
@@ -393,9 +424,56 @@ def run_deciles(args, rets, signal, forward, eligible, rng) -> int:
     return 0
 
 
+def compute_signal(args: argparse.Namespace, rets: pd.DataFrame, panel: pd.DataFrame) -> pd.DataFrame:
+    """Build the signal matrix for the chosen grammar."""
+    stype = args.signal_type
+    if stype == "momentum":
+        growth = 1.0 + rets
+        return growth.rolling(args.lookback, min_periods=args.lookback).apply(np.prod, raw=True) - 1.0
+
+    # Level-based grammars must NOT use the raw close: the panel is not adjusted
+    # for corporate actions, so a split inside the lookback window breaks the
+    # price level, not just one day's return. Measured 2026-08-19 on KOSPI: 303
+    # split-like jumps across 175 codes contaminate 1.45% of eligible cells, and
+    # those cells make up 10.16% of the bottom breakout decile against a 1.45%
+    # base rate -- i.e. splits are pushed systematically into the extreme bucket.
+    # Rebuild an adjusted series by cumulating the split-safe return instead.
+    # Both grammars below are scale-invariant, so the arbitrary starting level
+    # does not matter.
+    adj = adjusted_price(rets)
+
+    if stype == "breakout":
+        return adj / adj.rolling(args.lookback, min_periods=args.lookback).max() - 1.0
+    if stype == "bollinger":
+        ma = adj.rolling(args.lookback, min_periods=args.lookback).mean()
+        sd = adj.rolling(args.lookback, min_periods=args.lookback).std()
+        return (adj - ma) / sd
+    raise ValueError(f"unknown signal_type: {stype}")
+
+
+def adjusted_price(rets: pd.DataFrame) -> pd.DataFrame:
+    """Split-adjusted price level rebuilt from returns.
+
+    `rets` already prefers change_rate and drops |r| > 31% as a data error, so
+    cumulating it yields a series with no corporate-action discontinuities. Days
+    with no return (not listed, or a dropped data-error day) are carried flat and
+    then masked back out, so a code's untraded periods stay untradeable rather
+    than becoming a flat price that the rolling window would treat as real.
+    """
+    level = (1.0 + rets.fillna(0.0)).cumprod()
+    return level.where(rets.notna())
+
+
 def run(args: argparse.Namespace) -> int:
     rng = np.random.default_rng(args.seed)
     panel = build_panel(Path(args.panel_cache), args.rebuild_panel)
+
+    if args.start_date:
+        panel = panel[panel["date"] >= args.start_date]
+        print(f"[panel] start_date filter >= {args.start_date}: {len(panel):,} rows")
+    if args.end_date:
+        panel = panel[panel["date"] <= args.end_date]
+        print(f"[panel] end_date filter <= {args.end_date}: {len(panel):,} rows")
 
     if args.market != "all":
         want = args.market.upper()
@@ -413,8 +491,8 @@ def run(args: argparse.Namespace) -> int:
     print(f"[panel] {rets.shape[0]} dates x {rets.shape[1]} codes  "
           f"{rets.index.min()} ~ {rets.index.max()}")
 
+    signal = compute_signal(args, rets, panel)
     growth = 1.0 + rets
-    signal = growth.rolling(args.lookback, min_periods=args.lookback).apply(np.prod, raw=True) - 1.0
     forward = (growth.rolling(args.hold, min_periods=args.hold).apply(np.prod, raw=True) - 1.0
                ).shift(-(1 + args.hold))
     eligible = (vals >= args.min_value) & signal.notna() & forward.notna()
@@ -446,8 +524,14 @@ def run(args: argparse.Namespace) -> int:
         })
 
     res = pd.DataFrame(rows)
+    if args.signal_start_date:
+        res = res[res["date"] >= args.signal_start_date]
+        print(f"[signal] signal_start_date filter >= {args.signal_start_date}: {len(res)} days")
+    if args.signal_end_date:
+        res = res[res["date"] <= args.signal_end_date]
+        print(f"[signal] signal_end_date filter <= {args.signal_end_date}: {len(res)} days")
     if res.empty:
-        print("no signal days produced -- check lookback/hold vs panel length")
+        print("no signal days produced -- check lookback/hold vs panel length and date filters")
         return 1
     res["excess"] = res["basket_net"] - res["base_net"]
     excess = res["excess"].dropna().to_numpy()
@@ -507,10 +591,11 @@ def run(args: argparse.Namespace) -> int:
               f"basket={100 * grp['basket_net'].mean():+7.4f}%  "
               f"base={100 * grp['base_net'].mean():+7.4f}%")
 
-    mde = 1.96 * sd / np.sqrt(len(excess))
+    eff_n = max(1, len(excess) // max(args.hold, 1))
+    mde = 1.96 * sd / np.sqrt(eff_n)
     print()
     print("  power check")
-    print(f"    n={len(excess)}  sd={100 * sd:.3f}%")
+    print(f"    nominal n={len(excess)}  effective indep. n={eff_n}  sd={100 * sd:.3f}%")
     print(f"    min detectable effect (95%): {100 * mde:.4f}% per period "
           f"= {100 * mde * periods_per_year:.2f}% annualized")
     print(f"    observed |effect| / MDE    : {abs(mean) / mde:.2f}x")
@@ -525,6 +610,9 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="smallest complete loop")
     ap.add_argument("--lookback", type=int, default=20, help="signal window in trading days")
     ap.add_argument("--hold", type=int, default=5, help="holding period in trading days")
+    ap.add_argument("--signal-type", choices=["momentum", "breakout", "bollinger"], default="momentum",
+                    help="momentum = past return; breakout = close / rolling high - 1; "
+                         "bollinger = (close - MA) / SD")
     ap.add_argument("--topk", type=int, default=20, help="basket size")
     ap.add_argument("--direction", choices=["top", "bottom"], default="top",
                     help="top = highest signal (momentum), bottom = lowest (reversal)")
@@ -537,6 +625,16 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--panel-cache", default=str(DEFAULT_CACHE))
     ap.add_argument("--rebuild-panel", action="store_true", help="ignore the cache and rebuild")
+    ap.add_argument("--start-date", default="",
+                    help="include panel rows on or after this YYYYMMDD (e.g. 20220101). "
+                         "Use this when you do NOT want pre-period data used for lookback.")
+    ap.add_argument("--end-date", default="",
+                    help="include panel rows on or before this YYYYMMDD (e.g. 20241231)")
+    ap.add_argument("--signal-start-date", default="",
+                    help="emit signals only on or after this YYYYMMDD, while still using earlier "
+                         "panel rows for lookback (e.g. 20220101 with 120d lookback needs 2021 data)")
+    ap.add_argument("--signal-end-date", default="",
+                    help="emit signals only on or before this YYYYMMDD")
     ap.add_argument("--mode", choices=["auto", "basket", "deciles", "ic"], default="auto",
                     help="basket = one top/bottom basket; deciles = quantile monotonicity; "
                          "ic = rank-IC stability confirmation round. 'auto' picks deciles when "
