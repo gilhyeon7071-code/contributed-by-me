@@ -284,7 +284,17 @@ def run_ic_stability(args, rets, signal, forward, eligible, rng) -> int:
 
     full_excl, _, full_m = report("FULL PERIOD", ic)
 
-    # rule 4: the same three checks at every requested segment count
+    # rule 4' -- power gate. Pre-registered in PLANS 2026-08-19 (10).
+    # A split whose segments cannot resolve the observed effect is not evidence
+    # either way, so it is set aside as DEFERRED_UNDERPOWERED rather than counted
+    # as a failure. Sign consistency (rule 3) still applies to those segments,
+    # because a sign flip is real instability, not a sample-size artifact.
+    sd_ic = float(ic.std(ddof=1))
+    required_eff = int(np.ceil((1.96 * sd_ic / abs(full_m)) ** 2)) if full_m else 10 ** 9
+    print()
+    print(f"  power gate: sd(daily IC)={sd_ic:.4f}, |IC_full|={abs(full_m):.5f}")
+    print(f"    -> a segment needs eff n >= {required_eff} to resolve this effect")
+
     seg_results = {}
     for n_seg in seg_counts:
         if n_seg < 2:
@@ -297,11 +307,15 @@ def run_ic_stability(args, rets, signal, forward, eligible, rng) -> int:
             lbl = f"[{n_seg}seg] s{s+1} {idx[a][:6]}~{idx[b-1][:6]}"
             e, n_ok, m = report(lbl, ic[a:b])
             excl_l.append(e); enough_l.append(n_ok); signs_l.append(np.sign(m))
+        eff_per_seg = len(ic) // n_seg // max(args.hold, 1)
+        powered = eff_per_seg >= required_eff
         seg_results[n_seg] = {
             "excl": all(excl_l),
             "enough": all(enough_l),
             "same_sign": len(set(signs_l)) == 1,
             "sign": signs_l[0] if signs_l else 0.0,
+            "powered": powered,
+            "eff_per_seg": eff_per_seg,
         }
 
     # rule 5: monotone vs U-shaped
@@ -334,17 +348,25 @@ def run_ic_stability(args, rets, signal, forward, eligible, rng) -> int:
 
     print()
     print("  rule check")
-    fails = []
+    fails, judged = [], []
     if not seg_results:
         fails.append("no segment counts requested")
     for n_seg, r in sorted(seg_results.items()):
+        # rule 3 applies even to underpowered splits: a sign flip is real instability
+        if not r["same_sign"]:
+            print(f"    {n_seg} segments : FAIL (sign split)")
+            fails.append(f"{n_seg}-segment sign split")
+            continue
+        if not r["powered"]:
+            print(f"    {n_seg} segments : DEFERRED_UNDERPOWERED "
+                  f"(eff/seg {r['eff_per_seg']} < {required_eff} required)")
+            continue
+        judged.append(n_seg)
         marks = []
         if not r["enough"]:
             marks.append("n<min")
         if not r["excl"]:
             marks.append("spans0")
-        if not r["same_sign"]:
-            marks.append("sign split")
         ok = not marks
         print(f"    {n_seg} segments : {'PASS' if ok else 'FAIL (' + ', '.join(marks) + ')'}")
         if not ok:
@@ -353,16 +375,17 @@ def run_ic_stability(args, rets, signal, forward, eligible, rng) -> int:
     if not monotone:
         fails.append("bucket structure not monotone")
 
-    any_short = any(not r["enough"] for r in seg_results.values())
     print()
-    if not fails:
-        sign_word = "negative" if full_m < 0 else "positive"
-        verdict = (f"CONFIRMED -- stable across {seg_counts} segment splits, consistent "
-                   f"{sign_word} sign, and a monotone bucket structure")
-    elif any_short and len(fails) == 1:
-        verdict = "DEFERRED_INSUFFICIENT_SAMPLE -- a segment is below the minimum effective n"
-    else:
+    if fails:
         verdict = "NOT_CONFIRMED -- " + "; ".join(fails)
+    elif not judged:
+        verdict = (f"DEFERRED_INSUFFICIENT_SAMPLE -- every split is underpowered "
+                   f"(need eff/seg >= {required_eff}); structure is not contradicted, "
+                   f"there is simply not enough data to judge stability")
+    else:
+        sign_word = "negative" if full_m < 0 else "positive"
+        verdict = (f"CONFIRMED -- stable across {judged} segment split(s), consistent "
+                   f"{sign_word} sign, and a monotone bucket structure")
     print(f"  >>> {verdict}")
     print()
     print("  note: a non-zero IC only says the signal carries cross-sectional information.")
