@@ -182,6 +182,111 @@ def block_bootstrap_ci(values: np.ndarray, block: int, n: int,
     return float(means[int(0.025 * n)]), float(means[int(0.975 * n)])
 
 
+def run_ic_stability(args, rets, signal, forward, eligible, rng) -> int:
+    """Signal-validity layer (V3 methodology section 3.1), as a confirmation round.
+
+    Primary metric is the daily cross-sectional rank IC, not a basket return.
+    A basket of `topk` names is dominated by the dispersion of a handful of
+    stocks; the IC uses every eligible name every day, so it is far better
+    powered at the sample sizes available here.
+
+    Pre-registered pass rule (do not change after seeing a result):
+      - every segment must reach min_eff_n effective independent observations
+      - every segment's BLOCK bootstrap CI must exclude zero
+      - every segment must share the same sign
+    Anything else is NOT_CONFIRMED, or DEFERRED_INSUFFICIENT_SAMPLE when the
+    sample is what failed.
+    """
+    ic_by_day: list[float] = []
+    days: list[str] = []
+    for day in rets.index:
+        mask = eligible.loc[day]
+        if mask.sum() < args.min_names:
+            continue
+        codes = mask[mask].index
+        sig = signal.loc[day, codes]
+        fwd = forward.loc[day, codes]
+        ic_by_day.append(float(sig.rank().corr(fwd.rank())))
+        days.append(day)
+
+    if len(ic_by_day) < args.hold * 4:
+        print(f"only {len(ic_by_day)} signal days -- not enough for block inference")
+        return 1
+
+    ic = np.asarray(ic_by_day)
+    idx = pd.Index(days)
+    bar = "=" * 84
+
+    print()
+    print(bar)
+    print(f"IC STABILITY ROUND (confirmation)  lookback={args.lookback}d  hold={args.hold}d  "
+          f"market={args.market}")
+    print(bar)
+    print("  pre-registered pass rule: every segment reaches the minimum effective n,")
+    print("  every segment's BLOCK CI excludes zero, and all segments share one sign.")
+    print(f"  min effective n per segment = {args.min_eff_n}   block length = {args.hold}")
+    print()
+
+    def report(label: str, v: np.ndarray) -> tuple[bool, bool, float]:
+        eff = len(v) // max(args.hold, 1)
+        m = float(v.mean())
+        lo, hi = block_bootstrap_ci(v, args.hold, args.bootstrap, rng)
+        excl = bool((lo > 0) or (hi < 0)) if lo == lo else False
+        enough = eff >= args.min_eff_n
+        flag = "OK " if (excl and enough) else ("n<min" if not enough else "spans0")
+        ci = f"[{lo:+.5f}, {hi:+.5f}]" if lo == lo else "[   n/a   ]"
+        print(f"  {label:24s} n={len(v):5d} eff={eff:4d}  IC={m:+.5f}  block95={ci:24s} {flag}")
+        return excl, enough, m
+
+    all_excl, all_enough, signs = [], [], []
+    e, n_ok, m = report("FULL PERIOD", ic)
+    full_excl, full_m = e, m
+
+    n_seg = max(1, args.segments)
+    if n_seg > 1:
+        print()
+        bounds = np.linspace(0, len(ic), n_seg + 1).astype(int)
+        for s in range(n_seg):
+            a, b = bounds[s], bounds[s + 1]
+            lbl = f"seg{s+1} {idx[a][:6]}~{idx[b-1][:6]}"
+            e, n_ok, m = report(lbl, ic[a:b])
+            all_excl.append(e); all_enough.append(n_ok); signs.append(np.sign(m))
+
+    if args.by_year:
+        print()
+        print("  by year (diagnostic only, not part of the pass rule)")
+        yr = np.asarray([d[:4] for d in idx])
+        for y in sorted(set(yr.tolist())):
+            v = ic[yr == y]
+            if len(v) < args.hold * 2:
+                print(f"    {y}: n={len(v):4d}  too short for block inference")
+                continue
+            lo, hi = block_bootstrap_ci(v, args.hold, max(2000, args.bootstrap // 5), rng)
+            print(f"    {y}: n={len(v):4d} eff={len(v)//args.hold:3d}  IC={v.mean():+.5f}  "
+                  f"block95=[{lo:+.5f}, {hi:+.5f}]")
+
+    print()
+    if n_seg > 1:
+        same_sign = len(set(signs)) == 1
+        if not all(all_enough):
+            verdict = "DEFERRED_INSUFFICIENT_SAMPLE -- a segment is below the minimum effective n"
+        elif all(all_excl) and same_sign:
+            verdict = f"CONFIRMED -- every segment excludes zero with a consistent {'negative' if signs[0] < 0 else 'positive'} sign"
+        elif not same_sign:
+            verdict = "NOT_CONFIRMED -- segments disagree on sign"
+        else:
+            verdict = "NOT_CONFIRMED -- at least one segment's block CI spans zero"
+    else:
+        verdict = ("CONFIRMED (single segment)" if full_excl else "NOT_CONFIRMED (single segment)")
+    print(f"  >>> {verdict}")
+    print()
+    print("  reminder: a non-zero IC establishes that the signal carries cross-sectional")
+    print("  information. It does NOT establish a tradeable basket -- that is the next layer")
+    print("  and it failed its own confirmation on 2026-08-19, see PLANS (2).")
+    print(bar)
+    return 0
+
+
 def run_deciles(args, rets, signal, forward, eligible, rng) -> int:
     """Quantile monotonicity (V3 methodology section 3.1).
 
@@ -314,7 +419,14 @@ def run(args: argparse.Namespace) -> int:
                ).shift(-(1 + args.hold))
     eligible = (vals >= args.min_value) & signal.notna() & forward.notna()
 
-    if args.deciles > 0:
+    mode = args.mode
+    if mode == "auto":
+        mode = "deciles" if args.deciles > 0 else "basket"
+    if mode == "ic":
+        return run_ic_stability(args, rets, signal, forward, eligible, rng)
+    if mode == "deciles":
+        if args.deciles <= 0:
+            args.deciles = 10
         return run_deciles(args, rets, signal, forward, eligible, rng)
 
     rows = []
@@ -425,8 +537,20 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--panel-cache", default=str(DEFAULT_CACHE))
     ap.add_argument("--rebuild-panel", action="store_true", help="ignore the cache and rebuild")
+    ap.add_argument("--mode", choices=["auto", "basket", "deciles", "ic"], default="auto",
+                    help="basket = one top/bottom basket; deciles = quantile monotonicity; "
+                         "ic = rank-IC stability confirmation round. 'auto' picks deciles when "
+                         "--deciles is given, else basket")
     ap.add_argument("--deciles", type=int, default=0,
-                    help="if > 0, report all N deciles and monotonicity instead of a single top/bottom basket")
+                    help="bucket count for --mode deciles (default 10 when the mode is selected)")
+    ap.add_argument("--segments", type=int, default=2,
+                    help="--mode ic: split the period into N equal-count segments for confirmation")
+    ap.add_argument("--min-eff-n", type=int, default=20,
+                    help="--mode ic: minimum effective independent observations per segment")
+    ap.add_argument("--min-names", type=int, default=50,
+                    help="--mode ic: minimum eligible names on a day for its IC to count")
+    ap.add_argument("--by-year", action="store_true",
+                    help="--mode ic: also print a per-year IC diagnostic")
     return run(ap.parse_args())
 
 
