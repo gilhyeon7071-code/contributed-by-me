@@ -512,6 +512,14 @@ def compute_signal(args: argparse.Namespace, rets: pd.DataFrame, panel: pd.DataF
         growth = 1.0 + rets
         return growth.rolling(args.lookback, min_periods=args.lookback).apply(np.prod, raw=True) - 1.0
 
+    if stype == "reversal":
+        # Sign-flipped short-horizon return: high = has fallen most. Pre-registered
+        # in PLANS 2026-08-19 (24) with a POSITIVE direction prior. The window is
+        # set by --lookback and defaults to 5 to match the beta_harvest entries
+        # (prior 5d -4.42%), which were the only profitable path in the live fills.
+        growth = 1.0 + rets
+        return -(growth.rolling(args.lookback, min_periods=args.lookback).apply(np.prod, raw=True) - 1.0)
+
     if stype == "vol_ratio":
         # Traded value elevated against a stock's own longer-run norm. Pre-registered
         # in PLANS 2026-08-19 (14) with a NEGATIVE direction prior: attention spikes
@@ -702,7 +710,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="smallest complete loop")
     ap.add_argument("--lookback", type=int, default=20, help="signal window in trading days")
     ap.add_argument("--hold", type=int, default=5, help="holding period in trading days")
-    ap.add_argument("--signal-type", choices=["momentum", "breakout", "bollinger", "vol_ratio"], default="momentum",
+    ap.add_argument("--signal-type", choices=["momentum", "breakout", "bollinger", "vol_ratio", "reversal"], default="momentum",
                     help="momentum = past return; breakout = close / rolling high - 1; "
                          "bollinger = (close - MA) / SD; vol_ratio = 20d mean value / lookback mean value")
     ap.add_argument("--topk", type=int, default=20, help="basket size")
