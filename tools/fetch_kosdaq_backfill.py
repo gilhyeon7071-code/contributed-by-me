@@ -50,28 +50,52 @@ COL_MAP = {"시가": "open", "고가": "high", "저가": "low", "종가": "close
            "거래량": "volume", "등락률": "change_rate"}
 
 
-def roster() -> list[str]:
-    raw = pd.read_parquet(RAW_WIDE, columns=["code", "date", "market"])
-    raw["code"] = raw["code"].astype(str).str.zfill(6)
-    raw["date"] = raw["date"].astype(str).str.replace("-", "", regex=False).str[:8]
-    codes = raw.loc[(raw["market"] == "KOSDAQ") & (raw["date"] < "20230101"), "code"]
-    return sorted(set(codes))
+PANEL_CACHE = BASE_DIR / "2_Logs" / "research_loop_panel_cache.parquet"
+
+
+def roster(source: str) -> tuple[list[str], str]:
+    """Contemporaneous code list for the window being fetched.
+
+    'raw2022'  -- RAW_WIDE's 2022 KOSDAQ membership, for the 2020-2022 backfill.
+    'panel2020'-- every code the panel carries during 2020, for a pre-2020 fetch.
+                  Both markets. Names delisted before 2020 are unrecoverable and
+                  that residual survivorship is recorded with the result.
+    """
+    if source == "raw2022":
+        raw = pd.read_parquet(RAW_WIDE, columns=["code", "date", "market"])
+        raw["code"] = raw["code"].astype(str).str.zfill(6)
+        raw["date"] = raw["date"].astype(str).str.replace("-", "", regex=False).str[:8]
+        codes = raw.loc[(raw["market"] == "KOSDAQ") & (raw["date"] < "20230101"), "code"]
+        return sorted(set(codes)), "RAW_WIDE 2022 KOSDAQ membership"
+    if source == "panel2020":
+        c = pd.read_parquet(PANEL_CACHE, columns=["code", "date"])
+        c["code"] = c["code"].astype(str).str.zfill(6)
+        return sorted(set(c.loc[c["date"] < "20210101", "code"])), "panel 2020 membership"
+    raise ValueError(f"unknown roster source: {source}")
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=0, help="fetch only the first N codes (smoke test)")
-    ap.add_argument("--out", default=str(OUT_DIR / OUT_NAME))
+    ap.add_argument("--out", default="")
     ap.add_argument("--sleep", type=float, default=0.0, help="seconds between calls")
+    ap.add_argument("--start", default=START)
+    ap.add_argument("--end", default=END)
+    ap.add_argument("--roster", choices=["raw2022", "panel2020"], default="raw2022")
+    ap.add_argument("--market-label", default="KOSDAQ",
+                    help="value written to the market column; use '' to resolve per code later")
     args = ap.parse_args()
 
     from pykrx import stock
 
-    codes = roster()
+    start, end = args.start, args.end
+    codes, roster_desc = roster(args.roster)
     if args.limit:
         codes = codes[: args.limit]
-    print(f"[roster] {len(codes):,} KOSDAQ codes from RAW_WIDE 2022 membership")
-    print(f"[window] {START} ~ {END}")
+    print(f"[roster] {len(codes):,} codes from {roster_desc}")
+    print(f"[window] {start} ~ {end}")
+    if not args.out:
+        args.out = str(OUT_DIR / f"krx_daily_{start}_{end}_backfill_clean.parquet")
 
     out_path = Path(args.out)
     if out_path.exists():
@@ -82,7 +106,7 @@ def main() -> int:
     t0 = time.time()
     for i, code in enumerate(codes, 1):
         try:
-            df = stock.get_market_ohlcv_by_date(START, END, code)
+            df = stock.get_market_ohlcv_by_date(start, end, code)
         except Exception as exc:
             failed.append((code, type(exc).__name__))
             continue
@@ -108,7 +132,15 @@ def main() -> int:
         return 1
 
     panel = pd.concat(frames, ignore_index=True)
-    panel["market"] = "KOSDAQ"
+    if args.market_label:
+        panel["market"] = args.market_label
+    else:
+        # resolve each code against what the panel already knows
+        known = pd.read_parquet(PANEL_CACHE, columns=["code", "market"]).drop_duplicates("code")
+        known["code"] = known["code"].astype(str).str.zfill(6)
+        m = dict(zip(known["code"], known["market"]))
+        panel["market"] = panel["code"].map(m).fillna("UNKNOWN")
+        print(f"[market] resolved: {panel.drop_duplicates('code')['market'].value_counts().to_dict()}")
     # the per-code endpoint has no 거래대금; close*volume tracks it to a median
     # ratio of 1.0003 and agrees with the 1e8 floor on 99.888% of RAW_WIDE rows
     panel["value"] = panel["close"].astype("float64") * panel["volume"].astype("float64")
