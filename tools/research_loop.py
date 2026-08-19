@@ -147,6 +147,7 @@ def _market_map() -> dict:
 
 
 def bootstrap_ci(values: np.ndarray, n: int, rng: np.random.Generator) -> tuple[float, float]:
+    """i.i.d. bootstrap. OPTIMISTIC when holding windows overlap -- see block_bootstrap_ci."""
     v = np.asarray(values, dtype=float)
     v = v[~np.isnan(v)]
     if len(v) < 10:
@@ -154,6 +155,137 @@ def bootstrap_ci(values: np.ndarray, n: int, rng: np.random.Generator) -> tuple[
     idx = rng.integers(0, len(v), size=(n, len(v)))
     means = np.sort(v[idx].mean(axis=1))
     return float(means[int(0.025 * n)]), float(means[int(0.975 * n)])
+
+
+def block_bootstrap_ci(values: np.ndarray, block: int, n: int,
+                       rng: np.random.Generator) -> tuple[float, float]:
+    """Moving-block bootstrap. This is the honest interval for this design.
+
+    A signal is emitted every day but held for `hold` days, so consecutive
+    observations share (hold-1)/hold of their forward window. Treating days as
+    independent understated the CI width by roughly 3-4x when this was first
+    measured on 2026-08-19, which was enough to flip several 'significant'
+    findings back to undecided. Effective independent sample is about n/hold.
+    """
+    v = np.asarray(values, dtype=float)
+    v = v[~np.isnan(v)]
+    L = len(v)
+    if L < max(40, 2 * block) or block < 1:
+        return float("nan"), float("nan")
+    n_blocks = int(np.ceil(L / block))
+    max_start = L - block
+    means = np.empty(n)
+    for i in range(n):
+        starts = rng.integers(0, max_start + 1, size=n_blocks)
+        means[i] = np.concatenate([v[s:s + block] for s in starts])[:L].mean()
+    means.sort()
+    return float(means[int(0.025 * n)]), float(means[int(0.975 * n)])
+
+
+def run_deciles(args, rets, signal, forward, eligible, rng) -> int:
+    """Quantile monotonicity (V3 methodology section 3.1).
+
+    top/bottom baskets alone cannot tell three very different structures apart:
+      monotone   -> the signal carries information; the sign may simply be inverted
+      U-shaped   -> only the extremes are bad; this is an "avoid extremes" rule
+      flat       -> the signal carries nothing
+    So report every bucket, plus a daily rank IC as the summary statistic.
+    """
+    n_buckets = args.deciles
+    bucket_rows = []      # per day: mean net forward return of each bucket
+    base_rows = []
+    ic_rows = []          # per day: Spearman rank corr(signal, forward) across the universe
+    dates_used = []
+
+    for day in rets.index:
+        mask = eligible.loc[day]
+        if mask.sum() < n_buckets * 5:
+            continue
+        codes = mask[mask].index
+        sig = signal.loc[day, codes]
+        fwd = forward.loc[day, codes]
+
+        sig_rank = sig.rank(method="first")
+        # bucket 1 = lowest signal ... bucket N = highest signal
+        buckets = np.ceil(sig_rank / (len(sig_rank) / n_buckets)).clip(1, n_buckets).astype(int)
+        means = fwd.groupby(buckets).mean()
+        if len(means) != n_buckets:
+            continue
+        bucket_rows.append(means.reindex(range(1, n_buckets + 1)).to_numpy() - COST_ROUNDTRIP)
+        base_rows.append(float(fwd.mean()) - COST_ROUNDTRIP)
+        ic_rows.append(float(sig.rank().corr(fwd.rank())))
+        dates_used.append(day)
+
+    if not bucket_rows:
+        print("no usable days -- universe too small for the requested bucket count")
+        return 1
+
+    B = np.vstack(bucket_rows)                 # days x buckets
+    base = np.asarray(base_rows)
+    excess = B - base[:, None]
+    ic = np.asarray(ic_rows)
+    periods_per_year = 252.0 / args.hold
+
+    bar = "=" * 84
+    print()
+    print(bar)
+    print(f"QUANTILE ROUND: lookback={args.lookback}d  hold={args.hold}d  buckets={n_buckets}  "
+          f"market={args.market}  min_value={args.min_value:,.0f}  cost={COST_ROUNDTRIP:.5f} RT")
+    print(bar)
+    print(f"  signal days : {len(B)}   {dates_used[0]} ~ {dates_used[-1]}")
+    print(f"  bucket 1 = LOWEST signal, bucket {n_buckets} = HIGHEST signal")
+    print()
+    print(f"  {'bucket':>7s} {'excess/period':>14s} {'95% CI':>24s} {'annualized':>12s}")
+    print("  " + "-" * 62)
+    means = []
+    for b in range(n_buckets):
+        col = excess[:, b]
+        m = float(col.mean())
+        lo, hi = bootstrap_ci(col, args.bootstrap, rng)
+        blo, bhi = block_bootstrap_ci(col, args.hold, args.bootstrap, rng)
+        means.append(m)
+        star = " *" if (blo > 0 or bhi < 0) else ""
+        print(f"  {b + 1:7d} {100 * m:13.4f}% "
+              f"[{100 * blo:+8.4f}%,{100 * bhi:+8.4f}%] {100 * m * periods_per_year:11.2f}%{star}")
+    print(f"  (* = BLOCK bootstrap CI excludes zero; block={args.hold}, "
+          f"effective indep. n ~{len(B) // max(args.hold, 1)})")
+
+    means = np.asarray(means)
+    order = np.arange(1, n_buckets + 1)
+    # Spearman between bucket index and its mean excess
+    rank_corr = float(pd.Series(order).corr(pd.Series(means), method="spearman"))
+    ic_mean = float(ic.mean())
+    # daily ICs overlap for the same reason bucket returns do -- block it too
+    ic_lo, ic_hi = block_bootstrap_ci(ic, args.hold, args.bootstrap, rng)
+
+    print()
+    print("  monotonicity")
+    print(f"    spearman(bucket index, mean excess) : {rank_corr:+.3f}")
+    print(f"    daily rank IC mean                  : {ic_mean:+.5f}   "
+          f"CI [{ic_lo:+.5f}, {ic_hi:+.5f}]")
+    print(f"    rank IC CI excludes zero            : {(ic_lo > 0) or (ic_hi < 0)}")
+
+    extremes = (means[0] + means[-1]) / 2.0
+    middle = means[1:-1].mean()
+    print()
+    print("  shape test")
+    print(f"    mean of the two extreme buckets : {100 * extremes:+.4f}%")
+    print(f"    mean of the middle buckets      : {100 * middle:+.4f}%")
+    print(f"    extremes - middle               : {100 * (extremes - middle):+.4f}%")
+
+    if abs(rank_corr) >= 0.7 and ((ic_lo > 0) or (ic_hi < 0)):
+        shape = ("MONOTONE (%s). The signal carries information; a negative slope means the "
+                 "usable trade is the inverted one." % ("increasing" if rank_corr > 0 else "decreasing"))
+    elif extremes < middle - abs(middle) * 0.25:
+        shape = "U-SHAPED. Only the extremes underperform -- this is an avoid-extremes rule, not a ranking signal."
+    elif not ((ic_lo > 0) or (ic_hi < 0)):
+        shape = "FLAT. Rank IC is indistinguishable from zero -- the signal carries no cross-sectional information."
+    else:
+        shape = "MIXED. Neither cleanly monotone nor cleanly U-shaped; do not build on this yet."
+    print()
+    print(f"  >>> {shape}")
+    print(bar)
+    return 0
 
 
 def run(args: argparse.Namespace) -> int:
@@ -181,6 +313,9 @@ def run(args: argparse.Namespace) -> int:
     forward = (growth.rolling(args.hold, min_periods=args.hold).apply(np.prod, raw=True) - 1.0
                ).shift(-(1 + args.hold))
     eligible = (vals >= args.min_value) & signal.notna() & forward.notna()
+
+    if args.deciles > 0:
+        return run_deciles(args, rets, signal, forward, eligible, rng)
 
     rows = []
     for day in rets.index:
@@ -219,11 +354,20 @@ def run(args: argparse.Namespace) -> int:
     print(f"  signal days        : {len(excess)}   {res['date'].min()} ~ {res['date'].max()}")
     print(f"  median universe/day: {res['n_univ'].median():.0f}")
     print()
+    blo, bhi = block_bootstrap_ci(excess, args.hold, args.bootstrap, rng)
     print(f"  MEAN EXCESS        : {100 * mean:+.4f}%   per {args.hold}-day holding period")
-    print(f"  bootstrap 95% CI   : [{100 * lo:+.4f}%, {100 * hi:+.4f}%]")
-    print(f"  CI excludes zero   : {(lo > 0) or (hi < 0)}")
+    print(f"  iid 95% CI         : [{100 * lo:+.4f}%, {100 * hi:+.4f}%]   (optimistic)")
+    print(f"  BLOCK 95% CI       : [{100 * blo:+.4f}%, {100 * bhi:+.4f}%]   (honest, block={args.hold})")
+    print(f"  effective indep. n : ~{len(excess) // max(args.hold, 1)}  (nominal {len(excess)})")
+    print(f"  block CI excl zero : {(blo > 0) or (bhi < 0)}")
     print(f"  naive annualized   : {100 * mean * periods_per_year:+.2f}%")
-    verdict = "POSITIVE EDGE" if lo > 0 else "NEGATIVE" if hi < 0 else "NO DETECTABLE EDGE"
+    if blo > 0:
+        verdict = "POSITIVE EDGE"
+    elif bhi < 0:
+        verdict = "NEGATIVE"
+    else:
+        verdict = "UNDECIDED -- block CI spans zero (iid CI would have said otherwise)" \
+            if (lo > 0 or hi < 0) else "NO DETECTABLE EDGE"
     print(f"  >>> {verdict}")
 
     print()
