@@ -214,14 +214,23 @@ def run_ic_stability(args, rets, signal, forward, eligible, rng) -> int:
     powered at the sample sizes available here.
 
     Pre-registered pass rule (do not change after seeing a result):
-      - every segment must reach min_eff_n effective independent observations
-      - every segment's BLOCK bootstrap CI must exclude zero
-      - every segment must share the same sign
-    Anything else is NOT_CONFIRMED, or DEFERRED_INSUFFICIENT_SAMPLE when the
-    sample is what failed.
+      1. every segment reaches min_eff_n effective independent observations
+      2. every segment's BLOCK bootstrap CI excludes zero
+      3. every segment shares the same sign
+      4. 1-3 hold at EVERY segment count in --segments, not just one
+      5. the decile structure is MONOTONE, not U-shaped
+
+    Rules 4 and 5 were added 2026-08-19 after bollinger passed the earlier
+    three-rule version and turned out to be untradeable. It only passed at two
+    segments -- three or four broke it -- and its deciles were U-shaped, with the
+    most compressed decile the worst performer. A signal whose two tails both
+    lose has a non-zero IC without having a usable ranking, so monotonicity is
+    now part of the pass condition rather than a diagnostic. See PLANS (7) F.
     """
     ic_by_day: list[float] = []
     days: list[str] = []
+    bucket_rows: list[np.ndarray] = []
+    nb = max(2, args.deciles or 10)
     for day in rets.index:
         if args.signal_start_date and day < args.signal_start_date:
             continue
@@ -235,6 +244,9 @@ def run_ic_stability(args, rets, signal, forward, eligible, rng) -> int:
         fwd = forward.loc[day, codes]
         ic_by_day.append(float(sig.rank().corr(fwd.rank())))
         days.append(day)
+        buckets = np.ceil(sig.rank(method="first") / (len(codes) / nb)).clip(1, nb).astype(int)
+        means = fwd.groupby(buckets).mean().reindex(range(1, nb + 1))
+        bucket_rows.append(means.to_numpy(dtype=float) - float(fwd.mean()))
 
     if len(ic_by_day) < args.hold * 4:
         print(f"only {len(ic_by_day)} signal days -- not enough for block inference")
@@ -249,8 +261,13 @@ def run_ic_stability(args, rets, signal, forward, eligible, rng) -> int:
     print(f"IC STABILITY ROUND (confirmation)  lookback={args.lookback}d  hold={args.hold}d  "
           f"market={args.market}")
     print(bar)
-    print("  pre-registered pass rule: every segment reaches the minimum effective n,")
-    print("  every segment's BLOCK CI excludes zero, and all segments share one sign.")
+    seg_counts = [int(x) for x in str(args.segments).replace(" ", "").split(",") if x]
+    print("  pre-registered pass rule (all five must hold):")
+    print("    1. every segment reaches the minimum effective n")
+    print("    2. every segment's BLOCK CI excludes zero")
+    print("    3. every segment shares one sign")
+    print(f"    4. rules 1-3 hold at EVERY segment count in {seg_counts}")
+    print(f"    5. the {nb}-bucket structure is monotone, not U-shaped")
     print(f"  min effective n per segment = {args.min_eff_n}   block length = {args.hold}")
     print()
 
@@ -265,19 +282,42 @@ def run_ic_stability(args, rets, signal, forward, eligible, rng) -> int:
         print(f"  {label:24s} n={len(v):5d} eff={eff:4d}  IC={m:+.5f}  block95={ci:24s} {flag}")
         return excl, enough, m
 
-    all_excl, all_enough, signs = [], [], []
-    e, n_ok, m = report("FULL PERIOD", ic)
-    full_excl, full_m = e, m
+    full_excl, _, full_m = report("FULL PERIOD", ic)
 
-    n_seg = max(1, args.segments)
-    if n_seg > 1:
+    # rule 4: the same three checks at every requested segment count
+    seg_results = {}
+    for n_seg in seg_counts:
+        if n_seg < 2:
+            continue
         print()
+        excl_l, enough_l, signs_l = [], [], []
         bounds = np.linspace(0, len(ic), n_seg + 1).astype(int)
         for s in range(n_seg):
             a, b = bounds[s], bounds[s + 1]
-            lbl = f"seg{s+1} {idx[a][:6]}~{idx[b-1][:6]}"
+            lbl = f"[{n_seg}seg] s{s+1} {idx[a][:6]}~{idx[b-1][:6]}"
             e, n_ok, m = report(lbl, ic[a:b])
-            all_excl.append(e); all_enough.append(n_ok); signs.append(np.sign(m))
+            excl_l.append(e); enough_l.append(n_ok); signs_l.append(np.sign(m))
+        seg_results[n_seg] = {
+            "excl": all(excl_l),
+            "enough": all(enough_l),
+            "same_sign": len(set(signs_l)) == 1,
+            "sign": signs_l[0] if signs_l else 0.0,
+        }
+
+    # rule 5: monotone vs U-shaped
+    B = np.vstack(bucket_rows)
+    bmeans = B.mean(axis=0)
+    order = pd.Series(np.arange(1, nb + 1))
+    rho = float(order.corr(pd.Series(bmeans), method="spearman"))
+    opposite_tails = bool(np.sign(bmeans[0]) != np.sign(bmeans[-1]))
+    monotone = (abs(rho) >= args.min_monotone_rho) and opposite_tails
+    print()
+    print(f"  bucket structure ({nb} buckets, B1 = lowest signal)")
+    print("    " + "  ".join(f"B{i+1}:{100*bmeans[i]:+.3f}%" for i in range(nb)))
+    print(f"    spearman(bucket, excess) = {rho:+.3f}   (need |rho| >= {args.min_monotone_rho})")
+    print(f"    tails on opposite sides  = {opposite_tails}   "
+          f"(B1 {100*bmeans[0]:+.3f}% vs B{nb} {100*bmeans[-1]:+.3f}%)")
+    print(f"    -> {'MONOTONE' if monotone else 'NOT MONOTONE (U-shaped or flat)'}")
 
     if args.by_year:
         print()
@@ -293,23 +333,41 @@ def run_ic_stability(args, rets, signal, forward, eligible, rng) -> int:
                   f"block95=[{lo:+.5f}, {hi:+.5f}]")
 
     print()
-    if n_seg > 1:
-        same_sign = len(set(signs)) == 1
-        if not all(all_enough):
-            verdict = "DEFERRED_INSUFFICIENT_SAMPLE -- a segment is below the minimum effective n"
-        elif all(all_excl) and same_sign:
-            verdict = f"CONFIRMED -- every segment excludes zero with a consistent {'negative' if signs[0] < 0 else 'positive'} sign"
-        elif not same_sign:
-            verdict = "NOT_CONFIRMED -- segments disagree on sign"
-        else:
-            verdict = "NOT_CONFIRMED -- at least one segment's block CI spans zero"
+    print("  rule check")
+    fails = []
+    if not seg_results:
+        fails.append("no segment counts requested")
+    for n_seg, r in sorted(seg_results.items()):
+        marks = []
+        if not r["enough"]:
+            marks.append("n<min")
+        if not r["excl"]:
+            marks.append("spans0")
+        if not r["same_sign"]:
+            marks.append("sign split")
+        ok = not marks
+        print(f"    {n_seg} segments : {'PASS' if ok else 'FAIL (' + ', '.join(marks) + ')'}")
+        if not ok:
+            fails.append(f"{n_seg}-segment split")
+    print(f"    monotonicity: {'PASS' if monotone else 'FAIL'}")
+    if not monotone:
+        fails.append("bucket structure not monotone")
+
+    any_short = any(not r["enough"] for r in seg_results.values())
+    print()
+    if not fails:
+        sign_word = "negative" if full_m < 0 else "positive"
+        verdict = (f"CONFIRMED -- stable across {seg_counts} segment splits, consistent "
+                   f"{sign_word} sign, and a monotone bucket structure")
+    elif any_short and len(fails) == 1:
+        verdict = "DEFERRED_INSUFFICIENT_SAMPLE -- a segment is below the minimum effective n"
     else:
-        verdict = ("CONFIRMED (single segment)" if full_excl else "NOT_CONFIRMED (single segment)")
+        verdict = "NOT_CONFIRMED -- " + "; ".join(fails)
     print(f"  >>> {verdict}")
     print()
-    print("  reminder: a non-zero IC establishes that the signal carries cross-sectional")
-    print("  information. It does NOT establish a tradeable basket -- that is the next layer")
-    print("  and it failed its own confirmation on 2026-08-19, see PLANS (2).")
+    print("  note: a non-zero IC only says the signal carries cross-sectional information.")
+    print("  Rule 5 is what separates that from a usable ranking -- a U-shaped signal has")
+    print("  a non-zero IC because both tails lose, and cannot be turned into a basket.")
     print(bar)
     return 0
 
@@ -641,8 +699,13 @@ def main() -> int:
                          "--deciles is given, else basket")
     ap.add_argument("--deciles", type=int, default=0,
                     help="bucket count for --mode deciles (default 10 when the mode is selected)")
-    ap.add_argument("--segments", type=int, default=2,
-                    help="--mode ic: split the period into N equal-count segments for confirmation")
+    ap.add_argument("--segments", default="2,3,4",
+                    help="--mode ic: comma-separated segment counts. The pass rule must hold at "
+                         "EVERY one of them -- a signal that only survives a single split is not "
+                         "stable (bollinger, 2026-08-19)")
+    ap.add_argument("--min-monotone-rho", type=float, default=0.7,
+                    help="--mode ic: minimum |spearman(bucket, excess)| for the structure to count "
+                         "as monotone rather than U-shaped")
     ap.add_argument("--min-eff-n", type=int, default=20,
                     help="--mode ic: minimum effective independent observations per segment")
     ap.add_argument("--min-names", type=int, default=50,
