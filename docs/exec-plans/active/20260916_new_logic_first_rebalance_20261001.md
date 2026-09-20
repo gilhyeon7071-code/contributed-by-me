@@ -192,6 +192,21 @@ Q1 은 사용자 결정이에요. 나머지는 구현 중 확인.
    - `2_Logs/intraday_loop_status_latest.json` 의 `switches.raw.PAPER_EXIT_ONLY == "1"`, `switches.exit_only_mode == true` (당일 generated_at)
    - `paper/paper_state.json` 의 `open_positions` 길이 0
 
+**판정 방법 (2026-09-20 추가 — 기준은 안 바꿔요, 재는 방법만 못 박아요):**
+```
+python paper/strategies/kospi_mcap_quarterly_v2/src/go_nogo.py
+```
+기준마다 **읽은 파일 경로**와 함께 `PASS / FAIL / UNKNOWN` 을 내요. 규칙 셋:
+**① UNKNOWN 은 통과가 아니에요**(확인 안 된 것) **② 증거에 나이 한도가 있어 낡으면 UNKNOWN**
+**③ 검사가 터져도 UNKNOWN**. 전부 PASS 일 때만 rc=0 이고 "간다" 가 나와요.
+Claude 의 산문 보고가 아니라 이 출력으로 판정해요 — 2026-09-20 에 부분 실행(246건)을 전수(711건)로
+보고한 적이 있어서, 되돌릴 수 없는 문 앞에서는 사람의 문장을 증거로 쓰지 않기로 했어요.
+
+**2026-09-20 첫 실행 결과: PASS 3 / FAIL 0 / UNKNOWN 6** — 1·4·9 만 통과.
+UNKNOWN 6 중 4건은 아직 안 한 일(3·6 은 09-22 실발주, 5·7 은 09-21 계좌 점검, 8 은 09-23~27 일일 운용)이고,
+**2번은 성격이 달라요 — D7 status=OK 이지만 기계가 읽을 손계산 대조 기록(`handcalc_*.json`)이 없어요.**
+사람이 "맞다" 고 한 것은 여기서 증거가 되지 않아요. 09-21 손계산 대조 때 그 파일을 남겨야 해요.
+
 **미룬다 → 12-30 선정 / 2027-01-04 집행:** 하나라도 미충족. 미루는 건 기준대로의 결정이지 실패가 아니에요.
 
 ## 6. 가져다 쓸 후보 (미리 채택 아님 — 칸 구현 때 게이트로 확인)

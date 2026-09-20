@@ -51221,3 +51221,18 @@ account_clear_min_scale 바닥                                = 0.25    (applied
   결과를 상태로 재는 쪽을 막았다. 확인 시점 = 다음 커밋부터 이 도구로만
 - 도구 첫 실전 사용에서 결함 1건 즉시 발견: Windows cp949 로 git 출력을 읽어 **검증 단계에서 터졌다**
   (커밋 a40a8eed 은 나갔고 사후 판정이 죽음). bytes 로 받아 utf-8/replace 로 디코드. 회귀 시험 추가 -> 7 passed
+
+## 558. 09-28 가부 9개를 명령으로 — 판정기 신설 (2026-09-20)
+- 사용자: "네가 순간순간 판단을 어떻게 내가 전부 판단할 수 있을까" -> 전수 감시는 불가.
+  되돌릴 수 없는 지점(발주 무장/가부/실주문/삭제·이동/기록 변경) 다섯 개만 문서 아닌 **상태**로 판정하기로
+- 신설 `paper/strategies/kospi_mcap_quarterly_v2/src/go_nogo.py` — 기준 9개를 파일에서 읽어
+  `PASS/FAIL/UNKNOWN` + **읽은 파일 경로**를 낸다. 규칙: UNKNOWN 은 통과 아님 / 증거에 나이 한도 /
+  검사 예외도 UNKNOWN / 전부 PASS 일 때만 rc=0
+- **첫 실행 실측: PASS 3 (1·4·9) / FAIL 0 / UNKNOWN 6** -> 현재 판정 "미룬다"
+  - 3·6 = 09-22 실발주·취소 시험 전, 5·7 = 계좌 점검 산출물 없음(09-21), 8 = morning/afternoon 기록 없음
+  - **2 = 성격이 다름: D7 status=OK 인데 손계산 대조 기록 파일이 없다.** 사람 확인은 증거로 안 셈 ->
+    09-21 대조 때 `handcalc_<date>.json` 을 남기도록 할 일 추가
+- 시험 `tests/test_kospi_mcap_quarterly_v2_go_nogo.py` 14건 — 전부 UNKNOWN 이면 GO 아님 / 하나만
+  UNKNOWN 이어도 GO 아님 / 예외 -> UNKNOWN / 낡은 계좌 산출물 -> UNKNOWN / 문턱 6,000만 경계 / 보유 있으면 FAIL /
+  손계산 기록 없으면 UNKNOWN / 안 한 것은 FAIL 아닌 UNKNOWN / v41.1 보유 있으면 FAIL / 낡은 상태파일 UNKNOWN
+- exec plan 5절에 판정 명령과 첫 결과 기록. **기준 자체는 바꾸지 않았다**(09-28 이후 변경 금지 규칙 준수)
