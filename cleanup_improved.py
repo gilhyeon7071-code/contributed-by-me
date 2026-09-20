@@ -2,35 +2,34 @@
 """
 cleanup_improved.py  (v2.0 - 2026-02-24)
 
-湲곗〈 cleanup_1_data.py ?鍮?異붽? 泥섎━:
-  1) 肄붾뱶議곌컖 ?뚯씪/?붾젆?좊━ ??젣 (0諛붿씠??+ 鍮꾩젙???뚯씪紐?
-  2) 鍮꾪몴以 ?뺤옣??諛깆뾽 泥섎━ (.asofforce_, .BROKEN_, .broken_, ??
-  3) '???대뜑' ??'_krx_clean' ?대쫫 蹂寃?
+Additional cleanup rules compared with cleanup_1_data.py:
+  1) Delete code-fragment files/directories, including zero-byte invalid names.
+  2) Move non-standard backup-extension files such as .asofforce_, .BROKEN_, .broken_.
+  3) Rename the legacy folder name to _krx_clean archive name.
   4) Windows 寃쎈줈紐??뚯씪 泥섎━
-  5) D:/?놁뼱??濡쒖뺄 _bak/<ts>/ 濡??꾩뭅?대툕 媛??
+  5) Archive to D:/ when available, otherwise to local _bak/<ts>.
   6) .bak_before_restore, .bak_A_*, .bak_C*_, .bak_H*_ ?⑦꽩 ?ы븿
 
-?ㅽ뻾:
-  python cleanup_improved.py                  # DRY (湲곕낯): 怨꾪쉷留?異쒕젰
-  python cleanup_improved.py DOIT             # ?ㅼ젣 ?ㅽ뻾 (?대룞/??젣/?대쫫蹂寃?
+Usage:
+  python cleanup_improved.py                  # DRY: print planned actions only
+  python cleanup_improved.py DOIT             # Apply moves/deletes/renames
   python cleanup_improved.py DOIT --no-logs   # 2_Logs 泥섎━ ?쒖쇅
   python cleanup_improved.py DOIT --dest D:/1_Data_Archive
 """
 from __future__ import annotations
 
-import os
 import sys
 import json
 import shutil
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 import re
 
-BASE_DIR = Path(__file__).resolve().parent  # E:\1_Data
+BASE_DIR = Path(__file__).resolve().parent  
 TS = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-# ?꾩뭅?대툕 紐⑹쟻吏: D:\ ?놁쑝硫?濡쒖뺄 _bak/ ?ъ슜
+# Archive destination: use D:\ if available, otherwise local _bak/.
 _dest_arg = next((a for a in sys.argv if a.startswith("--dest")), None)
 if _dest_arg and "=" in _dest_arg:
     DEST_ROOT = Path(_dest_arg.split("=", 1)[1])
@@ -43,9 +42,9 @@ else:
 
 DEST_DIR = DEST_ROOT / TS
 
-# ??????????????????????????????????????????????
-# 蹂댄샇 紐⑸줉
-# ??????????????????????????????????????????????
+# ---------------------------------------------------------------------------
+# Protected paths
+# ---------------------------------------------------------------------------
 PROTECT_DIRS = {
     "paper", "12_Risk_Controlled", "_bak", "_krx_clean", "krx_daily_archive",
     "data", "docs", "tools", "utils", "Raw",
@@ -68,14 +67,14 @@ PROTECT_FILES = {
     str(Path("2_Logs") / "liquidity_filter_daily_last.json"),
 }
 
-# ??????????????????????????????????????????????
-# ?뺢퇋???⑦꽩
-# ??????????????????????????????????????????????
+# ---------------------------------------------------------------------------
+# Pattern rules
+# ---------------------------------------------------------------------------
 
-# 湲곗〈 .bak_YYYYMMDD ?⑦꽩
+# Existing .bak_YYYYMMDD pattern.
 BAK_PAT = re.compile(r".*\.bak_?\d{8}.*$", re.IGNORECASE)
 
-# ?뺤옣??諛깆뾽 ?⑦꽩 (.bak_A_, .bak_C*_, .bak_H*_, .bak_before_*, .broken_, .BROKEN_)
+# Non-standard backup-extension pattern.
 BAK_EXT_PAT = re.compile(
     r".*\.(bak_[A-Za-z]|bak_before|broken_|BROKEN_|asofforce_|cleandiag_|"
     r"dateparsefix_|FINALFIX_|indentfix_|loadfix_|nokfix_|parseddiag_|"
@@ -83,7 +82,7 @@ BAK_EXT_PAT = re.compile(
     re.IGNORECASE
 )
 
-# 肄붾뱶議곌컖 ?뚯씪紐??⑦꽩 (Python ?덉빟???쒗쁽????낇엺????
+# Code-fragment file-name patterns.
 _CODE_FRAG_NAMES = {
     "'", "0", "0)", "0).mean()", "0).mean())", "0]", "0].sum()",
     "127", "8]", "bool", "int", "Dict", "Params", "type",
@@ -95,7 +94,7 @@ _CODE_FRAG_NAMES = {
     "_HIT_C_PATHS.txt",  # 0諛붿씠??
 }
 
-# 肄붾뱶議곌컖 ?붾젆?좊━紐??⑦꽩
+# Code-fragment directory-name patterns.
 _CODE_FRAG_DIRS = {
     "(report['meta'].get('latest_date')",
     "'')",
@@ -106,29 +105,29 @@ _CODE_FRAG_DIRS = {
     "pq.ParquetFile(str(p)).metadata",
 }
 
-# Windows 寃쎈줈紐??뚯씪 (?뚯씪紐낆뿉 Windows 寃쎈줈媛 ?듭㎏濡??ㅼ뼱媛?寃?
+# Windows path-like file names.
 _WIN_PATH_FILES = {
     "C:UsersjjtopAppDataLocalTempexcel_content.txt",
 }
 
-# Windows ?섍꼍蹂?섎챸 ?뚯씪
+# Windows environment variable file names.
 _ENV_VAR_FILES = {
     "%BAKCFG%",
 }
 
-# 鍮??뚯씪 + ?대쫫??Python ?쒗쁽??臾몄옄 ?ы븿
+# Empty file with Python-expression-like name.
 _CODE_CHARS_PAT = re.compile(r"[\[\]()'=.]")
 
 
 def _is_code_fragment_file(p: Path) -> bool:
-    """0諛붿씠?몄씠怨??대쫫??肄붾뱶議곌컖???뚯씪 ?먮퀎."""
+    """Return True when the path looks like a code-fragment file."""
     if p.name in _CODE_FRAG_NAMES:
         return True
     if p.name in _WIN_PATH_FILES:
         return True
     if p.name in _ENV_VAR_FILES:
         return True
-    # 0諛붿씠?몄씠怨??대쫫??Python ?쒗쁽???⑦꽩 ?ы븿
+    # Empty files with Python-expression-like names are treated as fragments.
     try:
         if p.stat().st_size == 0 and _CODE_CHARS_PAT.search(p.name):
             return True
@@ -138,24 +137,24 @@ def _is_code_fragment_file(p: Path) -> bool:
 
 
 def _is_code_fragment_dir(p: Path) -> bool:
-    """?대쫫??肄붾뱶議곌컖???붾젆?좊━ ?먮퀎."""
+    """Return True when the directory name looks like a code fragment."""
     return p.name in _CODE_FRAG_DIRS
 
 
-# ??????????????????????????????????????????????
-# ?≪뀡 ???
-# ??????????????????????????????????????????????
+# ---------------------------------------------------------------------------
+# Action model
+# ---------------------------------------------------------------------------
 @dataclass
 class Action:
     kind: str          # "move" | "delete" | "rename"
     src: Path
-    dst: Path | None   # rename/move: ??? delete: None
+    dst: Path | None   # rename/move target; delete uses None
     reason: str
 
 
-# ??????????????????????????????????????????????
-# 蹂댄샇 ?щ? ?뺤씤
-# ??????????????????????????????????????????????
+# ---------------------------------------------------------------------------
+# Protection checks
+# ---------------------------------------------------------------------------
 def _is_protected(p: Path) -> bool:
     try:
         rel = p.relative_to(BASE_DIR)
@@ -166,21 +165,21 @@ def _is_protected(p: Path) -> bool:
         return True
     if parts[0] in PROTECT_DIRS:
         return True
-    # ?뺥솗???뚯씪 蹂댄샇
+    # Protect exact file paths and file names.
     rel_s = "/".join(parts)
     if rel_s in PROTECT_FILES or parts[-1] in PROTECT_FILES:
         return True
     return False
 
 
-# ??????????????????????????????????????????????
-# ?뚮옖 ?섎┰
-# ??????????????????????????????????????????????
+# ---------------------------------------------------------------------------
+# Planning
+# ---------------------------------------------------------------------------
 def plan_actions() -> list[Action]:
     actions: list[Action] = []
 
     for p in sorted(BASE_DIR.iterdir()):
-        # ?쒖뒪???붾젆?좊━ 嫄대꼫?
+        # Skip hidden system directories.
         if p.name.startswith(".") and p.is_dir():
             continue
         if _is_protected(p):
@@ -198,9 +197,9 @@ def plan_actions() -> list[Action]:
             ))
             continue
 
-        # ?? 2) 肄붾뱶議곌컖 ?붾젆?좊━ ??젣 ???????????????????
+        # 2) Delete or move code-fragment directories.
         if p.is_dir() and _is_code_fragment_dir(p):
-            # ?붾젆?좊━ ?????뚯씪???덉쑝硫??대룞, 鍮꾩뼱?덉쑝硫???젣
+            # Move non-empty fragment directories; delete empty ones.
             children = list(p.iterdir())
             if not children:
                 actions.append(Action(kind="delete", src=p, dst=None,
@@ -208,31 +207,31 @@ def plan_actions() -> list[Action]:
             else:
                 actions.append(Action(kind="move", src=p,
                                       dst=DEST_DIR / "garbage_dirs" / _safe_name(name),
-                                      reason="肄붾뱶議곌컖_?붾젆?좊━_鍮꾩뼱?덉??딆쓬"))
+                                      reason="code_fragment_non_empty_directory"))
             continue
 
         if p.is_file():
-            # ?? 3) 肄붾뱶議곌컖 ?뚯씪 ??젣 ??????????????????????
+            # 3) Delete code-fragment files.
             if _is_code_fragment_file(p):
                 actions.append(Action(kind="delete", src=p, dst=None,
-                                      reason="肄붾뱶議곌컖_?뚯씪"))
+                                      reason="code_fragment_file"))
                 continue
 
-            # ?? 4) 鍮꾪몴以 ?뺤옣??諛깆뾽 ?대룞 ?????????????????
+            # 4) Move non-standard backup-extension files.
             if BAK_EXT_PAT.match(name):
                 actions.append(Action(kind="move", src=p,
                                       dst=DEST_DIR / "backups_ext" / name,
-                                      reason="鍮꾪몴以?뺤옣??諛깆뾽"))
+                                      reason="non_standard_backup_extension"))
                 continue
 
-            # ?? 5) ?쒖? .bak_YYYYMMDD 諛깆뾽 ?대룞 ????????????
+            # 5) Move existing .bak_YYYYMMDD backup files.
             if BAK_PAT.match(name):
                 actions.append(Action(kind="move", src=p,
                                       dst=DEST_DIR / "backups" / name,
-                                      reason="?쒖?_bak_諛깆뾽"))
+                                      reason="dated_bak_backup"))
                 continue
 
-    # ?? 6) 2_Logs 30???댁쟾 ?뚯씪 ?대룞 (--no-logs ??嫄대꼫?) ????
+    # 6) Move 2_Logs files older than 30 days unless --no-logs is set.
     no_logs = "--no-logs" in sys.argv
     if not no_logs:
         LOG_DATED_PAT = re.compile(
@@ -256,9 +255,9 @@ def plan_actions() -> list[Action]:
                 if dt < cutoff:
                     actions.append(Action(kind="move", src=p,
                                           dst=DEST_DIR / "2_Logs" / p.name,
-                                          reason="濡쒓렇_30??珥덇낵"))
+                                          reason="logs_older_than_30_days"))
 
-    # 以묐났 ?쒓굅
+    # Deduplicate planned actions.
     seen: set[str] = set()
     deduped: list[Action] = []
     for a in actions:
@@ -270,13 +269,13 @@ def plan_actions() -> list[Action]:
 
 
 def _safe_name(name: str) -> str:
-    """?뚯씪?쒖뒪?쒖뿉???ъ슜 遺덇??ν븳 臾몄옄瑜?_濡?移섑솚."""
+    """Replace filesystem-unsafe characters with underscores."""
     return re.sub(r'[<>:"/\\|?*\x00-\x1f\']', "_", name)[:80]
 
 
-# ??????????????????????????????????????????????
-# ?ㅽ뻾
-# ??????????????????????????????????????????????
+# ---------------------------------------------------------------------------
+# Execution
+# ---------------------------------------------------------------------------
 def _ensure(dst: Path) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
 
@@ -302,7 +301,7 @@ def _safe_delete(p: Path) -> None:
 
 def _safe_rename(src: Path, dst: Path) -> None:
     if dst.exists():
-        print(f"  [WARN] rename ??곸씠 ?대? 議댁옱: {dst}")
+        print(f"  [WARN] rename target already exists: {dst}")
         return
     src.rename(dst)
 
@@ -322,13 +321,13 @@ def execute(actions: list[Action]) -> dict:
                 counts["rename"] += 1
         except Exception as e:
             counts["error"] += 1
-            print(f"  [ERR] {a.kind} ?ㅽ뙣: {a.src}  err={e}")
+            print(f"  [ERR] {a.kind} failed: {a.src}  err={e}")
     return counts
 
 
-# ??????????????????????????????????????????????
-# 硫붿씤
-# ??????????????????????????????????????????????
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 def main() -> int:
     mode = "DRY"
     for arg in sys.argv[1:]:
@@ -342,7 +341,7 @@ def main() -> int:
 
     actions = plan_actions()
 
-    # 醫낅쪟蹂?異쒕젰
+    # Print by action type.
     by_kind: dict[str, list[Action]] = {}
     for a in actions:
         by_kind.setdefault(a.kind, []).append(a)
@@ -360,25 +359,25 @@ def main() -> int:
         print()
 
     total = len(actions)
-    print(f"[CLEANUP v2] 珥?{total}媛????(??젣:{len(by_kind.get('delete',[]))}, "
-          f"?대쫫蹂寃?{len(by_kind.get('rename',[]))}, "
-          f"?대룞:{len(by_kind.get('move',[]))})")
+    print(f"[CLEANUP v2] total={total} planned (delete={len(by_kind.get('delete',[]))}, "
+          f"rename={len(by_kind.get('rename',[]))}, "
+          f"move={len(by_kind.get('move',[]))})")
 
     if mode == "DRY":
-        print("[CLEANUP v2] DRY 紐⑤뱶 - ?ㅼ젣 蹂寃??놁쓬.")
-        print("[CLEANUP v2] ?ㅽ뻾?섎젮硫? python cleanup_improved.py DOIT")
+        print("[CLEANUP v2] DRY mode - no filesystem changes applied.")
+        print("[CLEANUP v2] To apply: python cleanup_improved.py DOIT")
         return 0
 
-    # DOIT 紐⑤뱶
+    # DOIT mode.
     try:
         DEST_DIR.mkdir(parents=True, exist_ok=True)
     except Exception as e:
-        print(f"[CLEANUP v2] FATAL: dest ?앹꽦 ?ㅽ뙣: {DEST_DIR}  err={e}")
+        print(f"[CLEANUP v2] FATAL: failed to create dest: {DEST_DIR}  err={e}")
         return 3
 
     counts = execute(actions)
 
-    # 寃곌낵 ???
+    # Save result.
     report = {
         "ts": TS,
         "base_dir": str(BASE_DIR),
@@ -395,12 +394,13 @@ def main() -> int:
     out.parent.mkdir(exist_ok=True)
     out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print(f"\n[CLEANUP v2] ?꾨즺: ?대룞={counts['move']}, ??젣={counts['delete']}, "
-          f"?대쫫蹂寃?{counts['rename']}, ?ㅻ쪟={counts['error']}")
-    print(f"[CLEANUP v2] 寃곌낵 ??? {out}")
+    print(f"\n[CLEANUP v2] finished: move={counts['move']}, delete={counts['delete']}, "
+          f"rename={counts['rename']}, error={counts['error']}")
+    print(f"[CLEANUP v2] result saved: {out}")
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
 

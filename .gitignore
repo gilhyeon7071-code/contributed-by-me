@@ -217,3 +217,5 @@ Stock-AI-Wiki/00_Inbox/logs/
 # 런타임 상태
 live/
 state/
+
+virtual_ledger.csv

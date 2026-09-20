@@ -19,6 +19,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+ROOT_A = Path(os.getenv("ROOTA", str(Path(__file__).resolve().parents[1])))
+ROOT_B = Path(os.getenv("ROOTB", str(Path(__file__).resolve().parents[2] / "vibe" / "buffett")))
+
 
 def load_json(path: Path) -> Dict[str, Any]:
     if not path.exists() or not path.is_file():
@@ -680,10 +683,10 @@ def _inject_design_logic_checks(
     total_req = len(required_phases)
 
     doc_paths = [
-        Path(r"E:\1_Data\README_STOC.txt"),
-        Path(r"E:\1_Data\README_P0_next.md"),
-        Path(r"E:\1_Data\checkfile\orchestrator.py"),
-        Path(r"E:\1_Data\checkfile\main.py"),
+        ROOT_A / "README_STOC.txt",
+        ROOT_A / "README_P0_next.md",
+        ROOT_A / "checkfile" / "orchestrator.py",
+        ROOT_A / "checkfile" / "main.py",
     ]
     docs_present = sum(1 for p in doc_paths if p.exists() and p.is_file())
 
@@ -695,7 +698,7 @@ def _inject_design_logic_checks(
     method_draft["gate_mode"] = gate_mode
 
     flow_hits = _count_text_hits(
-        [Path(r"E:\1_Data\docs"), Path(r"E:\1_Data\checkfile"), Path(r"E:\1_Data")],
+        [ROOT_A / "docs", ROOT_A / "checkfile", ROOT_A],
         ["mermaid", "flowchart", "statediagram", "graph td"],
         max_files=300,
     )
@@ -997,7 +1000,7 @@ def inject_operational_observability(base: Dict[str, Any], args: argparse.Namesp
         method_soak["max_fail_ratio"] = 0.05
 
     emergency_checklist = {
-        "script_exists": Path(r"E:\1_Data\tools\kis_emergency_liquidate.py").exists(),
+        "script_exists": (ROOT_A / "tools" / "kis_emergency_liquidate.py").exists(),
         "cancel_open_supported": True,
         "dry_run_supported": True,
         "apply_guard_present": True,
@@ -1152,17 +1155,20 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--profile", choices=["DEMO", "PROD"], default="PROD")
     p.add_argument("--out", required=True, help="output runtime evidence path")
 
-    p.add_argument("--demo-source", default=r"E:\1_Data\checkfile\runtime_evidence_demo.json")
-    p.add_argument("--prod-base", default=r"E:\1_Data\checkfile\runtime_evidence_prod_base.json")
-    p.add_argument("--policy", default=r"E:\1_Data\checkfile\survivorship_policy_kr.json")
-    p.add_argument("--universe-csv", default=r"E:\1_Data\_cache\sector_ssot_plus_pref.csv")
-    p.add_argument("--supplement-csv", default=r"E:\1_Data\_cache\survivorship_delisted_seed.csv")
-    p.add_argument("--observability-json", default=r"E:\1_Data\2_Logs\execution_observability_latest.json")
-    p.add_argument("--dashboard-state", default=r"E:\vibe\buffett\runs\dashboard_state_latest.json")
-    p.add_argument("--lvb-paper-json", default=r"E:\1_Data\2_Logs\live_vs_bt_paper_latest.json")
-    p.add_argument("--runtime-log", default=r"E:\1_Data\2_Logs\run_paper_daily_last.txt")
-    p.add_argument("--best-execution-review-json", default=r"E:\1_Data\2_Logs\best_execution_review_latest.json")
-    p.add_argument("--paper-trades-csv", default=r"E:\1_Data\paper\trades.csv")
+    p.add_argument("--demo-source", default=str(ROOT_A / "checkfile" / "runtime_evidence_demo.json"))
+    p.add_argument("--prod-base", default=str(ROOT_A / "checkfile" / "runtime_evidence_prod_base.json"))
+    p.add_argument("--policy", default=str(ROOT_A / "checkfile" / "survivorship_policy_kr.json"))
+    p.add_argument("--universe-csv", default=str(ROOT_A / "_cache" / "sector_ssot_plus_pref.csv"))
+    p.add_argument("--supplement-csv", default=str(ROOT_A / "_cache" / "survivorship_delisted_seed.csv"))
+    p.add_argument("--observability-json", default=str(ROOT_A / "2_Logs" / "execution_observability_latest.json"))
+    p.add_argument("--dashboard-state", default=str(ROOT_B / "runs" / "dashboard_state_latest.json"))
+    p.add_argument("--lvb-paper-json", default=str(ROOT_A / "2_Logs" / "live_vs_bt_paper_latest.json"))
+    p.add_argument("--runtime-log", default=str(ROOT_A / "2_Logs" / "run_paper_daily_last.txt"))
+    p.add_argument("--best-execution-review-json", default=str(ROOT_A / "2_Logs" / "best_execution_review_latest.json"))
+    # 손익 권위 원장 = trades_calc.csv (PLANS 2026-08-18 (4), 사용자 승인).
+    # trades.csv 는 함의 비용이 행마다 다르고(중앙 3.02% vs 설정 0.358%) 이중 차감된 net 을 담는다.
+    # _pick_return_column 이 pnl_pct 부재 시 net_ret 을 집으므로 컬럼 매핑 불필요.
+    p.add_argument("--paper-trades-csv", default=str(ROOT_A / "paper" / "trades_calc.csv"))
     p.add_argument("--metrics-window-trades", type=int, default=120)
     p.add_argument("--min-metric-sample-size", type=int, default=30)
     p.add_argument("--min-profit-factor", type=float, default=1.05)
@@ -1171,9 +1177,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--min-calmar", type=float, default=0.05)
     p.add_argument("--performance-gate-mode", choices=["AUTO", "STRICT", "ONBOARDING"], default="AUTO")
 
-    p.add_argument("--backtest-trades-csv", default=r"E:\1_Data\12_Risk_Controlled\report_backtest_trades_v41_1.csv")
-    p.add_argument("--stable-params-json", default=r"E:\1_Data\12_Risk_Controlled\stable_params_v41_1.json")
-    p.add_argument("--search-report-csv", default=r"E:\1_Data\12_Risk_Controlled\search_report_v41_1.csv")
+    p.add_argument("--backtest-trades-csv", default=str(ROOT_A / "12_Risk_Controlled" / "report_backtest_trades_v41_1.csv"))
+    p.add_argument("--stable-params-json", default=str(ROOT_A / "12_Risk_Controlled" / "stable_params_v41_1.json"))
+    p.add_argument("--search-report-csv", default=str(ROOT_A / "12_Risk_Controlled" / "search_report_v41_1.csv"))
     p.add_argument("--overfit-top-frac", type=float, default=0.10)
     p.add_argument("--min-dsr", type=float, default=0.10)
     p.add_argument("--max-pbo", type=float, default=0.80)

@@ -191,11 +191,39 @@ def _load_listing_map() -> pd.DataFrame:
 
 # _find_parquets -> utils.common.find_parquets濡??대룞??
 
+# [2026-08-29] R1 배선. 생산은 Raw/ 를 한 번도 읽은 적이 없다.
+#   원인 두 가지가 겹쳐 있었다:
+#     (1) 탐색 디렉터리 목록에 Raw 가 없었다
+#     (2) Raw 의 파일은 `_clean` 접미사가 없는데, _find_krx_parquets 가 _clean 을
+#         하나라도 찾으면 거기서 반환해 비-clean 패턴은 아예 시도하지 않는다
+#   그 결과 Raw/krx_daily_20221001_20251224.parquet (3,158,510행, 코스닥 203만)
+#   이 통째로 빠져 2022-10~2024-12 유니버스가 결손됐다.
+#   연구용 tools/load_merged_panel.py 는 이미 이 파일을 읽고 있었다 = 생산만의 결손.
+#
+#   Raw 는 **가장 낮은 우선순위**로 넣는다. 겹치는 (code,date) 는 종전 그대로
+#   archive/_krx_manual 값이 남고, Raw 는 아무도 안 가진 날짜만 채운다.
+#   -> 기존 행은 한 줄도 바뀌지 않고 결손만 메워진다.
+_KRX_SOURCE_DIRS = (
+    (BASE_DIR / "Raw", 0),
+    (BASE_DIR, 1),
+    (BASE_DIR / "krx_daily_archive", 2),
+    (BASE_DIR / "_krx_manual", 3),
+)
+
+
+def _krx_src_priority(path: Path) -> int:
+    parent = path.parent
+    for directory, prio in _KRX_SOURCE_DIRS:
+        if parent == directory:
+            return prio
+    return 0
+
+
 def _bounded_krx_glob(pattern: str) -> list[Path]:
     """Return only canonical, non-recursive KRX parquet sources."""
     out: list[Path] = []
     seen: set[str] = set()
-    for directory in (BASE_DIR / "_krx_manual", BASE_DIR / "krx_daily_archive", BASE_DIR):
+    for directory, _prio in _KRX_SOURCE_DIRS:
         if not directory.exists() or not directory.is_dir():
             continue
         for path in directory.glob(pattern):
@@ -209,9 +237,18 @@ def _bounded_krx_glob(pattern: str) -> list[Path]:
 
 def _find_krx_parquets() -> list[Path]:
     files = _bounded_krx_glob("krx_daily_*_clean.parquet")
-    if files:
-        return files
-    return _bounded_krx_glob("krx_daily_*.parquet")
+    if not files:
+        return _bounded_krx_glob("krx_daily_*.parquet")
+    # _clean 을 찾았더라도 Raw 의 비-clean 광역 백필은 별도로 합친다.
+    seen = {str(p.resolve()) for p in files}
+    for path in _bounded_krx_glob("krx_daily_*.parquet"):
+        if _krx_src_priority(path) != 0 or path.parent != (BASE_DIR / "Raw"):
+            continue
+        key = str(path.resolve())
+        if key not in seen:
+            seen.add(key)
+            files.append(path)
+    return sorted(files)
 
 
 def _map_macro_to_candidate_regime(macro_regime: str, fallback_is_bull: bool = False) -> str:
@@ -284,7 +321,7 @@ def _load_data(*, max_gap_sessions: int = 0) -> pd.DataFrame:
             continue
 
         df = df.loc[pd.Series(df["date"]).notna()].copy()
-        df["_src_priority"] = 2 if f.parent == BASE_DIR / "_krx_manual" else (1 if f.parent == BASE_DIR / "krx_daily_archive" else 0)
+        df["_src_priority"] = _krx_src_priority(f)
         try:
             df["_src_mtime"] = f.stat().st_mtime
         except OSError:
@@ -435,24 +472,77 @@ def _compute_factors(df: pd.DataFrame):
     # Market proxy: use each row's KOSPI/KOSDAQ peer group when available,
     # with the old all-market average as a compatibility fallback.
     df["market"] = df["market"].fillna("").astype(str).str.upper().str.strip()
+
+    # [2026-08-21] 해결된 시장 라벨을 **별도 컬럼**으로만 붙인다. `market` 은 건드리지 않는다.
+    #
+    # KRX clean parquet 의 market 은 2026-05 부터 절반이 "UNKNOWN" 이다(수집 경로가 값을 버렸다).
+    # 마스터(`2_Logs/market_master_latest.json`)로 100% 복구되지만, `market` 을 덮어쓰면
+    # 아래 peer-group 지표(m_ret_20 / market_is_bull)가 같이 바뀐다. 실측으로 최신일 기준
+    # 516종목의 market_is_bull 판정이 뒤집히고 KOSPI 그룹 bull 이 True -> False 가 된다.
+    # 그건 데이터 보강이 아니라 매매 동작 변경이므로 승인 없이 하지 않는다.
+    # 지금은 관측 가능하게만 만들어 둔다. 소비자는 아직 없다.
+    # 상세: .agent/PLANS.md 2026-08-21 (11)
+    try:
+        _mm_path = BASE_DIR / "2_Logs" / "market_master_latest.json"
+        _mm = {}
+        if _mm_path.exists():
+            _mm_doc = json.loads(_mm_path.read_text(encoding="utf-8-sig"))
+            _mm_codes = _mm_doc.get("codes")
+            if isinstance(_mm_codes, dict):
+                _mm = {
+                    str(k).zfill(6): str(v).upper()
+                    for k, v in _mm_codes.items()
+                    if str(v).upper() in ("KOSPI", "KOSDAQ")
+                }
+        if _mm:
+            _cur = df["market"]
+            _resolved = df["code"].astype(str).str.zfill(6).map(_mm)
+            df["market_resolved"] = _cur.where(_cur.isin(["KOSPI", "KOSDAQ"]), _resolved).fillna("")
+        else:
+            df["market_resolved"] = df["market"]
+    except Exception as _mm_exc:
+        print(f"[MARKET_MASTER] resolve skipped: {type(_mm_exc).__name__}: {_mm_exc}")
+        df["market_resolved"] = df["market"]
     overall_idx = df.groupby("date", as_index=True)["close"].mean().sort_index()
     overall_ret_20 = overall_idx.pct_change(20)
     overall_ret_60 = overall_idx.pct_change(60)
     overall_bull = overall_idx > overall_idx.rolling(60).mean()
 
+    # [2026-08-21] peer-group 기준 컬럼. 기본은 예전대로 `market` 이다.
+    #
+    # `market` 은 2026-05 부터 절반이 "UNKNOWN" 이라, 그 47% 가 존재하지 않는 시장의
+    # 평균을 벤치마크로 쓰고 있다. 그런데 아래에서 `rs = ret_20 - m_ret_20` 을 만들고
+    # rs 는 이 시스템의 주 신호다(w_rs=0.29, rs_lim 하드 게이트).
+    # 즉 **주 신호가 절반의 종목에서 엉터리 기준으로 측정된다.**
+    #
+    # `market_resolved` 로 바꾸면 패널 전체(과거 포함)가 한 번에 일관되게 라벨링된다.
+    # 마스터에서 매번 계산하므로 과거 parquet 을 손댈 필요가 없다.
+    # 실측 영향(2026-08-20, 2,580종목): rs 게이트 통과 1,512 -> 1,416,
+    # 판정이 뒤집히는 종목 260(신규통과 82 / 탈락 178). **후보가 줄어드는 방향이다.**
+    #
+    # 그래서 기본 OFF 다. 켜는 시점을 골라 후보 수 변화를 바로 대조할 수 있게 한다.
+    # `CAND_USE_MARKET_RESOLVED=1` 로 켠다. 상세: .agent/PLANS.md 2026-08-21 (12)
+    _peer_col = "market"
+    if str(os.environ.get("CAND_USE_MARKET_RESOLVED", "0")).strip().lower() in ("1", "true", "yes", "on"):
+        if "market_resolved" in df.columns:
+            _peer_col = "market_resolved"
+        else:
+            print("[MARKET_MASTER] CAND_USE_MARKET_RESOLVED=1 이지만 market_resolved 컬럼이 없어 market 을 쓴다")
+    print(f"[MARKET_MASTER] peer_group_col={_peer_col}")
+
     market_idx = (
-        df[df["market"].ne("")]
-        .groupby(["market", "date"], as_index=False)["close"]
+        df[df[_peer_col].ne("")]
+        .groupby([_peer_col, "date"], as_index=False)["close"]
         .mean()
-        .sort_values(["market", "date"])
+        .sort_values([_peer_col, "date"])
     )
     if not market_idx.empty:
-        market_idx["m_ret_20"] = market_idx.groupby("market")["close"].pct_change(20)
-        market_idx["market_ma60"] = market_idx.groupby("market")["close"].transform(lambda x: x.rolling(60).mean())
+        market_idx["m_ret_20"] = market_idx.groupby(_peer_col)["close"].pct_change(20)
+        market_idx["market_ma60"] = market_idx.groupby(_peer_col)["close"].transform(lambda x: x.rolling(60).mean())
         market_idx["market_is_bull"] = market_idx["close"] > market_idx["market_ma60"]
         df = df.merge(
-            market_idx[["market", "date", "m_ret_20", "market_is_bull"]],
-            on=["market", "date"],
+            market_idx[[_peer_col, "date", "m_ret_20", "market_is_bull"]],
+            on=[_peer_col, "date"],
             how="left",
             sort=False,
         )
@@ -610,7 +700,8 @@ def _compute_factors(df: pd.DataFrame):
         }
         df.attrs['as_of_select'] = as_of_select
     latest_market_bull = market_idx[market_idx["date"].eq(latest_dt)] if not market_idx.empty else pd.DataFrame()
-    kospi_latest = latest_market_bull[latest_market_bull["market"].eq("KOSPI")] if not latest_market_bull.empty else pd.DataFrame()
+    # [2026-08-21] market_idx 는 _peer_col 로 묶여 있다. "market" 을 박아두면 스위치를 켠 순간 KeyError 다.
+    kospi_latest = latest_market_bull[latest_market_bull[_peer_col].eq("KOSPI")] if not latest_market_bull.empty else pd.DataFrame()
     if not kospi_latest.empty:
         val = kospi_latest["market_is_bull"].iloc[-1]
     else:
@@ -1857,6 +1948,84 @@ def _apply_rally_safety_override(today: pd.DataFrame, p: dict, cand: pd.DataFram
     info["reason"] = "override_no_gain"
     return cand, p, False, info
 
+# [2026-09-10] 완화 방향 **선언**. B 수리.
+#
+#   왜 선언이 필요한가: 종전에는 방향이 각 수식 안에 숨어 있었다.
+#     rs_lim  = max(rs_lim * 0.95, -0.10)   <- 음수가 되면 방향이 뒤집힌다
+#   수식만 보면 "완화" 처럼 보이는데 실제로는 조이고 있었고, 6주간 안 보였다.
+#   방향을 데이터로 꺼내면 **틀렸을 때 검사가 잡을 수 있다.**
+#
+#   "loosen" 은 그 파라미터가 **느슨해지는 방향**이다.
+#     down = 값이 내려가야 더 많이 통과한다  (게이트가 `x > lim` 또는 `x >= lim`)
+#     up   = 값이 올라가야 더 많이 통과한다  (게이트가 `x < max` 또는 `x <= max`)
+RELAX_DIRECTION = {
+    "rs_lim": "down",                  # rs > rs_lim
+    "v_accel_lim": "down",             # v_accel > v_accel_lim
+    "value_min": "down",               # value > value_min
+    "min_listing_days": "down",        # listing_days >= min_listing_days
+    "vol_close_corr_min": "down",      # vol_close_corr20 >= vol_close_corr_min
+    "atr_max": "up",                   # atr14_pct < atr_max
+    "stretch_max": "up",               # stretch < stretch_max
+    "rsi_max": "up",                   # rsi14 < rsi_max
+    "near_52w_high_gap_max": "up",     # high_52w_gap <= near_52w_high_gap_max
+}
+
+
+def _assert_ladder_monotone(ladder: list) -> list:
+    """사다리가 선언된 방향으로 **단조**인지 검사한다. 아니면 즉시 실패한다.
+
+    완화 단계는 이전 단계보다 느슨하거나 같아야 한다. 더 엄격해지면 사다리가 아니다.
+    (2026-07-28 rs 재정의 때 바닥값만 고치고 계수를 안 고쳐 L0 -0.0400 -> L6 -0.0278 로
+     **31% 더 엄격**해졌다. 2026-09-10 까지 6주간 아무도 못 봤다 - 검사가 없었기 때문이다)
+    """
+    viol = []
+    for i in range(1, len(ladder)):
+        pname, prev = ladder[i - 1]
+        cname, cur = ladder[i]
+        for k, direction in RELAX_DIRECTION.items():
+            if k not in prev or k not in cur:
+                continue
+            try:
+                a, b = float(prev[k]), float(cur[k])
+            except Exception:
+                continue
+            if direction == "down" and b > a + 1e-12:
+                viol.append("%s->%s %s %.6f -> %.6f (내려가야 하는데 올라감)" % (pname, cname, k, a, b))
+            elif direction == "up" and b < a - 1e-12:
+                viol.append("%s->%s %s %.6f -> %.6f (올라가야 하는데 내려감)" % (pname, cname, k, a, b))
+    if viol:
+        raise RuntimeError(
+            "[RELAX_LADDER] 완화 사다리가 단조가 아니다. 완화 단계가 오히려 조이고 있다:\n  "
+            + "\n  ".join(viol)
+        )
+    return ladder
+
+
+def _relax_rs_lim(value: float, frac: float, floor: float = -0.10) -> float:
+    """rs_lim 을 **바닥 쪽으로** 이동시킨다. 부호와 무관하게 항상 느슨해진다.
+
+    게이트는 `rs > rs_lim` 이라 rs_lim 이 **내려가야** 완화다.
+
+    [2026-09-10] 종전 `max(rs_lim * 0.95, -0.10)` 는 rs_lim 이 음수면 반대로 갔다.
+      -0.04 * 0.95 = -0.038 -> 0 쪽으로 **올라간다** = 더 엄격해진다.
+      실측: L0 -0.0400 -> L6 -0.0278 로 완화 사다리를 오를수록 31% 더 엄격했다.
+      바닥값 max(..., -0.10) 은 max() 가 늘 덜 음수인 쪽을 골라 **영원히 못 닿았다.**
+      바닥을 -0.10 으로 내려둔 것 자체가 "아래로 가야 한다" 는 의도의 증거다.
+
+      계보: 이 사다리는 rs 가 **비율**(rs_lim=1.6, 양수)이던 시절 코드다.
+      2026-07-28 에 rs 를 차이값으로 재정의하며 5곳을 고쳤는데,
+      사다리는 **바닥값만 고치고 곱셈 계수는 그대로 뒀다** = 반쪽 수리.
+
+    구현: 남은 거리(value - floor)의 frac 만큼 바닥 쪽으로 옮긴다.
+      옛 양수 값에서도 거의 같은 결과다 - 1.6, frac 0.05 -> 1.515 (종전 1.52).
+    """
+    v = float(value)
+    f = float(floor)
+    if v <= f:
+        return f
+    return max(v - (v - f) * float(frac), f)
+
+
 def _relax_ladder(p0: dict) -> list[dict]:
     """?꾨낫 0媛?諛⑹?: ?먯쭊 ?꾪솕(遺덉븞??諛⑹??⑹쑝濡??④퀎 ?쒗븳)"""
     p0 = dict(p0)
@@ -1874,14 +2043,14 @@ def _relax_ladder(p0: dict) -> list[dict]:
     p2 = dict(p1)
     p2["atr_max"] = max(float(p2["atr_max"]), 0.12)
     p2["v_accel_lim"] = max(float(p2["v_accel_lim"]) * 0.90, 1.20)
-    p2["rs_lim"] = max(float(p2["rs_lim"]) * 0.95, -0.10)
+    p2["rs_lim"] = _relax_rs_lim(p2["rs_lim"], 0.05)
     ladder.append(("L2", p2))
 
     # L3: stretch/value ?꾪솕(留덉?留??④퀎)
     p3 = dict(p2)
     p3["atr_max"] = max(float(p3["atr_max"]), 0.15)
     p3["v_accel_lim"] = max(float(p3["v_accel_lim"]) * 0.90, 1.20)
-    p3["rs_lim"] = max(float(p3["rs_lim"]) * 0.95, -0.10)
+    p3["rs_lim"] = _relax_rs_lim(p3["rs_lim"], 0.05)
     p3["stretch_max"] = min(float(p3["stretch_max"]) + 0.03, 1.30)
     p3["value_min"] = max(float(p3["value_min"]) * 0.85, 1_000_000_000.0)
     ladder.append(("L3", p3))
@@ -1890,7 +2059,7 @@ def _relax_ladder(p0: dict) -> list[dict]:
     p4 = dict(p3)
     p4["atr_max"] = max(float(p4["atr_max"]), 0.18)
     p4["v_accel_lim"] = max(float(p4["v_accel_lim"]) * 0.90, 1.15)
-    p4["rs_lim"] = max(float(p4["rs_lim"]) * 0.93, -0.10)
+    p4["rs_lim"] = _relax_rs_lim(p4["rs_lim"], 0.07)
     p4["stretch_max"] = min(float(p4["stretch_max"]) + 0.03, 1.35)
     p4["value_min"] = max(float(p4["value_min"]) * 0.70, 1_000_000_000.0)
     ladder.append(("L4", p4))
@@ -1899,7 +2068,7 @@ def _relax_ladder(p0: dict) -> list[dict]:
     p5 = dict(p4)
     p5["atr_max"] = max(float(p5["atr_max"]), 0.22)
     p5["v_accel_lim"] = max(float(p5["v_accel_lim"]) * 0.88, 1.10)
-    p5["rs_lim"] = max(float(p5["rs_lim"]) * 0.92, -0.10)
+    p5["rs_lim"] = _relax_rs_lim(p5["rs_lim"], 0.08)
     p5["stretch_max"] = min(float(p5["stretch_max"]) + 0.04, 1.40)
     p5["value_min"] = max(float(p5["value_min"]) * 0.55, 1_000_000_000.0)
     ladder.append(("L5", p5))
@@ -1908,7 +2077,7 @@ def _relax_ladder(p0: dict) -> list[dict]:
     p6 = dict(p5)
     p6["atr_max"] = max(float(p6["atr_max"]), 0.25)
     p6["v_accel_lim"] = max(float(p6["v_accel_lim"]) * 0.85, 1.05)
-    p6["rs_lim"] = max(float(p6["rs_lim"]) * 0.90, -0.10)
+    p6["rs_lim"] = _relax_rs_lim(p6["rs_lim"], 0.10)
     p6["stretch_max"] = min(float(p6["stretch_max"]) + 0.05, 1.45)
     p6["value_min"] = max(float(p6["value_min"]) * 0.40, 1_000_000_000.0)
     ladder.append(("L6", p6))
@@ -1941,7 +2110,8 @@ def _relax_ladder(p0: dict) -> list[dict]:
     p9["disparity200_max"] = max(float(p9.get("disparity200_max", 1.30)), 1.60)
     ladder.append(("L9", p9))
 
-    return ladder
+    # [2026-09-10] 만든 직후 검사한다. 여기서 막으면 잘못된 사다리가 생산에 안 나간다.
+    return _assert_ladder_monotone(ladder)
 
 
 def main() -> int:
@@ -2071,6 +2241,20 @@ def main() -> int:
             chosen_level = level
             chosen_params = p
             candidates = cand
+            # [2026-09-10] A 수리. **게이트를 통과한 후보임을 여기서 못박는다.**
+            #   종전에는 표시가 없었다. 그래서 keep_cols 의
+            #   `if c not in top.columns: top[c] = np.nan` 에 걸려 natural_pass 가
+            #   NaN 이 됐고, 폴백 행에만 False 가 박혀 있었다.
+            #   결과: 소비자마다 "이 행이 매매 가능한가" 를 원자료에서 다시 유도했고
+            #   판정 조건의 절반(natural_pass)이 죽은 채로 우연히 맞고 있었다.
+            candidates = candidates.copy()
+            candidates["natural_pass"] = True
+            if "candidate_origin" not in candidates.columns:
+                candidates["candidate_origin"] = "GATE_PASS"
+            else:
+                candidates["candidate_origin"] = candidates["candidate_origin"].fillna("GATE_PASS")
+            candidates["observe_only"] = False
+            candidates["observe_only_reason"] = ""
             break
 
     rally_override = {"applied": False, "reason": "not_checked"}
@@ -2112,6 +2296,11 @@ def main() -> int:
             "disable_relax": bool(research_disable_relax),
             "disable_sector_union": bool(research_disable_sector_union),
             "official_use_allowed": False if research_mode else bool(stable_gate_status.get("ok", False)),
+            # [2026-08-20] 파라미터 자격 라벨. official_use_allowed 는 "가동 가능"만
+            # 뜻하므로, 인증 여부를 별도로 실어 소비자가 구분할 수 있게 한다.
+            "param_certified": bool(stable_gate_status.get("certified", False)),
+            "param_operational": bool(stable_gate_status.get("operational", False)),
+            "param_cert_reason": str(stable_gate_status.get("cert_reason", "") or ""),
         },
         "stable_param_gate": stable_gate_status,
         "stable_params": {
@@ -2156,8 +2345,9 @@ def main() -> int:
         # empty output (schema fixed)
         cols = ["no","date","code","name","market","market_regime","close","value","market_cap","listed_shares","rs","rs_slope","stretch","v_accel","atr14_pct","rsi14","macd_golden","vol_close_corr20","high_52w_gap","listing_days","score","fundamental_score","fundamental_grade","final_score","junk_risk_score","junk_risk_grade","junk_flags","krx_admin","krx_warning","krx_risk","krx_caution","relax_level"]
         _atomic_write_csv(out_path, pd.DataFrame(columns=cols))
+        _atomic_write_csv(latest_data_path, pd.DataFrame(columns=cols))
         _atomic_write_text(latest_ptr, out_path.name, encoding="utf-8")
-        print("[FIX17] latest_data kept (no candidates) -> NOT overwriting candidates_latest_data.csv")
+        print("[FIX17] latest_data updated empty-current (no candidates) -> candidates_latest_data.csv")
         meta['as_of_select'] = dict(as_of_select)
         meta['as_of_select']['src'] = 'generate_candidates_v41_1.py'  # standard_check expects as_of_select.src
         _atomic_write_json(latest_meta_path, meta)
@@ -2207,8 +2397,21 @@ def main() -> int:
     top = candidates.sort_values("final_score", ascending=False).head(top_n).copy()
     top.insert(0, "no", range(1, len(top) + 1))
 
+    # [2026-09-10] A 수리. **매매 가능 여부를 여기서 한 번 정해 내려보낸다.**
+    #   소비자가 candidate_origin/natural_pass 를 각자 다시 조합하지 않게 한다.
+    #   지금 규칙은 종전 entry.py 의 판정과 같다 -
+    #     섹터 폴백(SECTOR_PREFILTER_UNION)이고 자연통과가 아니면 매매 불가.
+    #   규칙을 바꾸는 것이 아니라 **정하는 자리를 옮기는 것**이다.
+    _origin = top["candidate_origin"].astype(str).str.strip().str.upper() \
+        if "candidate_origin" in top.columns else pd.Series("", index=top.index)
+    _natural = top["natural_pass"].map(lambda v: str(v).strip().lower() in {"1", "true", "t", "y", "yes"}) \
+        if "natural_pass" in top.columns else pd.Series(False, index=top.index)
+    _fallback = _origin.eq("SECTOR_PREFILTER_UNION") & (~_natural)
+    top["tradable"] = ~_fallback
+    top["tradable_reason"] = np.where(_fallback, "SECTOR_FALLBACK_OBSERVE_ONLY", "GATE_PASS")
+
     # columns order
-    keep_cols = ["no","date","code","name","market","market_regime","close","value","market_cap","listed_shares","ret1_pct","rs","rs_slope","stretch","v_accel","atr14_pct","rsi14","macd_golden","vol_close_corr20","high_52w_gap","listing_days","ma60_support_bounce","trend_smoothness","price_vol_divergence","score","fundamental_score","fundamental_grade","final_score","junk_risk_score","junk_risk_grade","junk_flags","krx_admin","krx_warning","krx_risk","krx_caution","relax_level","candidate_origin","natural_pass","observe_only","observe_only_reason"]
+    keep_cols = ["no","date","code","name","market","market_regime","close","value","market_cap","listed_shares","ret1_pct","rs","rs_slope","stretch","v_accel","atr14_pct","rsi14","macd_golden","vol_close_corr20","high_52w_gap","listing_days","ma60_support_bounce","trend_smoothness","price_vol_divergence","score","fundamental_score","fundamental_grade","final_score","junk_risk_score","junk_risk_grade","junk_flags","krx_admin","krx_warning","krx_risk","krx_caution","relax_level","candidate_origin","natural_pass","observe_only","observe_only_reason","tradable","tradable_reason"]
     for c in keep_cols:
         if c not in top.columns:
             top[c] = np.nan

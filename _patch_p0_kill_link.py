@@ -1,7 +1,10 @@
-from pathlib import Path
-import datetime, shutil, re, sys, os
+﻿from pathlib import Path
+import datetime
+import shutil
+import re
+import os
 
-p = Path(r"E:\1_Data\p0_daily_check.py")
+p = Path(__file__).resolve().parent / "p0_daily_check.py"
 if not p.exists():
     print("ERR_NOT_FOUND", p); raise SystemExit(2)
 
@@ -65,3 +68,4 @@ tmp.write_text("".join(new_lines), encoding="utf-8", newline="\n")
 os.replace(tmp, p)
 
 print("PATCH_OK", "bak", str(bak), "insert_at_line", end + 1)
+

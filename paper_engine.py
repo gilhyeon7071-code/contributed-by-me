@@ -7,6 +7,7 @@ import logging
 import math
 import os
 import sys
+import traceback
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, cast
@@ -40,7 +41,7 @@ from utils.common import (
     now_ymd,
 )
 from utils.pipeline_audit import log_pipeline_event, count_rows
-from paper_engine.config import load_config, _path_from_env, _deep_merge_dict
+from paper_engine.config import load_config, verify_config_lock, _path_from_env, _deep_merge_dict
 from paper_engine.io import (
     detect_schema,
     ensure_csv,
@@ -199,6 +200,23 @@ def main() -> int:
     _args = parser.parse_args()
 
     cfg = load_config()
+
+    # LOCK-B parity: the daily batch verifies the config hash at [0/14], but the
+    # intraday loop spawns this file directly and skipped that check entirely.
+    # docs/exec-plans/active/20260820_config_lock_enforcement.md
+    _cfg_lock = verify_config_lock()
+    if not bool(_cfg_lock.get("ok", False)):
+        _lock_msg = (
+            "[CONFIG_LOCK] " + str(_cfg_lock.get("reason") or "")
+            + " current=" + str(_cfg_lock.get("current_sha256") or "")[:16]
+            + " approved=" + str(_cfg_lock.get("approved_sha256") or "")[:16]
+            + " config=" + str(_cfg_lock.get("config_path") or "")
+        )
+        if bool(_cfg_lock.get("enforced", True)):
+            print("[FAILED] " + _lock_msg + " - refusing to run"
+                  " (set PAPER_CONFIG_LOCK_ENFORCE=0 to override)")
+            return 1
+        print("[WARN] " + _lock_msg + " - enforcement disabled by PAPER_CONFIG_LOCK_ENFORCE=0")
     _audit_ymd = now_ymd() or datetime.now().strftime("%Y%m%d")
     log_pipeline_event(
         stage="paper_engine_main",
@@ -828,6 +846,13 @@ def main() -> int:
         f"[ENTRY_GATE] decision={entry_decision_code} reason={entry_decision_reason} "
         f"p0={p0_market_status} gate={gate_market_status} engine={market_regime} fx={fx_status}"
     )
+    # [2026-08-21] 이 특례는 이제 발동하지 않는다 - 남겨둔 이유는 아래 참조.
+    #
+    # 대시보드 상태는 guards.py evaluate_global_outlier_watcher 에서 결정 입력에서
+    # 제외됐다(display_health 로만 남는다). 따라서 이 문자열은 더 이상 생성되지 않는다.
+    # 코드를 지우지 않은 것은, 지우는 방향이 "BLOCK 을 REDUCE 로 낮추던 완화를 제거"라서
+    # 만에 하나 다른 경로가 같은 문자열을 만들면 매매가 더 막히는 쪽으로 움직이기 때문이다.
+    # 배선을 끊는 변경과 완화를 걷어내는 변경을 같은 날 섞지 않는다.
     if (
         intraday_realtime_mode
         and entry_decision_code == "BLOCK"
@@ -1414,53 +1439,100 @@ def main() -> int:
     carry_max_age = int(loop_state["carry_max_age"])
     replay_due_today_count = int(loop_state["replay_due_today_count"])
     carryover_market_gate_block = bool(loop_state["carryover_market_gate_block"])
-    loop_result = _process_entry_rows(
-        cdf,
-        max_new=int(max_new),
-        max_new_surge=int(max_new_surge),
-        capital_total=float(capital_total),
-        max_positions=int(max_positions),
-        schema=str(schema),
-        config=cfg,
-        prices_df=px,
-        fee_pct=float(fee_pct),
-        slip_pct=float(slip_pct),
-        gap_up_max_pct_runtime=float(gap_up_max_pct_runtime),
-        entry_gap_down_stop_pct_runtime=float(entry_gap_down_stop_pct_runtime),
-        stop_loss=float(stop_loss),
-        take_profit=take_profit,
-        trail_pct=trail_pct,
-        same_close_entry_mode=bool(same_close_entry_mode),
-        intraday_realtime_mode=bool(intraday_realtime_mode),
-        processed_signals=processed_signals,
-        committed_signal_keys=committed_signal_keys,
-        replay_enabled=bool(replay_enabled),
-        replay_global_ok=bool(replay_global_ok),
-        replay_min_age_days=int(replay_min_age_days),
-        replay_order_id_include_entry_day=bool(replay_order_id_include_entry_day),
-        ops_enabled=bool(ops_enabled),
-        ops_policy=ops_policy,
-        carryover_market_gate_block=bool(carryover_market_gate_block),
-        carryover_revalidate_summary=carryover_revalidate_summary,
-        market_regime=str(market_regime or ''),
-        risk_off_enabled=bool(risk_off_enabled),
-        block_same_sector_entry=bool(block_same_sector_entry),
-        entry_sector_col=str(entry_sector_col or ''),
-        blocked_sector_value=str(blocked_sector_value or ''),
-        sector_concentration=float(sector_concentration),
-        gross_cap_krw=gross_cap_krw,
-        daily_new_cap_krw=daily_new_cap_krw,
-        current_open_notional=float(current_open_notional),
-        position_size_multiplier=float(position_size_multiplier),
-        fundamentals_db=fundamentals_db,
-        sector_db=sector_db,
-        trend_overlay_ctx=trend_overlay_ctx,
-        existing_fill_order_ids=existing_fill_order_ids,
-        open_pos=open_pos,
-        open_codes=open_codes,
-        max_positions_override_allowed=bool(max_positions_override_allowed),
-        loop_state=loop_state,
-    )
+    # [2026-08-21] 진입 단계 실패를 청산 단계와 분리한다.
+    #
+    # main() 의 순서는 진입(여기) -> 보유 포지션 관리/청산 -> 잔량 처리 -> 산출물 기록이다.
+    # 그래서 진입에서 예외가 나면 **그 뒤의 청산까지 통째로 실행되지 않는다.**
+    # 2026-08-21 09:24 에 take_profit 값 하나 때문에 그렇게 됐다. 그날은 보유 포지션이
+    # 0 이라 피해가 "매수 못 함"에 그쳤지만, 포지션을 들고 있으면 손절도 같이 멈춘다.
+    #
+    # 종목 하나의 값 문제는 종목 단위 사건이고, 청산 중단은 계좌 단위 사건이다.
+    # 둘을 같은 채널로 묶지 않는다.
+    #
+    # fail-closed 는 유지된다:
+    #   - 예외는 삼키지 않고 기록한다(로그 + entry_phase_failure_latest.json)
+    #   - 진입 결과는 "아무것도 안 산 상태"로 되돌린다(부분 체결은 공유 리스트에 남아
+    #     청산 단계가 그대로 인계받는다 - 산 것을 못 본 척하지 않는다)
+    #   - main() 은 마지막에 **0이 아닌 코드로 끝난다.** 루프의 연속 실패 카운터가
+    #     이 실패를 세고, 계속되면 하드 블록으로 간다
+    # 상세: .agent/PLANS.md 2026-08-21 (9)
+    entry_phase_error = ""
+    try:
+        loop_result = _process_entry_rows(
+            cdf,
+            max_new=int(max_new),
+            max_new_surge=int(max_new_surge),
+            capital_total=float(capital_total),
+            max_positions=int(max_positions),
+            schema=str(schema),
+            config=cfg,
+            prices_df=px,
+            fee_pct=float(fee_pct),
+            slip_pct=float(slip_pct),
+            gap_up_max_pct_runtime=float(gap_up_max_pct_runtime),
+            entry_gap_down_stop_pct_runtime=float(entry_gap_down_stop_pct_runtime),
+            stop_loss=float(stop_loss),
+            take_profit=take_profit,
+            trail_pct=trail_pct,
+            same_close_entry_mode=bool(same_close_entry_mode),
+            intraday_realtime_mode=bool(intraday_realtime_mode),
+            processed_signals=processed_signals,
+            committed_signal_keys=committed_signal_keys,
+            replay_enabled=bool(replay_enabled),
+            replay_global_ok=bool(replay_global_ok),
+            replay_min_age_days=int(replay_min_age_days),
+            replay_order_id_include_entry_day=bool(replay_order_id_include_entry_day),
+            ops_enabled=bool(ops_enabled),
+            ops_policy=ops_policy,
+            carryover_market_gate_block=bool(carryover_market_gate_block),
+            carryover_revalidate_summary=carryover_revalidate_summary,
+            market_regime=str(market_regime or ''),
+            risk_off_enabled=bool(risk_off_enabled),
+            block_same_sector_entry=bool(block_same_sector_entry),
+            entry_sector_col=str(entry_sector_col or ''),
+            blocked_sector_value=str(blocked_sector_value or ''),
+            sector_concentration=float(sector_concentration),
+            gross_cap_krw=gross_cap_krw,
+            daily_new_cap_krw=daily_new_cap_krw,
+            current_open_notional=float(current_open_notional),
+            position_size_multiplier=float(position_size_multiplier),
+            fundamentals_db=fundamentals_db,
+            sector_db=sector_db,
+            trend_overlay_ctx=trend_overlay_ctx,
+            existing_fill_order_ids=existing_fill_order_ids,
+            open_pos=open_pos,
+            open_codes=open_codes,
+            max_positions_override_allowed=bool(max_positions_override_allowed),
+            loop_state=loop_state,
+        )
+    except Exception as exc:
+        entry_phase_error = f"{type(exc).__name__}: {exc}"
+        print(f"[ENTRY_PHASE_FAILED] {entry_phase_error} - 청산 단계는 계속 진행한다")
+        traceback.print_exc()
+        try:
+            (LOG_DIR / "entry_phase_failure_latest.json").write_text(
+                json.dumps(
+                    {
+                        "generated_at": now_ts(),
+                        "runtime_ymd": str(today_ymd),
+                        "error": entry_phase_error,
+                        "traceback_tail": traceback.format_exc().strip().splitlines()[-12:],
+                        "note": "entry phase raised; exit/settlement phases still ran; main() returns non-zero",
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+        loop_result = dict(loop_state)
+        loop_result["entry_decisions"] = entry_decisions if isinstance(entry_decisions, list) else []
+        loop_result["portfolio_state"] = state
+        loop_result["t2_cash_checks"] = []
+        loop_result["max_positions_blocked"] = False
+        loop_result["fail_closed_triggered"] = True
+        loop_result["fail_closed_reason"] = f"entry_phase_exception:{type(exc).__name__}"
     t2_cash_checks: List[Dict[str, Any]] = []
     entry_loop = _normalize_entry_loop_result(
         loop_result,
@@ -1795,6 +1867,12 @@ def main() -> int:
             max_positions_meta=max_positions_meta,
         ),
     )
+    if entry_phase_error:
+        # 청산·잔량·산출물 단계는 위에서 전부 끝났다. 그래도 이 실행은 실패다.
+        # 0 을 돌려주면 루프의 연속 실패 카운터가 이 실패를 못 세고,
+        # 진입이 계속 깨져도 아무도 멈추지 않는다.
+        print(f"[ENTRY_PHASE_FAILED] exit_code=3 error={entry_phase_error}")
+        return 3
     return 0
 
 

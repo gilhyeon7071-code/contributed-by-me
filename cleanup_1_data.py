@@ -3,7 +3,7 @@
 cleanup_1_data.py
 
 Purpose
-- Clean up E:\1_Data by moving non-essential artifacts to D:\1_Data_Archive\<timestamp>\
+- Clean up project root by moving non-essential artifacts to D:\1_Data_Archive\<timestamp>\
 
 Modes
 - DRY  (default): print plan only
@@ -15,7 +15,6 @@ Design goals
 """
 from __future__ import annotations
 
-import os
 import sys
 import json
 import shutil
@@ -24,7 +23,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import re
 
-BASE_DIR = Path(__file__).resolve().parent  # E:\1_Data
+BASE_DIR = Path(__file__).resolve().parent
 DEST_ROOT = Path(r"D:\1_Data_Archive")      # will be auto-created
 TS = datetime.now().strftime("%Y%m%d_%H%M%S")
 DEST_DIR = DEST_ROOT / TS

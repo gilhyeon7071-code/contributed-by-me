@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -53,7 +54,7 @@ def _resolve_logs_dir(
         parent = p.parent
         if parent.exists() and parent.is_dir():
             return str(parent)
-    fallback = Path(r"E:\1_Data\2_Logs")
+    fallback = Path(os.getenv("CHECKFILE_LOG_DIR", str(Path(__file__).resolve().parents[1] / "2_Logs")))
     if fallback.exists() and fallback.is_dir():
         return str(fallback)
     return None

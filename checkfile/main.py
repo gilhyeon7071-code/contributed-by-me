@@ -5,15 +5,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-DEFAULT_DASHBOARD_STATE = r"E:\vibe\buffett\runs\dashboard_state_latest.json"
-DEFAULT_PENDING_STATUS = r"E:\1_Data\2_Logs\pending_entry_status_latest.json"
-DEFAULT_DESIGN_EVIDENCE = r"E:\vibe\buffett\runs\design_evidence_latest.json"
-DEFAULT_RUNTIME_EVIDENCE = r"E:\1_Data\2_Logs\verification_runtime_evidence_latest.json"
+ROOT_A = Path(os.getenv("ROOTA", str(Path(__file__).resolve().parents[1])))
+ROOT_B = Path(os.getenv("ROOTB", str(Path(__file__).resolve().parents[2] / "vibe" / "buffett")))
+
+DEFAULT_DASHBOARD_STATE = str(ROOT_B / "runs" / "dashboard_state_latest.json")
+DEFAULT_PENDING_STATUS = str(ROOT_A / "2_Logs" / "pending_entry_status_latest.json")
+DEFAULT_DESIGN_EVIDENCE = str(ROOT_B / "runs" / "design_evidence_latest.json")
+DEFAULT_RUNTIME_EVIDENCE = str(ROOT_A / "2_Logs" / "verification_runtime_evidence_latest.json")
 
 try:
     from . import (

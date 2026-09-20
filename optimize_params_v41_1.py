@@ -203,10 +203,73 @@ DEFAULT_FROZEN = {
     "hold": 10,
 }
 
-# Trading fee fallback -- round-trip cost, matches the 2026-07-23 confirmed
-# cost model (fee_pct*2 + slippage_pct*2 + sell_tax_pct = 0.00004*2 + 0.001*2
-# + 0.0015); was 0.005 (no documented source, ~40% higher than confirmed).
-DEFAULT_FEE = 0.00358
+# Trading fee fallback -- round-trip cost.
+#
+# [2026-09-09] 0.00358 -> 0.00400. **측정이 정했다. 선택이 아니다.**
+#   0.00358 은 2026-07-23 설정(fee 0.00004 x2 + slip 0.001 x2 + tax 0.0015)의 역산이었다.
+#   2026-08-24 에 실계좌에 맞춰 fee 0.0 / tax 0.002 로 교정됐는데(PLANS (261)),
+#   이 상수만 남아 **시뮬레이션이 원장보다 왕복 0.042%p 싸게 계산**하고 있었다.
+#   브로커 실측(tr_id TTTC8715R, 실화폐 매도 3건):
+#     매도대금 88,730 / 수수료 0 / 제세금 175  -> 0.19723%
+#     건별 재현 0.002 -> 176 (브로커 175 와 일치) / 0.0015 -> 132 (43 차이)
+#   현행 라이브 설정 왕복 = 0.0 x2 + 0.001 x2 + 0.002 = **0.00400**
+#
+#   영향: 이 상수로 나온 과거 최적화 결과는 이제 더 비싼 세계에서 재평가된다.
+#         기존 stable_params 의 점수·PF 와 직접 비교할 수 없다. **보고할 사실이지
+#         고치지 말아야 할 이유가 아니다** - 틀린 비용으로 맞춘 기준선이 더 나쁘다.
+DEFAULT_FEE = 0.00400
+
+# 다시 벌어지지 않게 묶는다. 상수는 그대로 두되(시뮬 재현성) 라이브 설정과
+# 어긋나면 경고를 낸다. 08-24 변경이 조용히 16일간 유지된 것이 이 장치가 없어서였다.
+def _warn_if_fee_diverges_from_live() -> None:
+    try:
+        import json as _json
+        cfg_p = BASE_DIR / "paper" / "paper_engine_config.json"
+        if not cfg_p.exists():
+            return
+        c = _json.loads(cfg_p.read_text(encoding="utf-8-sig"))
+
+        # 설정 파일이 **말하는** 값
+        stated = (float(c.get("fee_pct", 0.0) or 0.0) * 2.0
+                  + float(c.get("slippage_pct", 0.0) or 0.0) * 2.0
+                  + float(c.get("sell_tax_pct", 0.0) or 0.0))
+
+        # [2026-09-10] 엔진이 **실제로 쓰는** 값. 이 줄이 없어서 C7 을 놓쳤다.
+        #   설정에 fee_pct: 0.0 이 정확히 들어 있는데 build_cost_profile 의
+        #   `or 0.005` 가 그걸 삼켜, 엔진은 왕복 1.400% 를 청구하고 있었다.
+        #   이 함수는 설정 파일만 읽어 0.400% 를 보고 "일치" 라고 판정했다.
+        #   **감시는 설정값이 아니라 실효값을 봐야 한다.**
+        effective = None
+        try:
+            import sys as _sys
+            if str(BASE_DIR) not in _sys.path:
+                _sys.path.insert(0, str(BASE_DIR))
+            from pricing_engine import build_cost_profile as _bcp
+            _cp = _bcp(c)
+            effective = (float(_cp.fee_pct) * 2.0
+                         + float(_cp.slippage_pct) * 2.0
+                         + float(_cp.sell_tax_pct))
+        except Exception as _pe:
+            print("[COST_DRIFT] 실효값 계산 실패(설정값만 비교함): %s: %s"
+                  % (type(_pe).__name__, _pe))
+
+        live = stated if effective is None else effective
+
+        # (1) 설정이 말하는 값과 엔진이 쓰는 값이 다르면 - 접근자가 값을 삼킨 것이다
+        if effective is not None and abs(effective - stated) > 1e-9:
+            print("[COST_DRIFT] **설정 왕복=%.5f 인데 엔진 실효=%.5f 다.** "
+                  "설정 파일이 아니라 접근자(pricing_engine.build_cost_profile)가 값을 바꾸고 있다 "
+                  "-> 설정을 고쳐도 안 먹는다" % (stated, effective))
+
+        # (2) 시뮬 상수와 라이브가 다르면 - 원래 목적
+        if abs(live - DEFAULT_FEE) > 1e-6:
+            print("[COST_DRIFT] DEFAULT_FEE=%.5f 인데 라이브 실효 왕복=%.5f 다. "
+                  "시뮬과 원장이 다른 비용을 본다 -> 둘을 맞춰라" % (DEFAULT_FEE, live))
+    except Exception as _e:
+        print("[COST_DRIFT] 확인 실패: %s: %s" % (type(_e).__name__, _e))
+
+
+_warn_if_fee_diverges_from_live()
 
 
 # --- IS/VAL/OOS split policy (for selection scoring) ---
@@ -553,7 +616,7 @@ def _bounded_krx_glob(base_dir: Path, pattern: str) -> List[Path]:
     """
     out: List[Path] = []
     seen: set[str] = set()
-    for d in (base_dir / "_krx_manual", base_dir / "krx_daily_archive", base_dir):
+    for d, _prio in _krx_source_dirs(base_dir):
         if not d.exists() or not d.is_dir():
             continue
         for p in d.glob(pattern):
@@ -565,11 +628,41 @@ def _bounded_krx_glob(base_dir: Path, pattern: str) -> List[Path]:
     return sorted(out)
 
 
+# [2026-08-29] R1 배선. generate_candidates_v41_1.py 와 동일한 결함이 여기에도
+#   그대로 복사돼 있었다: 탐색 경로에 Raw 가 없고, `_clean` 을 찾으면 거기서 반환해
+#   `_clean` 접미사가 없는 Raw 파일은 영원히 안 읽힌다.
+#   생산만 고치고 옵티마이저를 놔두면 HPO 는 계속 결손 패널로 돈다.
+#   Raw 는 최하위 우선순위 -> 겹치는 (code,date) 는 종전 값 유지, 빈 날짜만 채운다.
+def _krx_source_dirs(base_dir: Path) -> List[tuple]:
+    return [
+        (base_dir / "Raw", 0),
+        (base_dir, 1),
+        (base_dir / "krx_daily_archive", 2),
+        (base_dir / "_krx_manual", 3),
+    ]
+
+
+def _krx_src_priority(base_dir: Path, path: Path) -> int:
+    for d, prio in _krx_source_dirs(base_dir):
+        if path.parent == d:
+            return prio
+    return 0
+
+
 def find_parquets(base_dir: Path) -> List[Path]:
     clean = _bounded_krx_glob(base_dir, "krx_daily_*_clean.parquet")
-    if clean:
-        return clean
-    return _bounded_krx_glob(base_dir, "krx_daily_*.parquet")
+    if not clean:
+        return _bounded_krx_glob(base_dir, "krx_daily_*.parquet")
+    seen = {str(p.resolve()) for p in clean}
+    raw_dir = base_dir / "Raw"
+    for p in _bounded_krx_glob(base_dir, "krx_daily_*.parquet"):
+        if p.parent != raw_dir:
+            continue
+        key = str(p.resolve())
+        if key not in seen:
+            seen.add(key)
+            clean.append(p)
+    return sorted(clean)
 
 
 def load_data(base_dir: Path) -> pd.DataFrame:
@@ -580,7 +673,7 @@ def load_data(base_dir: Path) -> pd.DataFrame:
     dfs = []
     for p in files:
         df = pd.read_parquet(p)
-        df["_src_priority"] = 2 if p.parent == base_dir / "_krx_manual" else (1 if p.parent == base_dir / "krx_daily_archive" else 0)
+        df["_src_priority"] = _krx_src_priority(base_dir, p)
         try:
             df["_src_mtime"] = p.stat().st_mtime
         except OSError:
@@ -1454,7 +1547,17 @@ def eval_params(df: pd.DataFrame, windows: List[Tuple[pd.Timestamp, pd.Timestamp
             print(f"[EVAL {label}] window {idx}/{len(windows)} {s.date()}~{e.date()} n={n} active_days={active_days} pf={pf:.4f}")
 
         split = "IS" if e <= TRAIN_END else ("VAL" if e <= VAL_END else "OOS")
-        results.append(WindowResult(start=s.strftime("%Y-%m-%d"), end=e.strftime("%Y-%m-%d"), n_trades=n, pf=pf, mean_ret=mean_ret, split=split, year=int(e.year), daily_rets=[], avg_exposure_pct=0.0))
+        # [2026-08-29] R6 배선. _compute_daily_portfolio_returns() 는 2026-07 부터
+        #   존재했지만 호출된 적이 없고 여기서 [] / 0.0 을 하드코딩하고 있었다.
+        #   그 결과 windows[].daily_rets 가 비어 CAGR·MDD·지수대비 환산이 구조적으로 불가능했고,
+        #   A→B→C 검증(PLANS 131/132)이 "복리 상한" 이라는 대용치를 쓸 수밖에 없었다.
+        #   계산은 이미 있었다 - 결과에 담기지 않았을 뿐이다.
+        try:
+            _daily_rets, _avg_exposure = _compute_daily_portfolio_returns(trades, wdf, params)
+        except Exception as _exc:
+            print(f"[R6_WARN] daily-return 계산 실패 window {idx}: {type(_exc).__name__}: {_exc}")
+            _daily_rets, _avg_exposure = [], 0.0
+        results.append(WindowResult(start=s.strftime("%Y-%m-%d"), end=e.strftime("%Y-%m-%d"), n_trades=n, pf=pf, mean_ret=mean_ret, split=split, year=int(e.year), daily_rets=_daily_rets, avg_exposure_pct=_avg_exposure))
     # Avoid score-distribution collapse: no-trade only is hard fail (still a
     # legitimate data/logic problem, not a "selective trading" case).
     if total_n <= 0:
@@ -1872,6 +1975,13 @@ def main() -> int:
         "source": "stable",
         "best_score": float(new_score),
         "promoted": bool(promoted),
+        # [2026-08-20] certified / operational 분리. 승격은 두 가지를 동시에 뜻했으나
+        # 이제 분리한다. 기계가 인증(certified)을, 사람이 가동(operational)을 정한다.
+        # 승격 시점에는 둘 다 참이며, 이후 재현 불가 등이 드러나면 사람이
+        # certified=false / cert_reason 을 기록하되 operational 은 별도로 판단한다.
+        "certified": bool(promoted),
+        "operational": bool(promoted),
+        "cert_reason": "",
         "selection_metrics": new_selection,
         "windows": [r.__dict__ for r in new_windows],
         "meta": {

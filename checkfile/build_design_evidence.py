@@ -13,8 +13,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict, Tuple
+
+
+ROOT_A = Path(os.getenv("ROOTA", str(Path(__file__).resolve().parents[1])))
+ROOT_B = Path(os.getenv("ROOTB", str(Path(__file__).resolve().parents[2] / "vibe" / "buffett"))
+)
 
 
 SECTIONS = [
@@ -98,9 +104,9 @@ def build(args: argparse.Namespace) -> Dict[str, Any]:
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Build design evidence JSON")
     p.add_argument("--out", required=True)
-    p.add_argument("--template", default=r"E:\1_Data\checkfile\design_evidence_template.json")
-    p.add_argument("--dashboard-state", default=r"E:\vibe\buffett\runs\dashboard_state_latest.json")
-    p.add_argument("--external", default=r"E:\vibe\buffett\runs\design_evidence_latest.json")
+    p.add_argument("--template", default=str(ROOT_A / "checkfile" / "design_evidence_template.json"))
+    p.add_argument("--dashboard-state", default=str(ROOT_B / "runs" / "dashboard_state_latest.json"))
+    p.add_argument("--external", default=str(ROOT_B / "runs" / "design_evidence_latest.json"))
     return p.parse_args()
 
 

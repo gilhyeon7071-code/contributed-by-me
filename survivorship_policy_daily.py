@@ -28,6 +28,7 @@ STATE_PATH = PAPER_DIR / "paper_state.json"
 FILLS_PATH = PAPER_DIR / "fills.csv"
 TRADES_PATH = PAPER_DIR / "trades.csv"
 CANDS_PATH = LOG_DIR / "candidates_latest_data.csv"
+KRX_CLOSE_HHMM = 1530
 
 
 def _now() -> datetime:
@@ -42,6 +43,11 @@ def _tag(ts: Optional[datetime] = None) -> str:
 def _ymd(ts: Optional[datetime] = None) -> str:
     ts = ts or _now()
     return ts.strftime("%Y%m%d")
+
+
+def _hhmm(ts: Optional[datetime] = None) -> int:
+    ts = ts or _now()
+    return ts.hour * 100 + ts.minute
 
 
 def _safe_read_json(path: Path, default: Any) -> Any:
@@ -327,6 +333,10 @@ def main() -> int:
                 continue
             # If the code series ends before entry day -> cannot enter
             if info.get("last_date") and str(info["last_date"]) < entry_day:
+                # Intraday guard:
+                # on entry_day during market hours, daily parquet may not have today's row yet.
+                if str(entry_day) == _ymd(ts) and _hhmm(ts) < KRX_CLOSE_HHMM:
+                    continue
                 drop_mask[i] = True
                 untradeable_candidates.append(
                     {
@@ -371,6 +381,15 @@ def main() -> int:
         entry_date = _norm_date_str(pos.get("entry_date")) or ""
         entry_price = float(pos.get("entry_price") or 0.0)
         order_id = str(pos.get("order_id") or "")
+        signal_date = _norm_date_str(pos.get("signal_date")) or entry_date
+        entry_order_id = str(pos.get("entry_order_id") or order_id or "")
+        entry_intent_id = str(pos.get("entry_intent_id") or "")
+        entry_trace_id = str(pos.get("entry_trace_id") or "")
+        source_order_id = str(pos.get("source_order_id") or entry_order_id or order_id or "")
+        source_intent_id = str(pos.get("source_intent_id") or "")
+        source_trace_id = str(pos.get("source_trace_id") or "")
+        replay_chain_id = str(pos.get("replay_chain_id") or "")
+        replay_depth = str(pos.get("replay_depth") or 0)
 
         info = last_info.get(code)
         if not info:
@@ -403,6 +422,22 @@ def main() -> int:
             # Append SELL fill + trade
             dt_str = f"{exit_date}T15:20:00"
             sell_order_id = f"PAPER_SELL_{code}_{exit_date}_{exit_reason}"
+            note_parts = [
+                "forced_exit=1",
+                f"reason={exit_reason}",
+                f"signal_date={signal_date}",
+                f"orig_order_id={order_id}",
+                f"entry_order_id={entry_order_id}",
+                f"entry_intent_id={entry_intent_id}",
+                f"entry_trace_id={entry_trace_id}",
+                f"lineage_origin=FORCED_EXIT_FROM_POSITION",
+                f"source_order_id={source_order_id}",
+                f"source_intent_id={source_intent_id}",
+                f"source_trace_id={source_trace_id}",
+                f"replay_chain_id={replay_chain_id}",
+                f"replay_depth={replay_depth}",
+            ]
+            forced_note = ";".join(note_parts)
             _append_fill_row(
                 FILLS_PATH,
                 {
@@ -412,7 +447,7 @@ def main() -> int:
                     "qty": qty,
                     "price": exit_price,
                     "order_id": sell_order_id,
-                    "note": f"forced_exit=1;reason={exit_reason};orig_order_id={order_id}",
+                    "note": forced_note,
                 },
             )
             pnl = round((exit_price - entry_price) * qty, 6)
@@ -426,7 +461,7 @@ def main() -> int:
                     "exit_price": exit_price,
                     "qty": qty,
                     "pnl_krw": pnl,
-                    "note": f"forced_exit=1;reason={exit_reason};orig_order_id={order_id}",
+                    "note": forced_note,
                     "exit_reason": exit_reason,
                 },
             )

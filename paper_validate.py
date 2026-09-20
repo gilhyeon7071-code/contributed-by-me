@@ -14,20 +14,23 @@ TRADES_HEADER = [
     "trade_id", "code",
     "entry_date", "entry_price",
     "exit_date", "exit_price",
-    "pnl_pct", "exit_reason", "note",
+    "pnl_pct", "pnl_krw", "exit_reason", "note",
 ]
+TRADES_HEADER_WITH_SURGE = TRADES_HEADER + ["is_surge"]
+TRADES_HEADER_WITH_SURGE_PARTIAL = TRADES_HEADER_WITH_SURGE + ["_partial_exit"]
 
 def _normalize_cols(cols):
     # pandas가 BOM(ufeff)을 첫 컬럼명에 남기는 경우 대비
     return [str(c).lstrip("\ufeff").strip() for c in cols]
 
-def validate_one(path: Path, header: list[str]) -> tuple[bool, str]:
+def validate_one(path: Path, header: list[str], alt_headers: list[list[str]] | None = None) -> tuple[bool, str]:
     if not path.exists():
         return False, "missing"
     df = pd.read_csv(path, dtype=str)
     df.columns = _normalize_cols(df.columns)
     cols = df.columns.tolist()
-    if cols != header:
+    allowed = [header] + (alt_headers or [])
+    if cols not in allowed:
         return False, f"header mismatch: {cols}"
     return True, "ok"
 
@@ -51,9 +54,10 @@ def main():
     args = ap.parse_args()
 
     ok_f, msg_f = validate_one(FILLS, FILLS_HEADER)
-    ok_t, msg_t = validate_one(TRADES, TRADES_HEADER)
+    ok_t, msg_t = validate_one(TRADES, TRADES_HEADER, alt_headers=[TRADES_HEADER_WITH_SURGE, TRADES_HEADER_WITH_SURGE_PARTIAL])
     print(f"[CHECK] fills: {ok_f} ({msg_f}) -> {FILLS}")
     print(f"[CHECK] trades: {ok_t} ({msg_t}) -> {TRADES}")
+    has_error = (not ok_f) or (not ok_t)
 
     if args.fix:
         if not ok_f and FILLS.exists():
@@ -62,7 +66,10 @@ def main():
         if not ok_t and TRADES.exists():
             out = fix_one(TRADES, TRADES_HEADER)
             print(f"[FIX] wrote: {out}")
-    return 0
+        ok_f2, _ = validate_one(FILLS, FILLS_HEADER)
+        ok_t2, _ = validate_one(TRADES, TRADES_HEADER, alt_headers=[TRADES_HEADER_WITH_SURGE, TRADES_HEADER_WITH_SURGE_PARTIAL])
+        has_error = (not ok_f2) or (not ok_t2)
+    return 2 if has_error else 0
 
 if __name__ == "__main__":
     raise SystemExit(main())

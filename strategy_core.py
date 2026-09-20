@@ -1,9 +1,31 @@
 """Shared candidate-selection core for v41.1.
 
-This module is the single source of truth for the per-day candidate filter
-used by both the optimizer (optimize_params_v41_1.py) and production
-(generate_candidates_v41_1.py). Any change here affects both paths, which is
-intentional: the optimizer must simulate exactly what production will do.
+의도: 옵티마이저(optimize_params_v41_1.py)와 생산(generate_candidates_v41_1.py)이
+같은 후보 필터를 쓰게 하는 것.
+
+[2026-08-21 실측 정정] **현재 그 의도는 지켜지지 않는다.**
+이 파일은 옵티마이저/백테스트만 쓴다. 생산 `generate_candidates_v41_1.py` 는
+이 모듈을 import 하지 않고 자체 필터를 갖고 있으며, 아래 게이트들이 서로 다르다.
+
+이 모듈에만 있고 생산에는 없는 게이트 (stable_params_v41_1.json 기준):
+    v_accel_max=5.0 / defense_bear_disable_entry=1.0 / defense_bear_rs_slope_min=-0.015
+    sector_blacklist="005,024" / min_market_cap=1e11 / require_above_ma200=1.0
+생산은 2026-08-15 에 v_accel_max 와 bear 게이트를 뺐고(그 경위는
+generate_candidates_v41_1.py 의 rule_e 주석 참조) 이쪽은 그대로 남았다.
+
+그 결과 현재 파라미터로 이 필터는 **논리적 공집합**이다:
+    (v_accel > v_accel_lim 6.6) AND (v_accel <= v_accel_max 5.0)
+실측(2026-08-21): 생산 후보 21종목을 이 필터에 넣으면 0종목 통과.
+6개 게이트를 다 풀어도 0종목.
+
+진입 시점과 갭 필터도 다르다:
+    옵티마이저 same_close(신호일 종가, 갭 필터 미적용)
+    백테스트   next_open(기본값)
+    생산 실제  intraday_realtime 54% / same_close 8%, 갭 필터 적용
+
+**따라서 이 모듈을 고쳐도 생산 동작은 바뀌지 않는다.** 양쪽을 실제로 일치시키려면
+생산이 이 모듈을 쓰도록 배선하는 별도 작업이 필요하다.
+상세: .agent/PLANS.md 2026-08-21 (17)(19)
 """
 
 from __future__ import annotations

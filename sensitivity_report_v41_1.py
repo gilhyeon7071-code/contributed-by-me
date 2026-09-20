@@ -1,22 +1,21 @@
-# -*- coding: utf-8 -*-
-"""
-v41.1 파라미터 민감도(±20%) 리포트
+﻿# -*- coding: utf-8 -*-
+r"""
+v41.1 parameter sensitivity report (+/-20%).
 
-- 목적: stable_params_v41_1.json 기준으로 핵심 파라미터를 ±20% 흔들었을 때
-        IS/VAL/OOS 성과(특히 OOS)가 얼마나 붕괴/유지되는지 자동 리포트 생성
+- Purpose: starting from stable_params_v41_1.json, vary key parameters by +/-20%
+  and report whether IS/VAL/OOS performance, especially OOS, remains robust.
 
-입력:
+Inputs:
 - <BASE_DIR>\optimize_params_v41_1.py
 - <BASE_DIR>\12_Risk_Controlled\stable_params_v41_1.json
-- <BASE_DIR>\12_Risk_Controlled\split_policy_v41_1.json   (존재 시)
-출력:
+- <BASE_DIR>\12_Risk_Controlled\split_policy_v41_1.json   (optional)
+Outputs:
 - <BASE_DIR>\12_Risk_Controlled\sensitivity_report_v41_1.csv
 - <BASE_DIR>\12_Risk_Controlled\sensitivity_report_v41_1.json
-"""
+r"""
 from __future__ import annotations
 
 import json
-import math
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -26,7 +25,7 @@ import pandas as pd
 
 FACTORS = [0.8, 0.9, 1.0, 1.1, 1.2]
 
-# 민감도 대상(최소 범위): "필터/진입/리스크" 핵심만
+# Minimum set of sensitivity parameters.
 PARAM_KEYS = [
     "rs_lim",
     "v_accel_lim",
@@ -39,12 +38,12 @@ PARAM_KEYS = [
     "max_positions",
 ]
 
-# int로 처리해야 하는 키
+# Parameters that must remain integers.
 INT_KEYS = {"hold_days", "max_positions"}
 
 
 def _jload(p: Path) -> dict:
-    return json.loads(p.read_text(encoding="utf-8"))
+    return json.loads(p.read_text(encoding="utf-8-sig"))
 
 
 def _jsave(p: Path, obj: Any) -> None:
@@ -117,14 +116,14 @@ def _pct_change(base: float, cur: float) -> float:
 
 
 def _try_build_price_cache(opt_mod: Any, df: pd.DataFrame) -> None:
-    # v6 계열에서 price_cache가 필요할 수 있어, 있으면 만든 뒤 모듈 전역에 심어줌
+    # Some optimizer versions require a price_cache before eval; build and inject it if possible.
     candidates = ["build_price_cache", "make_price_cache", "build_cache", "make_cache"]
     for fn_name in candidates:
         fn = getattr(opt_mod, fn_name, None)
         if callable(fn):
             try:
                 pc = fn(df)
-                # 전역 변수 이름 추정
+                # Try common global cache variable names.
                 for var in ["PRICE_CACHE", "price_cache", "_PRICE_CACHE", "PRICE_CACHE_BY_CODE"]:
                     try:
                         setattr(opt_mod, var, pc)
@@ -132,19 +131,19 @@ def _try_build_price_cache(opt_mod: Any, df: pd.DataFrame) -> None:
                         pass
                 return
             except Exception:
-                # cache 빌드가 실패해도 eval이 내부에서 처리할 수 있으니 패스
+                # If cache building fails, let eval handle its own fallback path.
                 return
 
 
 def _call_eval(opt_mod: Any, df: pd.DataFrame, windows: List[Any], params: dict) -> Tuple[float, List[Any]]:
-    # eval_params 시그니처가 바뀌어도 최대한 맞춰 호출
+    # Call eval_params with the best matching known signature.
     ev = getattr(opt_mod, "eval_params", None)
     if not callable(ev):
-        raise RuntimeError("optimize_params_v41_1.py 에 eval_params() 가 없습니다.")
+        raise RuntimeError("optimize_params_v41_1.py does not provide eval_params().")
     try:
         return ev(df, windows, params)
     except TypeError:
-        # 혹시 (df, params, windows) 형태면 재시도
+        # Retry the alternate (df, params, windows) signature.
         return ev(df, params, windows)
 
 
@@ -166,7 +165,7 @@ def main() -> int:
         opt = importlib.import_module("optimize_params_v41_1")
     except Exception as e:
         print("[FATAL] cannot import optimize_params_v41_1.py:", repr(e))
-        print("        - BASE_DIR에 optimize_params_v41_1.py 가 있어야 합니다.")
+        print("        - Check that optimize_params_v41_1.py exists under BASE_DIR.")
         return 3
 
     stable = _jload(stable_path)
@@ -245,7 +244,7 @@ def main() -> int:
             d_score = _pct_change(float(base_score), float(score))
             d_oos = _pct_change(base_oos_pf, oos_pf)
 
-            # 붕괴 플래그: OOS -20% 이하 또는 score -20% 이하
+            # 遺뺢눼 ?뚮옒洹? OOS -20% ?댄븯 ?먮뒗 score -20% ?댄븯
             flag = ""
             if oos_n < 5:
                 flag = "INSUFFICIENT_DATA"
@@ -275,7 +274,7 @@ def main() -> int:
 
     rdf = pd.DataFrame(rows)
 
-    # 정렬: baseline -> param -> factor
+    # ?뺣젹: baseline -> param -> factor
     rdf["__order"] = rdf.apply(lambda r: (0 if r["param"] == "__BASELINE__" else 1, str(r["param"]), float(r["factor"]) if r["factor"] != "" else 1.0), axis=1)
     rdf = rdf.sort_values("__order").drop(columns=["__order"])
 
@@ -312,3 +311,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

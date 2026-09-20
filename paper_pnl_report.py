@@ -870,6 +870,48 @@ def _attach_ssot_chain_meta(payload: dict, ssot_chain: dict, df: pd.DataFrame, a
     payload.setdefault("meta", {})["ssot_chain"] = ssot
 
 
+
+def _as_of_freshness(as_of_ymd: str) -> dict:
+    """`as_of` 가 **달력 기준으로** 얼마나 뒤처졌는지 잰다.
+
+    [2026-09-10] 신설. 이 요약은 매일 새로 생성돼 `generated_at` 이 늘 오늘이다.
+    그런데 내용은 `trades_calc.csv` 의 마지막 청산일에 묶여 있다.
+    2026-09-10 07:36 에 만들어진 요약의 `as_of` 가 **20260825** 였다 -
+    v41.1 이 `PAPER_EXIT_ONLY=1` 로 청산 전용이라 새 거래가 없어서다.
+
+    파일 mtime 도 generated_at 도 신선하니 소비자는 살아 있는 것으로 읽는다.
+    실제로 `tools/build_capital_sizing_scenario_report.py` 가 신선도로 `generated_at` 을 쓴다.
+
+    **기준선을 자기 자료가 아니라 달력에서 잡는다.** 자기 자료에서 뽑으면 언제나 통과한다.
+    """
+    out = {"as_of": as_of_ymd or None, "reference": None,
+           "stale_trading_days": None, "stale": None, "note": ""}
+    try:
+        import datetime as _dt
+        from holiday_manager import HolidayManager
+        hm = HolidayManager()
+        ref = hm.previous_trading_day(_dt.date.today().strftime("%Y%m%d"))
+        out["reference"] = ref
+        out["reference_semantics"] = "직전 거래일 (holidays.json 정본)"
+        if not as_of_ymd:
+            out["stale"] = True
+            out["note"] = "as_of 가 비어 있어요"
+            return out
+        n, cur = 0, ref
+        while cur > str(as_of_ymd) and n < 400:
+            cur = hm.previous_trading_day(cur)
+            n += 1
+        out["stale_trading_days"] = n
+        out["stale"] = bool(n > 1)
+        if out["stale"]:
+            out["note"] = ("내용이 %s 에 묶여 있어요 - 직전 거래일 %s 기준 %d거래일 뒤처졌어요. "
+                           "generated_at 이 오늘이어도 **새 자료가 아니에요**" % (as_of_ymd, ref, n))
+    except Exception as exc:
+        out["stale"] = None
+        out["note"] = "판정 실패 (%s: %s)" % (type(exc).__name__, exc)
+    return out
+
+
 def _cost_profile_meta(cfg_path: Path, trades_path: Path) -> dict:
     cfg = try_read_json(cfg_path)
     if not isinstance(cfg, dict):
@@ -1090,10 +1132,15 @@ def main() -> int:
     eqm = _equity_metrics(df, ret_col, _to_float((cfg or {}).get("capital_total") if isinstance(cfg, dict) else None))
     as_of_ymd = str(eqm.get("last_exit_date") or "")
 
+    freshness = _as_of_freshness(as_of_ymd)
+    if freshness.get("stale"):
+        print("[STALE] paper_pnl_summary: %s" % freshness.get("note"))
     payload = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "run_id": run_id,
         "as_of": as_of_ymd,
+        # [2026-09-10] generated_at 은 늘 오늘이다. 신선도는 **이 칸**을 봐야 한다.
+        "as_of_freshness": freshness,
         "source": str(trades_path),
         "rows_total": rows_total,
         "rows_as_of": rows_as_of,
