@@ -210,3 +210,6 @@ dashboard_boot_sync_disabled.flag
 _runtime/
 _pytest_tmp/
 _pytest_*/
+
+# 로그
+Stock-AI-Wiki/00_Inbox/logs/

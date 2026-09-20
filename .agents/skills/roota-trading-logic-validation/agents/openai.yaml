@@ -1,0 +1,7 @@
+interface:
+  display_name: "RootA 매매 로직 검증"
+  short_description: "정책·코드·E2E·대시보드 증거를 단계별 검증"
+  default_prompt: "Use $roota-trading-logic-validation to audit the current RootA trading logic read-only and report evidence-backed PASS, FAIL, or NA."
+
+policy:
+  allow_implicit_invocation: true
