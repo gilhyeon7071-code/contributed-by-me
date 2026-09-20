@@ -1,0 +1,243 @@
+version: 0.1
+policy_id: roota_sensitivity_matrix
+scope: E:\1_Data
+ssot_chain: orders(D) -> fills(D) -> ledger -> stats
+
+evaluation_windows:
+  immediate_sec: 0
+  short_sec: 5
+  long_sec: 300
+
+trigger_rule:
+  require_relative_threshold: true
+  require_absolute_threshold: true
+  require_consecutive_windows_min: 2
+  exception_allow_single_window_for_critical: true
+
+metrics:
+  - metric_id: fill_mismatch_rate
+    source:
+      file_glob: E:\1_Data\2_Logs\fills_match_report_*.json
+      selection: latest_by_mtime
+      fallback_file: E:\1_Data\2_Logs\fills_match_report_20260527.json
+      json_path: rates.fill_row_match_rate
+      transform: "1.0 - value"
+    baseline:
+      mode: rolling_median
+      windows: 20
+    unit: ratio
+    thresholds:
+      monitor:
+        relative_change_ge: 0.05
+        window: immediate_sec
+        consecutive_windows: 1
+      soft_precheck:
+        relative_change_ge: 0.10
+        window: short_sec
+        consecutive_windows: 1
+      soft:
+        relative_multiple_ge: 2.0
+        absolute_ge: 0.003
+        window: long_sec
+        consecutive_windows: 2
+      hard:
+        relative_multiple_ge: 4.0
+        absolute_ge: 0.01
+        window: long_sec
+        sustain_sec: 120
+        consecutive_windows: 2
+    action_map:
+      soft: soft_pause
+      hard: rollback
+
+  - metric_id: match_prob
+    source:
+      file: E:\1_Data\2_Logs\drift_monitor_latest.json
+      json_path: checks.slippage_by_venue.rows[0].match_rate
+      transform: "value"
+    baseline:
+      mode: rolling_median
+      windows: 20
+    unit: ratio
+    thresholds:
+      monitor:
+        absolute_drop_pp_ge: 5
+        window: immediate_sec
+        consecutive_windows: 1
+      soft:
+        absolute_drop_pp_ge: 10
+        window: short_sec
+        consecutive_windows: 2
+      hard:
+        absolute_drop_pp_ge: 15
+        window: immediate_sec
+        consecutive_windows: 1
+    action_map:
+      soft: soft_pause
+      hard: emergency_stop_signed
+
+  - metric_id: execution_latency_p99_proxy
+    source:
+      file: E:\1_Data\2_Logs\resilience_check_latest.json
+      json_path: checks.sla_auto_degrade.metric.p95
+      transform: "value"
+    proxy_for: execution_latency_p99
+    baseline:
+      mode: rolling_median
+      windows: 20
+    unit: ms
+    thresholds:
+      monitor:
+        relative_change_ge: 0.10
+        window: immediate_sec
+        consecutive_windows: 1
+      soft:
+        relative_change_ge: 0.25
+        window: short_sec
+        consecutive_windows: 2
+      hard:
+        relative_change_ge: 0.50
+        window: long_sec
+        consecutive_windows: 2
+      critical:
+        relative_change_ge: 1.00
+        window: immediate_sec
+        consecutive_windows: 1
+    action_map:
+      soft: rate_limit_new_orders
+      hard: rate_limit_new_orders
+      critical: rollback
+
+  - metric_id: mean_slippage_bps
+    source:
+      file: E:\1_Data\2_Logs\execution_health_observed_latest.json
+      json_path: execution_health.metric.slippage_bps_mean
+      transform: "value"
+    unit: bps
+    thresholds:
+      monitor:
+        absolute_increase_bps_ge: 5
+        window: short_sec
+        consecutive_windows: 2
+      soft:
+        absolute_increase_bps_ge: 10
+        window: short_sec
+        consecutive_windows: 2
+      hard:
+        absolute_increase_bps_ge: 25
+        window: long_sec
+        consecutive_windows: 1
+      critical:
+        absolute_increase_bps_ge: 40
+        window: long_sec
+        consecutive_windows: 1
+    action_map:
+      soft: price_band_tighten
+      hard: price_band_tighten
+      critical: rollback
+
+  - metric_id: ess
+    source:
+      file: E:\1_Data\2_Logs\backtest_validation_latest.json
+      json_path: artifacts.signal_quality.ess
+      transform: "value"
+    baseline:
+      mode: rolling_median
+      windows: 20
+    unit: count
+    thresholds:
+      monitor:
+        relative_drop_ge: 0.05
+        window: short_sec
+        consecutive_windows: 2
+      soft:
+        relative_drop_ge: 0.10
+        window: short_sec
+        consecutive_windows: 2
+      hard:
+        relative_drop_ge: 0.25
+        window: long_sec
+        consecutive_windows: 1
+      critical:
+        relative_drop_ge: 0.50
+        window: long_sec
+        consecutive_windows: 1
+    action_map:
+      soft: soft_pause
+      hard: degrade_to_paper
+      critical: degrade_to_paper
+
+  - metric_id: order_reject_rate
+    source:
+      file: E:\1_Data\2_Logs\production_risk_playbook_latest.json
+      json_path: signals[3].value
+      transform: "value"
+    unit: ratio
+    thresholds:
+      monitor:
+        absolute_increase_ge: 0.002
+        window: immediate_sec
+        consecutive_windows: 1
+      soft:
+        absolute_increase_ge: 0.005
+        window: short_sec
+        consecutive_windows: 2
+      hard:
+        absolute_increase_ge: 0.01
+        window: long_sec
+        consecutive_windows: 1
+      critical:
+        absolute_increase_ge: 0.02
+        window: long_sec
+        consecutive_windows: 1
+    action_map:
+      soft: rate_limit_new_orders
+      hard: broker_failover
+      critical: broker_failover
+
+  - metric_id: feed_gap_ms_p99_proxy
+    source:
+      file: E:\1_Data\2_Logs\orderflow_observer_state_latest.json
+      json_path: input_age_sec
+      transform: "value * 1000.0"
+    proxy_for: feed_gap_ms_p99
+    unit: ms
+    thresholds:
+      monitor:
+        absolute_increase_ms_ge: 20
+        window: immediate_sec
+        consecutive_windows: 1
+      soft:
+        absolute_increase_ms_ge: 50
+        window: short_sec
+        consecutive_windows: 2
+      hard:
+        absolute_increase_ms_ge: 100
+        window: long_sec
+        consecutive_windows: 1
+      critical:
+        absolute_increase_ms_ge: 200
+        window: long_sec
+        consecutive_windows: 1
+    action_map:
+      soft: data_failover
+      hard: data_failover
+      critical: emergency_stop_signed
+
+actions:
+  soft_pause:
+    description: "새 진입 50% 차단(기존 오더 유지)"
+  rollback:
+    description: "직전 안정 파라미터 스냅샷으로 즉시 복귀"
+  emergency_stop_signed:
+    description: "전면 중지 + 증거 번들 해시/서명 저장"
+  rate_limit_new_orders:
+    description: "초당 신규 진입 상한 축소"
+  price_band_tighten:
+    description: "슬리피지 한계와 체결 밴드 축소"
+  degrade_to_paper:
+    description: "라이브에서 섀도우/페이퍼로 강등"
+  broker_failover:
+    description: "예비 브로커 라우팅으로 전환"
+  data_failover:
+    description: "예비 피드로 전환"

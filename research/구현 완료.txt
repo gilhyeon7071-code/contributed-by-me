@@ -1,0 +1,177 @@
+ 구현 완료
+
+  ① orderflow_tag 차단 (line 7872–7880)
+
+  LOB row에서 orderflow_tag를 읽어 CAUTION/PAUSE/NO_LOB 중 하나면 즉시
+  NORMAL_ORDERFLOW_TAG_BLOCK:{tag}로 차단. 기본값은 config에서 orderflow_tag_block_tags 리스트로 조정
+  가능.
+
+  ② qty 점진 축소 함수 (line 7926–7994, 호출 line 17831–17847)
+
+  _normal_exec_quality_qty_reduction() 신규 함수:
+  - spread ≥ 20bps → qty×0.75, ≥ 25bps → qty×0.5
+  - markout ≤ 5bps → qty×0.75
+  - orderflow_tag == CAUTION → qty×0.75 (위 BLOCK 태그와 별도, CAUTION은 감소만)
+  - 2개 이상 조건 중첩 시 two_or_more_multiplier 추가 압축
+  - 기본값 enabled: False — 운영에서 바로 켜지지 않음. config에서
+  normal_entry_execution_quality.qty_reduction.enabled: true로 활성화
+
+  ③ 후보 파일 staleness 체크 (line 12989–13010)
+
+  fallback 날짜가 사용된 경우에만 동작:
+  - days_old > max_stale_days(3) 이면 [CAND_STALENESS_STALE] 경고 출력
+  - block_if_stale: false (기본) → 경고만, 진입 허용
+  - block_if_stale: true 설정 시 후보 전체 차단
+
+  qty 축소는 의도치 않은 운영 영향을 막기 위해 기본 비활성이고, tag 차단과 staleness는 즉시
+  활성입니다.
+
+  ─────────────────────────────────────────────────
+  📊 bkit Feature Usage
+  ─────────────────────────────────────────────────
+  ✅ Used: Read, Grep, Edit, Bash (구문 검증)
+  ⏭️ Not Used: /pdca, TaskCreate, gap-detector (단일 파일 직접 구현 작업)
+  💡 Recommended: 실 운영 후 qty_reduction.enabled: true 활성화 여부 → /pdca analyze lotto로 갭 분석
+  ─────────────────────────────────────────────────
+
+✻ Crunched for 6m 18s
+
+> 이로직 수정이 급등과 동일한 비교를 하고 수정한것이라면 급등,일반에 동일한 적용과,분리
+  적용되야하는것들을 체크하고 한것인지 궁금해
+
+● 좋은 질문입니다. 제가 급등 코드를 "참고"해서 유사하게 만든 것인지, 아니면 실제 급등 코드 경로와
+  정확히 비교해서 공유/분리 여부를 검토한 것인지 솔직히 확인해봐야 합니다.
+
+  급등의 실제 orderflow_tag 처리, qty 축소, staleness 코드를 지금 직접 대조하겠습니다.
+
+  Searched for 1 pattern, read 1 file (ctrl+o to expand)
+
+● 핵심 문제를 발견했습니다. 더 확인합니다.
+
+  Searched for 1 pattern, read 1 file (ctrl+o to expand)
+
+● 결론이 나왔습니다. 구조적 오류를 발견했습니다.
+
+  ---
+  비교 결과: 정확히 따른 것, 틀린 것
+
+  ❌ 버그: CAUTION 처리 로직 충돌
+
+  급등의 _surge_execution_quality_qty_decision 실제 코드(line 8660):
+  if tag == "NO_HISTORY":   # ← 급등에서 감소 트리거는 NO_HISTORY
+      _add("no_history", ...)
+  if slip_source == "LOB_SWEEP_L10":
+      _add(...)
+  if slip_source == "NO_LOB_FALLBACK":
+      _add(...)
+  # CAUTION은 entry qty reduction에 없음
+
+  급등에서 CAUTION은 진입 차단/감소가 아니라 장중 EXIT 신호(line 6537)에서만 사용합니다. 제가 구현한
+  것:
+  - Change ①: CAUTION → orderflow_tag_block_tags에 포함 → 진입 완전 차단
+  - Change ②: CAUTION → orderflow_caution_multiplier로 감소 → 도달 불가 (dead code)
+
+  CAUTION이 ①에서 차단되므로 ②의 CAUTION 감소는 절대 실행 안 됩니다.
+
+  ✅ 올바르게 분리된 것
+
+  ┌────────────────┬──────────────────────────┬──────────────────────────────────┬────────────────┐
+  │      항목      │           급등           │               일반               │   설계 이유    │
+  ├────────────────┼──────────────────────────┼──────────────────────────────────┼────────────────┤
+  │ orderflow_tag  │ 후보 row의               │ surge_lob_latest.csv via         │ 일반은 이미    │
+  │ 출처           │ surge_orderflow_tag      │ _latest_lob_row_for_code()       │ LOB 파일 사용  │
+  │                │ (alert JSON)             │                                  │ 중 — 일관성 O  │
+  ├────────────────┼──────────────────────────┼──────────────────────────────────┼────────────────┤
+  │ qty 감소       │ row의 surge_spread_bps,  │ LOB meta의 normal_spread_bps,    │ 각 경로의      │
+  │ 기준값         │ surge_rvol20, score      │ normal_markout_1step_bps         │ 데이터 소스에  │
+  │                │                          │                                  │ 맞게 분리 — O  │
+  ├────────────────┼──────────────────────────┼──────────────────────────────────┼────────────────┤
+  │ Staleness 단위 │ 분(minute) — 실시간 JSON │ 일(day) — 종가 후보 CSV          │ 신호 성격이    │
+  │                │                          │                                  │ 다름 — O       │
+  ├────────────────┼──────────────────────────┼──────────────────────────────────┼────────────────┤
+  │                │                          │                                  │ 일반은 장중    │
+  │ rvol20 감소    │ O (surge_rvol20 밴드)    │ 없음                             │ 아니므로 적용  │
+  │                │                          │                                  │ 불필요 — O     │
+  └────────────────┴──────────────────────────┴──────────────────────────────────┴────────────────┘
+
+  ❌ 추가로 확인된 문제: NO_LOB 중복 방어
+
+  orderflow_tag_block_tags에 "NO_LOB" 포함했는데, 이미 위에서 lob_available / lob_status 체크(line
+  7847)가 NO_LOB를 막습니다. 중복이지만 해가 되지는 않습니다.
+
+  ---
+  지금 바로 수정: CAUTION을 block → reduce로 이동
+
+● Update(E:\1_Data\paper_engine.py)
+  ⎿  Added 2 lines, removed 1 line
+      1726          "max_depth_levels": 10,
+      1727          "min_markout_1step_bps": 0.0,
+      1728          "block_on_missing_markout": True,
+      1729 -        "orderflow_tag_block_tags": ["CAUTION", "PAUSE", "NO_LOB"],
+      1729 +        "orderflow_tag_block_tags": ["PAUSE", "NO_LOB"],
+      1730          "qty_reduction": {
+      1731              "enabled": False,
+      1732              "spread_bands": [
+     ...
+      1737                  {"max_bps": 5.0, "multiplier": 0.75},
+      1738              ],
+      1739              "orderflow_caution_multiplier": 0.75,
+      1740 +            "orderflow_caution_reduce_tags": ["CAUTION"],
+      1741              "multi_condition": {
+      1742                  "two_or_more_multiplier": 0.5,
+      1743              },
+
+● 이제 qty_reduction 함수에서 CAUTION 체크를 config 기반으로 수정합니다.
+
+● Update(E:\1_Data\paper_engine.py)
+  ⎿  Added 7 lines, removed 2 lines
+      7977          threshold = float(_to_float(markout_hit.get("max_bps"), 0.0) or 0.0)
+      7978          _add(f"markout_bps<={threshold:g}", markout_hit.get("multiplier", 1.0), "ma
+            rkout")
+      7979
+      7980 -    if orderflow_tag == "CAUTION":
+      7980 +    caution_tags: set[str] = {
+      7981 +        str(t or "").strip().upper()
+      7982 +        for t in (red_cfg.get("orderflow_caution_reduce_tags") or ["CAUTION"])
+      7983 +        if str(t or "").strip()
+      7984 +    }
+      7985 +    if orderflow_tag and orderflow_tag in caution_tags:
+      7986          caution_mult = float(_to_float(red_cfg.get("orderflow_caution_multiplier"),
+             1.0) or 1.0)
+      7982 -        _add("orderflow_CAUTION", caution_mult, "orderflow")
+      7987 +        _add(f"orderflow_{orderflow_tag}", caution_mult, "orderflow")
+      7988
+      7989      if not multipliers:
+      7990          return 1.0, ""
+
+● Bash(python -c "
+      import ast…)
+  ⎿  syntax OK
+
+● 수정 완료입니다.
+
+  ---
+  솔직한 자체 검토 결과
+
+  처음 구현 시 제가 부정확하게 한 것:
+  - 급등의 _surge_execution_quality_qty_decision 코드를 실제로 읽지 않고 "급등은 CAUTION을 차단한다"고
+  가정했습니다
+  - 실제로는 급등 entry에서 CAUTION은 차단/감소 대상이 아님 — EXIT 시그널에서만 사용
+  - 결과: CAUTION을 block_tags에 넣어서 qty_reduction의 CAUTION 감소가 dead code가 됨
+
+  수정 후 올바른 설계:
+
+  ┌────────────┬────────────────────────────────────────────┬─────────────────────────────────────┐
+  │    태그    │                    처리                    │                근거                 │
+  ├────────────┼────────────────────────────────────────────┼─────────────────────────────────────┤
+  │ PAUSE      │ 진입 차단                                  │ 호가 일시정지 상태 — 실제 매수 불가 │
+  ├────────────┼────────────────────────────────────────────┼─────────────────────────────────────┤
+  │ NO_LOB     │ 진입 차단                                  │ LOB 데이터 없음 (이미               │
+  │            │                                            │ lob_available로 방어, 이중 방어)    │
+  ├────────────┼────────────────────────────────────────────┼─────────────────────────────────────┤
+  │ CAUTION    │ qty 감소 (orderflow_caution_multiplier)    │ 유동성 주의 수준 — 급등 EXIT 시그널 │
+  │            │                                            │  패턴과 동일하게 soft 처리          │
+  ├────────────┼────────────────────────────────────────────┼─────────────────────────────────────┤
+  │ NO_HISTORY │ qty 감소 가능 (config에                    │ 급등과 동일한 패턴                  │
+  │            │ orderflow_caution_reduce_tags 확장)        │                                     │
+  └────────────┴────────────────────────────────────────────┴─────────────────────────────────────┘
