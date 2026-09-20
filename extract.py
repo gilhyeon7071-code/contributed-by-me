@@ -1,0 +1,1 @@
+import sqlite3; db = sqlite3.connect('E:/1_Data/news_trading/data/trading.db'); c = db.cursor(); c.execute('SELECT code, name, title, llm_score, implication_direction, implication_action FROM news_articles_naver WHERE date8=''20260702'' AND llm_score IS NOT NULL LIMIT 10'); print('code|name|title|score|direction|action'); [print('|'.join(str(x) for x in r)) for r in c.fetchall()]

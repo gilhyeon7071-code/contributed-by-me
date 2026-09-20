@@ -1,0 +1,1 @@
+import pandas as pd; df = pd.read_csv('E:/1_Data/2_Logs/candidates_latest_data.with_final_score.csv'); df[['code', 'name', 'news_score', 'news_implication_short_rows', 'news_implication_medium_rows', 'news_topic_candidate_actions']].head(10).to_csv('E:/1_Data/2_Logs/horizon.csv', index=False, encoding='utf-8-sig')

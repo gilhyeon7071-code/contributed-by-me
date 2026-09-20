@@ -1,0 +1,23 @@
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+warn_unused_ignores = true
+show_error_codes = true
+exclude = [
+    "^\\.venv/",
+    "^backup/",
+    "^__pycache__/",
+]
+
+[tool.ruff]
+line-length = 200
+target-version = "py312"
+exclude = [
+    ".venv",
+    "backup",
+    "__pycache__",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E501"]
