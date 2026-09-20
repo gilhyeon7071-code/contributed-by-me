@@ -1,0 +1,50 @@
+{
+  "acquisition_evidence_published": false,
+  "alphanumeric_code_mapping": {
+    "0126Z0": null
+  },
+  "alphanumeric_codes": [
+    "0126Z0"
+  ],
+  "candidate_selection_calculated": false,
+  "canonical_generated": false,
+  "captured_at": "2026-09-15T16:10:02.000000+09:00",
+  "endpoint": "https://opendart.fss.or.kr/api/corpCode.xml",
+  "fetch_error_type": "",
+  "full_capture_complete": false,
+  "http_status": 200,
+  "m2_allowed": false,
+  "manifest_code_count": 2,
+  "manifest_code_set_sha256": null,
+  "manifest_sha256": "cc12129b2d17a04b26a1653092ddc9c88aca38f87fe11c9a2feb81183f645836",
+  "manifest_updated": false,
+  "matched_code_count": 1,
+  "missing_code_count": 1,
+  "missing_codes": [
+    "0126Z0"
+  ],
+  "network_execution_authorized": true,
+  "network_execution_scope": "OPENDART_CORP_CODE_PACKAGE_ONLY",
+  "operational_change": false,
+  "orders_generated": false,
+  "package_mapping_count": 1,
+  "package_parse_status": "PASS",
+  "raw_path": "paper/strategies/kospi_mcap_quarterly_v1/data/inbox/raw/opendart_corp_code_20260915T161002+0900.zip",
+  "raw_sha256": "174393c7df2fba4609f201abdf2e9ef3508d9716030b963a048c7299caa053fb",
+  "raw_size_bytes": 312,
+  "reason_codes": [
+    "CORP_CODE_EXACT_UNIVERSE_COVERAGE_INCOMPLETE"
+  ],
+  "redirects_allowed": false,
+  "request_count": 1,
+  "request_started_at": "2026-09-15T16:10:00.000000+09:00",
+  "response_received_at": "2026-09-15T16:10:01.000000+09:00",
+  "retries_allowed": false,
+  "scope": "M1_C8_CORP_CODE_PACKAGE_ONE_CALL_CAPTURE",
+  "selection_as_of": "20260915",
+  "server_date_header": "",
+  "status": "BLOCKED",
+  "strategy_id": "KOSPI_MCAP_QUARTERLY_V1",
+  "target_portfolio_calculated": false,
+  "verdict": "C8_CORP_CODE_PACKAGE_CAPTURED_MAPPING_GAP"
+}

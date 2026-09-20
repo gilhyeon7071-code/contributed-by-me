@@ -1,0 +1,41 @@
+---
+id: concept-eco-packaging
+type: theme
+title: 친환경 패키징
+created: 2026-08-31
+updated: 2026-08-31
+status: concept_candidate
+stage: 0
+
+verification:
+  verified: false
+  verification_status: unknown
+
+trading:
+  used_for_trading: false
+  trading_approved: false
+  direct_candidate_allowed: false
+  execution_allowed: false
+  gate_checked: false
+
+audit:
+  human_reviewed: false
+  ai_generated: false
+  last_reviewed_at:
+  change_reason: generated concept candidate from RSS metadata
+---
+
+# 친환경 패키징
+
+## Linked Companies
+- [[KRX_001820_삼화콘덴서공업]]
+
+## Source Observations
+- `삼화콘덴서공업, 2026년 기업가치 제고 계획 발표 - 디지털투데이` (디지털투데이, 2026-03-27T16:00:00+09:00)
+
+## Verification Boundary
+- This is a concept candidate from RSS metadata only.
+- Source verification remains `unknown` until article body text is archived and checked.
+
+## Safety Boundary
+- This concept note does not approve trading, candidates, signals, orders, fills, ledger rows, stats, or gate pass status.

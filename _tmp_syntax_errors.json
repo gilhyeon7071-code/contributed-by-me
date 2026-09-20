@@ -1,0 +1,78 @@
+﻿{
+  "total_py": 5479,
+  "errors": [
+    {
+      "file": "E:\\\\1_Data\\backup_kis_canary_run_20260406_143059_prechange_from_HEAD_0001.py",
+      "error": "SyntaxError: source code string cannot contain null bytes\n"
+    },
+    {
+      "file": "E:\\\\1_Data\\backup_kis_emergency_liquidate_20260406_143059_prechange_from_HEAD_0001.py",
+      "error": "SyntaxError: source code string cannot contain null bytes\n"
+    },
+    {
+      "file": "E:\\\\1_Data\\backup_kis_live_canary_first_test_20260406_143059_prechange_from_HEAD_0001.py",
+      "error": "SyntaxError: source code string cannot contain null bytes\n"
+    },
+    {
+      "file": "E:\\\\1_Data\\backup_kis_order_dispatch_from_exec_20260406_141843_prechange_from_HEAD_0001.py",
+      "error": "SyntaxError: source code string cannot contain null bytes\n"
+    },
+    {
+      "file": "E:\\\\1_Data\\backup_kis_realtime_ws_20260406_143059_prechange_from_HEAD_0001.py",
+      "error": "SyntaxError: source code string cannot contain null bytes\n"
+    },
+    {
+      "file": "E:\\\\1_Data\\backup_paper_engine_config_lock_20260406_141843_prechange_from_HEAD_0001.py",
+      "error": "SyntaxError: source code string cannot contain null bytes\n"
+    },
+    {
+      "file": "E:\\\\1_Data\\krx_update_clean_incremental.py.BROKEN_indent_20260119_125220.py",
+      "error": "Sorry: IndentationError: unindent does not match any outer indentation level (krx_update_clean_incremental.py.BROKEN_indent_20260119_125220.py, line 399)"
+    },
+    {
+      "file": "E:\\\\1_Data\\2_Logs\\backup_20260219_090635\\redteam_check_v0.py",
+      "error": "  File \"E:\\\\1_Data\\2_Logs\\backup_20260219_090635\\redteam_check_v0.py\", line 7\n    @'\n     ^\nSyntaxError: unterminated string literal (detected at line 7)\n"
+    },
+    {
+      "file": "E:\\\\1_Data\\2_Logs\\backup_20260219_104137\\paper_pnl_report.py",
+      "error": "  File \"E:\\\\1_Data\\2_Logs\\backup_20260219_104137\\paper_pnl_report.py\", line 21\n    \\n            # PATCH: promote after_close to top-level for SSOT reason path (meta.risk_context -> after_close)\\n            try:\\n                _ac = (out.get('meta', {}) or {}).get('risk_context', {})\\n                _ac = (_ac or {}).get('after_close_summary_last', {})\\n                if isinstance(_ac, dict) and ('risk_off' in _ac) and ('reasons' in _ac):\\n                    out['after_close'] = {'risk_off': bool(_ac.get('risk_off')), 'reasons': list(_ac.get('reasons') or [])}\\n            except Exception as _e:\\n                try:\\n                    out.setdefault('meta', {})\\n                    out['meta'].setdefault('warnings', [])\\n                    out['meta']['warnings'].append(f'after_close_promote_fail:{type(_e).__name__}:{_e}')\\n                except Exception:\\n                    pass\\n            return None\n     ^\nSyntaxError: unexpected character after line continuation character\n"
+    },
+    {
+      "file": "E:\\\\1_Data\\backup\\hardcode_round3_20260406_152612\\dashboard_recovered.py",
+      "error": "SyntaxError: source code string cannot contain null bytes\n"
+    },
+    {
+      "file": "E:\\\\1_Data\\_bulk_backup_print_to_logging_20260406_143259\\E\\vibe\\buffett\\tools\\fix_vibe_v18_streamlit_width.py",
+      "error": "  File \"E:\\\\1_Data\\_bulk_backup_print_to_logging_20260406_143259\\E\\vibe\\buffett\\tools\\fix_vibe_v18_streamlit_width.py\", line 21\n    src2 = src2.replace(\"use_container_width=True\", \"width=\"stretch\"\")\n                                                    ^^^^^^^^^^^^^^^\nSyntaxError: invalid syntax. Perhaps you forgot a comma?\n"
+    },
+    {
+      "file": "E:\\\\1_Data\\_notes\\sample_strategy_tuner.py",
+      "error": "  File \"E:\\\\1_Data\\_notes\\sample_strategy_tuner.py\", line 1\n    전략 튜닝 엔진 (strategy_tuner.py)\n       ^^\nSyntaxError: invalid syntax\n"
+    },
+    {
+      "file": "E:\\\\1_Data\\_tmp\\dashboard.stock_name_split_fix.edit.py",
+      "error": "  File \"E:\\\\1_Data\\_tmp\\dashboard.stock_name_split_fix.edit.py\", line 172\n    \"metric\": \"痢≪젙媛?,\n              ^\nSyntaxError: unterminated string literal (detected at line 172)\n"
+    },
+    {
+      "file": "E:\\\\1_Data\\_tmp\\dashboard.syntax_line172_fix.edit.py",
+      "error": "  File \"E:\\\\1_Data\\_tmp\\dashboard.syntax_line172_fix.edit.py\", line 355\n    badge = \"?ㅻ뜲?댄꽣 ?섏떊 以?\n            ^\nSyntaxError: unterminated string literal (detected at line 355)\n"
+    },
+    {
+      "file": "E:\\\\vibe\\\\buffett\\backup_fix_vibe_v18_streamlit_width_20260406_143812_syntax_fix_0001.py",
+      "error": "  File \"E:\\\\vibe\\\\buffett\\backup_fix_vibe_v18_streamlit_width_20260406_143812_syntax_fix_0001.py\", line 35\n    src2 = src2.replace(\"use_container_width=True\", \"width=\"stretch\"\")\n                                                    ^^^^^^^^^^^^^^^\nSyntaxError: invalid syntax. Perhaps you forgot a comma?\n"
+    },
+    {
+      "file": "E:\\\\vibe\\\\buffett\\dashboard_recovered.py",
+      "error": "  File \"E:\\\\vibe\\\\buffett\\dashboard_recovered.py\", line 8\n    Unsupported Python version, 3.12.0, for decompilation\n                ^^^^^^\nSyntaxError: invalid syntax\n"
+    },
+    {
+      "file": "E:\\\\vibe\\\\buffett\\vibe_v18.py",
+      "error": "Historical syntax error in E:\\vibe\\buffett\\vibe_v18.py line 592: unterminated string literal."
+    },
+    {
+      "file": "E:\\\\vibe\\\\buffett\\pages\\00_Health_Status.py",
+      "error": "  File \"E:\\\\vibe\\\\buffett\\pages\\00_Health_Status.py\", line 182\n    st.subheader(\"SSOT ?ъ씤??)\n                 ^\nSyntaxError: unterminated string literal (detected at line 182)\n"
+    }
+  ],
+  "error_count": 18
+}

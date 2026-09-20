@@ -1,0 +1,27 @@
+﻿{
+    "paths":  {
+                  "log_dir":  "E:/1_Data/2_Logs"
+              },
+    "thresholds":  {
+                       "risk_state_fresh_days":  7,
+                       "paper_fresh_max_days":  5,
+                       "paper_min_trades":  9,
+                       "paper_max_drawdown_pct":  -81,
+                       "paper_live_max_drawdown_pct":  -20,
+                       "paper_warmup_trades":  50,
+                       "paper_return_divergence_max":  0.30,
+                       "live_e2e_fresh_max_days":  7
+                   },
+    "policy":  {
+                   "risk_off_soft_warmup":  true,
+                   "require_pending_clear":  true,
+                   "require_alignment":  true,
+                   "require_quality_gate":  true,
+                   "require_canary_execute":  true,
+                   "strict_date_consistency":  true
+               },
+    "scope":  {
+                  "paper_oper_start_ymd":  "20260301",
+                  "asof_ymd":  ""
+              }
+}

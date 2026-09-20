@@ -1,0 +1,22 @@
+{
+  "updated_at": "2026-04-08T00:00:00+09:00",
+  "route_type": "order",
+  "routes": [
+    {
+      "name": "primary",
+      "gateway": "vps_primary",
+      "priority": 1
+    },
+    {
+      "name": "secondary",
+      "gateway": "colo_secondary",
+      "priority": 2
+    },
+    {
+      "name": "tertiary",
+      "gateway": "fallback_third",
+      "priority": 3
+    }
+  ]
+}
+

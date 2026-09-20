@@ -1,0 +1,50 @@
+﻿{
+  "total_py": 5223,
+  "errors": [
+    {
+      "file": "E:\\\\1_Data\\backup_kis_canary_run_20260406_143059_prechange_from_HEAD_0001.py",
+      "error": "SyntaxError: source code string cannot contain null bytes\n"
+    },
+    {
+      "file": "E:\\\\1_Data\\backup_kis_emergency_liquidate_20260406_143059_prechange_from_HEAD_0001.py",
+      "error": "SyntaxError: source code string cannot contain null bytes\n"
+    },
+    {
+      "file": "E:\\\\1_Data\\backup_kis_live_canary_first_test_20260406_143059_prechange_from_HEAD_0001.py",
+      "error": "SyntaxError: source code string cannot contain null bytes\n"
+    },
+    {
+      "file": "E:\\\\1_Data\\backup_kis_order_dispatch_from_exec_20260406_141843_prechange_from_HEAD_0001.py",
+      "error": "SyntaxError: source code string cannot contain null bytes\n"
+    },
+    {
+      "file": "E:\\\\1_Data\\backup_kis_realtime_ws_20260406_143059_prechange_from_HEAD_0001.py",
+      "error": "SyntaxError: source code string cannot contain null bytes\n"
+    },
+    {
+      "file": "E:\\\\1_Data\\backup_paper_engine_config_lock_20260406_141843_prechange_from_HEAD_0001.py",
+      "error": "SyntaxError: source code string cannot contain null bytes\n"
+    },
+    {
+      "file": "E:\\\\1_Data\\_notes\\sample_strategy_tuner.py",
+      "error": "  File \"E:\\\\1_Data\\_notes\\sample_strategy_tuner.py\", line 1\n    전략 튜닝 엔진 (strategy_tuner.py)\n       ^^\nSyntaxError: invalid syntax\n"
+    },
+    {
+      "file": "E:\\\\vibe\\\\buffett\\backup_fix_vibe_v18_streamlit_width_20260406_143812_syntax_fix_0001.py",
+      "error": "  File \"E:\\\\vibe\\\\buffett\\backup_fix_vibe_v18_streamlit_width_20260406_143812_syntax_fix_0001.py\", line 35\n    src2 = src2.replace(\"use_container_width=True\", \"width=\"stretch\"\")\n                                                    ^^^^^^^^^^^^^^^\nSyntaxError: invalid syntax. Perhaps you forgot a comma?\n"
+    },
+    {
+      "file": "E:\\\\vibe\\\\buffett\\dashboard_recovered.py",
+      "error": "  File \"E:\\\\vibe\\\\buffett\\dashboard_recovered.py\", line 8\n    Unsupported Python version, 3.12.0, for decompilation\n                ^^^^^^\nSyntaxError: invalid syntax\n"
+    },
+    {
+      "file": "E:\\\\vibe\\\\buffett\\vibe_v18.py",
+      "error": "Historical syntax error in E:\\vibe\\buffett\\vibe_v18.py line 592: unterminated string literal."
+    },
+    {
+      "file": "E:\\\\vibe\\\\buffett\\pages\\00_Health_Status.py",
+      "error": "  File \"E:\\\\vibe\\\\buffett\\pages\\00_Health_Status.py\", line 182\n    st.subheader(\"SSOT ?ъ씤??)\n                 ^\nSyntaxError: unterminated string literal (detected at line 182)\n"
+    }
+  ],
+  "error_count": 11
+}

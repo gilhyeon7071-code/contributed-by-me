@@ -2,7 +2,9 @@
 
 ## 1. 작업 범위
 - RootA = `E:\1_Data`
-- RootB = `E:\vibe\buffett`
+- RootB = `E:\vibe\buffett` (데이터 빌더 · 상태 JSON · PLANS) + `E:\vibe\control_center_v2` (Control Center V2, 현재 사용 중인 대시보드 UI)
+  - 두 경로는 한 시스템이다. `E:\vibe\buffett\tools\build_dashboard_state_v2.py`가 상태를 만들고, `E:\vibe\control_center_v2`(React/Vite)가 `runs\dashboard_state_latest.json`을 읽어 화면에 그린다.
+  - `E:\vibe\buffett\react_forensic_dashboard` 와 `E:\vibe\buffett\pages` 는 현재 라이브가 아니다 (2026-08-20 확인). 대시보드를 찾을 때 이쪽을 뒤지면 헛짚는다.
 - `D:\` 는 백업 확인 외 사용 금지
 - 예외: 승인된 2차 백업 루트 `D:\1_Data_Offsite_Backup` 에 한해, `E:\1_Data\tools\maintenance\offsite_backup_manifest.py`의 dry-run 검증 후 사용자가 명시 승인한 경우에만 쓰기를 허용한다.
 - 명시적으로 지정된 파일만 다룰 것
@@ -117,7 +119,7 @@
 
 ## 15. PLANS 기록 분류
 - RootA(`E:\1_Data`) 매매 로직, 배치, 데이터 생성, SSOT, 주문-체결-원장 작업은 `E:\1_Data\.agent\PLANS.md`에 기록한다.
-- RootB(`E:\vibe\buffett`) 대시보드, 화면, 상태 JSON, React 작업은 `E:\vibe\buffett\PLANS.md`에 기록한다.
+- RootB(`E:\vibe\buffett` + `E:\vibe\control_center_v2`) 대시보드, 화면, 상태 JSON, React 작업은 `E:\vibe\buffett\PLANS.md`에 기록한다. UI 코드가 `control_center_v2`에 있어도 **기록처는 `buffett` 한 곳으로 유지**한다.
 - 두 영역을 함께 수정한 경우 양쪽 PLANS에 각각 해당 관점으로 나눠 기록한다.
 - 동일 작업이 RootA와 RootB를 모두 변경하면 하나의 공통 작업명/날짜를 사용하되, RootA PLANS에는 매매·배치·데이터 관점만, RootB PLANS에는 대시보드·상태·화면 관점만 기록하고 서로의 산출물 경로를 참조로 남긴다.
 - 사용자가 PLANS 업데이트를 요청하면 범위에 맞는 양쪽 문서를 모두 확인한다.
@@ -265,6 +267,7 @@
 
 ## 23. 전략 방법론 검증 가드
 - 전략, 후보 생성, 국면, 신호, 실행 가설을 검증하기 전에는 `E:\1_Data\docs\references\STRATEGY_VALIDATION_GUARD.md`를 반드시 읽는다.
+- **연구 목적의 모든 측정 라운드**(재측정·재현·기준선 교체·축 탐색·전략 대 대안 비교 포함)에는 `E:\1_Data\docs\references\NEW_SIGNAL_VALIDATION_STANDARD.md`를 함께 읽는다. [2026-09-11 추가] 이 문서는 2026-08-31 v1.1 로 적용 범위가 가장 넓은데 AGENTS.md 어디에서도 참조되지 않아 한 번도 열리지 않았다.
 - 시작 보고에는 `가드 읽음`, `현재 고정 목표`, `방향 변경 여부`, `이번 검증 범위`를 명시한다.
 - 가드의 금지 사항과 충돌하거나 범위를 바꿔야 하면, 실행 전에 근거와 영향 범위를 기록한다.
 
@@ -273,3 +276,15 @@
 - 이는 소액 계좌 한정 현상이 아니며, 시장가 주문 시 항상 가용현금의 약 77%(1/1.3)까지만 사용 가능하도록 바인딩된다.
 - 주문 구분(ORD_DVSN)이 01(시장가)일 경우, 인자로 넘긴 가격(ORD_UNPR)은 완전히 무시되고 상한가가 강제 적용된다.
 - 따라서 포지션 사이징 시 잔액을 최대한 활용하거나 테스트를 할 때는, 시장가(market) 대신 지정가(limit)를 사용해야 주문 실패를 방지할 수 있다.
+## 25. 지표 인용 규약
+- 수치를 인용할 때 조건을 함께 명시한다. 조건이 빠진 수치는 인용하지 않는다.
+- 지표별 명시 항목은 [`E:\1_Data\docs\references\METRIC_CITATION_PROTOCOL.md`](E:\1_Data\docs\references\METRIC_CITATION_PROTOCOL.md)에 정의한다.
+- 특히 다음은 조건에 따라 몇 배씩 달라지므로 조건 없이 쓰지 않는다.
+  - 후보 수 / 후보 발생일: 측정 창, 래더 적용 여부, 섹터 유니온 포함 여부 (래더만으로 6.5~12배)
+  - 진입 통과율 / `entry_ready`: 집계 단위, 카운터 리셋 주기, `max_new` 값
+  - `final_score`: 어느 파일인지(base / 사이드카 / `entry_decision_rows`), 축 구성, 측정 시각
+  - 체결·손익: 원장 출처, 경로 분류 기준, 창 정렬
+  - 인증 수치: 저장값 재채점인지 재계산인지
+- 비율을 만들 때 분자와 분모의 집계 단위가 같은지 먼저 확인한다. 단위가 다른 비율은 만들지 않는다.
+- 측정 착수 전에 `.agent\PLANS.md`와 메모리에서 **이전에 같은 질문에 도달한 기록이 있는지 먼저 검색한다.**
+- 조건 누락으로 사고가 나면 그 사례와 함께 규약 문서에 항목을 추가한다.

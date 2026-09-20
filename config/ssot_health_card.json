@@ -1,0 +1,55 @@
+﻿{
+  "schema_version": "ssot_health_card_config_v1",
+  "datasets": [
+    {
+      "name": "krx_clean",
+      "kind": "parquet",
+      "path": "E:\\1_Data\\_krx_manual\\krx_daily_*_clean.parquet",
+      "fallback_paths": ["E:\\1_Data\\krx_daily_archive\\krx_daily_*_clean.parquet"],
+      "max_age_hours": 48,
+      "allow_added_columns": true,
+      "expected_columns": ["date", "code", "close"],
+      "required_columns": ["date", "code", "close"],
+      "date_columns": ["date", "ymd"],
+      "min_completeness_pct": 99.0
+    },
+    {
+      "name": "prices_paper",
+      "kind": "parquet",
+      "path": "E:\\1_Data\\paper\\prices\\ohlcv_paper.parquet",
+      "max_age_hours": 24,
+      "allow_added_columns": true,
+      "expected_columns": ["date", "code", "close"],
+      "required_columns": ["date", "code", "open", "high", "low", "close"],
+      "date_columns": ["date", "ymd", "as_of_ymd"],
+      "min_completeness_pct": 99.0
+    },
+    {
+      "name": "live_fills",
+      "kind": "csv",
+      "path": "E:\\vibe\\buffett\\data\\live\\live_fills.csv",
+      "max_age_hours": 24,
+      "allow_added_columns": true,
+      "expected_columns": ["datetime", "code", "side", "fill_qty", "fill_price"],
+      "required_columns": ["datetime", "code", "side", "fill_qty", "fill_price"],
+      "date_columns": ["date", "ymd", "datetime"],
+      "min_completeness_pct": 98.0
+    },
+    {
+      "name": "orders_exec",
+      "kind": "xlsx",
+      "path": "E:\\vibe\\buffett\\data\\orders\\orders_*_exec.xlsx",
+      "max_age_hours": 36,
+      "allow_added_columns": true,
+      "expected_columns": ["exec_date", "side", "code", "fill_qty", "fill_price"],
+      "required_columns": ["exec_date", "side", "code", "fill_qty", "fill_price"],
+      "date_columns": ["date", "ymd", "exec_date"],
+      "min_completeness_pct": 95.0,
+      "row_filter": {
+        "column": "row_type",
+        "mode": "exclude",
+        "values": ["DIAG"]
+      }
+    }
+  ]
+}

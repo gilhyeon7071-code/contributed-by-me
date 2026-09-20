@@ -1,0 +1,45 @@
+{
+  "as_of_ymd": "",
+  "gateway_health": {
+    "max_age_minutes": 2.0,
+    "latency_threshold_ms": 80.0,
+    "paths": {
+      "primary": "E:\\1_Data\\2_Logs\\gateway_health_primary_latest.json",
+      "secondary": "E:\\1_Data\\2_Logs\\gateway_health_secondary_latest.json",
+      "tertiary": "E:\\1_Data\\2_Logs\\gateway_health_tertiary_latest.json"
+    }
+  },
+  "gateway_probe": {
+    "timeout_ms": 1500,
+    "gateways": [
+      {
+        "name": "primary",
+        "host": "openapivts.koreainvestment.com:29443"
+      },
+      {
+        "name": "secondary",
+        "host": "openapi.koreainvestment.com:9443"
+      },
+      {
+        "name": "tertiary",
+        "host": "8.8.8.8"
+      }
+    ]
+  },
+  "route_table": {
+    "paths": {
+      "order": "E:\\1_Data\\config\\order_route_table.json",
+      "quote": "E:\\1_Data\\config\\quote_route_table.json",
+      "auth": "E:\\1_Data\\config\\auth_route_table.json"
+    }
+  },
+  "data_checks": {
+    "candidates_csv": "E:\\1_Data\\2_Logs\\candidates_latest_data.with_final_score.csv",
+    "prices_csv": "E:\\1_Data\\2_Logs\\backtest_market_ohlc_latest.csv"
+  },
+  "sla_guard": {
+    "execution_health_json": "E:\\1_Data\\2_Logs\\execution_health_observed_latest.json",
+    "p95_caution": 10.0,
+    "p95_block": 20.0
+  }
+}

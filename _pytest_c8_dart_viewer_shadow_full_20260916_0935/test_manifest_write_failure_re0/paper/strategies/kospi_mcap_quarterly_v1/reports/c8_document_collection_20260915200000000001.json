@@ -1,0 +1,55 @@
+{
+  "acquisition_evidence_published": false,
+  "candidate_selection_calculated": false,
+  "canonical_generated": false,
+  "capture_status_updated": false,
+  "default_max_requests_per_run": 1000,
+  "fail_count": 0,
+  "first_pending_request": {
+    "kind": "DOCUMENT",
+    "receipt_no": "20260915000001"
+  },
+  "full_capture_complete": false,
+  "generated_at": "2026-09-15T20:00:00.000001+09:00",
+  "hard_stop_triggered": true,
+  "m2_allowed": false,
+  "manifest_updated": false,
+  "max_requests_this_run": 1,
+  "network_request_count": 1,
+  "next_pending_request": {
+    "kind": "DOCUMENT",
+    "receipt_no": "20260915000001"
+  },
+  "operational_change": false,
+  "orders_generated": false,
+  "outputs": [],
+  "pass_count": 1,
+  "reason_codes": [
+    "C8_DOCUMENT_MANIFEST_WRITE_FAILED"
+  ],
+  "recovered_pass_journal_count": 0,
+  "recovered_unavailable_count": 0,
+  "request_results": [
+    {
+      "dart_status": "000",
+      "http_status": 200,
+      "package_member_count": 1,
+      "payload_sha256": "98683c86fb74cfd355bc59fb3be9b1871b3d9f0b76e66df1acc90d4c843783a3",
+      "raw_path": "E:\\1_Data\\_pytest_c8_dart_viewer_shadow_full_20260916_0935\\test_manifest_write_failure_re0\\paper\\strategies\\kospi_mcap_quarterly_v1\\data\\inbox\\raw\\opendart_document_20260915000001_20260915T200000000002+0900_98683c86fb74cfd3.zip",
+      "reason_codes": [],
+      "request": {
+        "kind": "DOCUMENT",
+        "receipt_no": "20260915000001"
+      },
+      "status": "PASS"
+    }
+  ],
+  "scope": "M1_C8_CORPORATE_ACTION_DOCUMENT_COLLECTION",
+  "selection_as_of": "20260915",
+  "status": "FAIL",
+  "stop_reason": "MANIFEST_WRITE_FAILED",
+  "strategy_id": "KOSPI_MCAP_QUARTERLY_V1",
+  "target_portfolio_calculated": false,
+  "unavailable_count": 0,
+  "verdict": "FAIL_C8_DOCUMENT_COLLECTION"
+}

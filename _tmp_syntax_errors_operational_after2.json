@@ -1,0 +1,10 @@
+{
+  "total_py": 5073,
+  "errors": [
+    {
+      "file": "E:\\\\1_Data\\_bulk_backup_print_to_logging_20260406_143259\\E\\vibe\\buffett\\tools\\fix_vibe_v18_streamlit_width.py",
+      "error": "  File \"E:\\\\1_Data\\_bulk_backup_print_to_logging_20260406_143259\\E\\vibe\\buffett\\tools\\fix_vibe_v18_streamlit_width.py\", line 21\n    src2 = src2.replace(\"use_container_width=True\", \"width=\"stretch\"\")\n                                                    ^^^^^^^^^^^^^^^\nSyntaxError: invalid syntax. Perhaps you forgot a comma?\n"
+    }
+  ],
+  "error_count": 1
+}

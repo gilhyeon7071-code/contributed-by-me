@@ -1,0 +1,24 @@
+{
+  "capture_status_modified": false,
+  "completed_receipt_count": 0,
+  "completed_receipts": [],
+  "contract_version": "test",
+  "downstream_opened": false,
+  "generated_at": "2026-09-16T00:00:00.000004+00:00",
+  "integrity_issues": [],
+  "integrity_pass": true,
+  "mode": "APPLY_SHADOW_ONLY",
+  "network_requests": 0,
+  "pending_receipt_count": 2,
+  "pending_receipts": [
+    "20251024000420",
+    "20251111000001"
+  ],
+  "promotion_allowed": false,
+  "run_receipts": [],
+  "scope": "M1_C8_DART_VIEWER_EXACT_RECEIPT_SHADOW_STATUS",
+  "status": "SHADOW_INCOMPLETE",
+  "stop_reason": "NA_CONNECTION_LIMIT",
+  "strategy_id": "KOSPI_MCAP_QUARTERLY_V1",
+  "target_receipt_count": 2
+}

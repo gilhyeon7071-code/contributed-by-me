@@ -1,0 +1,50 @@
+{
+  "acquisition_evidence_published": false,
+  "candidate_selection_calculated": false,
+  "canonical_generated": false,
+  "capture_status_updated": true,
+  "default_max_requests_per_run": 1000,
+  "fail_count": 0,
+  "first_pending_request": {
+    "kind": "DOCUMENT",
+    "receipt_no": "20260915000001"
+  },
+  "full_capture_complete": false,
+  "generated_at": "2026-09-15T20:00:00.000002+09:00",
+  "hard_stop_triggered": false,
+  "m2_allowed": false,
+  "manifest_updated": true,
+  "max_requests_this_run": 1,
+  "network_request_count": 1,
+  "next_pending_request": {},
+  "operational_change": false,
+  "orders_generated": false,
+  "outputs": [],
+  "pass_count": 1,
+  "reason_codes": [],
+  "recovered_pass_journal_count": 0,
+  "recovered_unavailable_count": 1,
+  "request_results": [
+    {
+      "dart_status": "000",
+      "http_status": 200,
+      "package_member_count": 1,
+      "payload_sha256": "3841c9202225ff9da7dfded5a5e3fcaa365b26cb51a56aee31cf7b4b2761b190",
+      "raw_path": "E:\\1_Data\\_pytest_c8_dart_viewer_shadow_full_20260916_0935\\test_persisted_fail_014_recove0\\paper\\strategies\\kospi_mcap_quarterly_v1\\data\\inbox\\raw\\opendart_document_20260915000002_20260915T200000000003+0900_3841c9202225ff9d.zip",
+      "reason_codes": [],
+      "request": {
+        "kind": "DOCUMENT",
+        "receipt_no": "20260915000002"
+      },
+      "status": "PASS"
+    }
+  ],
+  "scope": "M1_C8_CORPORATE_ACTION_DOCUMENT_COLLECTION",
+  "selection_as_of": "20260915",
+  "status": "PASS",
+  "stop_reason": "NO_PENDING_REQUESTS",
+  "strategy_id": "KOSPI_MCAP_QUARTERLY_V1",
+  "target_portfolio_calculated": false,
+  "unavailable_count": 1,
+  "verdict": "C8_DOCUMENT_COLLECTION_NO_PENDING_INCOMPLETE"
+}

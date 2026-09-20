@@ -1,0 +1,19 @@
+﻿{
+    "generated_at":  "2026-07-28T17:11:21",
+    "task_name":  "VIBE_Stock_AI_Wiki_Update",
+    "root":  "E:\\1_Data",
+    "pipeline":  "E:\\1_Data\\run_stock_ai_wiki_update.bat",
+    "mode":  "APPLY",
+    "policy_effect":  false,
+    "trading_effect":  false,
+    "exists_before":  true,
+    "schedule":  "hourly",
+    "action":  "wscript.exe \"E:\\1_Data\\run_stock_ai_wiki_update_hidden.vbs\"",
+    "applied":  true,
+    "exists_after":  true,
+    "notes":  [
+                  "Registers only the Stock-AI-Wiki local update batch.",
+                  "Updates Google RSS observe artifacts, Stock-AI-Wiki markdown notes, article archive seed, wiki links, and progress dashboard.",
+                  "Does not change Gate, STOP, LOCK, risk, score, order, fill, ledger, stats, broker dispatch, or paper engine behavior."
+              ]
+}

@@ -1,0 +1,24 @@
+{
+  "restore_verify": {
+    "restore_root": "E:\\1_Data\\backup\\restore_drill_manual_20260429\\restore",
+    "manifest": "E:\\1_Data\\backup\\restore_drill_manual_20260429\\manifest.json",
+    "manifest_sig": "E:\\1_Data\\backup\\restore_drill_manual_20260429\\manifest.sig",
+    "public_key": "E:\\1_Data\\backup\\restore_drill_manual_20260429\\public.pem",
+    "object_lock_proof": "E:\\1_Data\\backup\\restore_drill_manual_20260429\\object_lock_proof.json",
+    "allow_local_eor": false,
+    "eor_dir": "E:\\1_Data\\backup\\restore_drill_manual_20260429\\eor"
+  },
+  "windows_vss": {
+    "enabled": false,
+    "source_volume": "C:",
+    "expose_drive": "X:",
+    "restore_target": "E:\\1_Data\\backup\\restore_drill_vss_restore_target"
+  },
+  "immutable_upload": {
+    "enabled": false,
+    "bucket": "replace-with-eor-bucket",
+    "key_prefix": "restore-drill/windows",
+    "object_lock_mode": "COMPLIANCE",
+    "retain_until_date": "2031-01-01T00:00:00Z"
+  }
+}

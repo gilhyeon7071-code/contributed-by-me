@@ -195,3 +195,10 @@ Raw/
 tools/cosign/
 *.exe
 *.dll
+
+# [2026-09-20] 백업·임시 폴더는 추적하지 않는다(파일 자체는 그대로 둔다)
+backup/
+tmp/
+_tmp_node/
+scratch/
+scratchpad/

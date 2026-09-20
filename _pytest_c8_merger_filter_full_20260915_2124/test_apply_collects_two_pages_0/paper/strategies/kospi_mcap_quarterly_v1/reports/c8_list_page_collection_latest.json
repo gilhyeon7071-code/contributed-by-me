@@ -1,0 +1,80 @@
+{
+  "acquisition_evidence_published": false,
+  "candidate_selection_calculated": false,
+  "canonical_generated": false,
+  "capture_status_updated": true,
+  "default_max_requests_per_run": 1000,
+  "fail_count": 0,
+  "first_pending_request": {
+    "code": "000001",
+    "corp_code": "00000001",
+    "kind": "LIST_PAGE",
+    "page_no": 1,
+    "series": "MERGER_DECISION_HISTORY"
+  },
+  "full_capture_complete": false,
+  "generated_at": "2026-09-15T17:00:00.000001+09:00",
+  "hard_stop_triggered": false,
+  "m2_allowed": false,
+  "manifest_updated": true,
+  "max_requests_this_run": 2,
+  "network_request_count": 2,
+  "next_pending_request": {
+    "code": "0126Z0",
+    "corp_code": "00000002",
+    "kind": "LIST_PAGE",
+    "page_no": 1,
+    "series": "MERGER_DECISION_HISTORY"
+  },
+  "operational_change": false,
+  "orders_generated": false,
+  "outputs": [],
+  "pass_count": 2,
+  "query_end": "20260915",
+  "query_start": "20200101",
+  "reason_codes": [],
+  "recovered_pass_journal_count": 0,
+  "request_results": [
+    {
+      "accepted_row_count": 0,
+      "dart_status": "013",
+      "http_status": 200,
+      "payload_sha256": "466ec7c13f0a2981a9c26fd0e2b9db7903c41b41e791e1bc7d65f791d44baa4c",
+      "raw_path": "E:\\1_Data\\_pytest_c8_merger_filter_full_20260915_2124\\test_apply_collects_two_pages_0\\paper\\strategies\\kospi_mcap_quarterly_v1\\data\\inbox\\raw\\opendart_list_000001_MERGER_DECISION_HISTORY_p0001_20260915T170000000002+0900_466ec7c13f0a2981.json",
+      "reason_codes": [],
+      "request": {
+        "code": "000001",
+        "corp_code": "00000001",
+        "kind": "LIST_PAGE",
+        "page_no": 1,
+        "series": "MERGER_DECISION_HISTORY"
+      },
+      "status": "PASS",
+      "total_page": 0
+    },
+    {
+      "accepted_row_count": 0,
+      "dart_status": "013",
+      "http_status": 200,
+      "payload_sha256": "466ec7c13f0a2981a9c26fd0e2b9db7903c41b41e791e1bc7d65f791d44baa4c",
+      "raw_path": "E:\\1_Data\\_pytest_c8_merger_filter_full_20260915_2124\\test_apply_collects_two_pages_0\\paper\\strategies\\kospi_mcap_quarterly_v1\\data\\inbox\\raw\\opendart_list_000001_MERGER_COMPLETION_HISTORY_p0001_20260915T170000000003+0900_466ec7c13f0a2981.json",
+      "reason_codes": [],
+      "request": {
+        "code": "000001",
+        "corp_code": "00000001",
+        "kind": "LIST_PAGE",
+        "page_no": 1,
+        "series": "MERGER_COMPLETION_HISTORY"
+      },
+      "status": "PASS",
+      "total_page": 0
+    }
+  ],
+  "scope": "M1_C8_CORPORATE_ACTION_LIST_PAGE_COLLECTION",
+  "selection_as_of": "20260915",
+  "status": "PASS",
+  "stop_reason": "REQUEST_BUDGET_REACHED",
+  "strategy_id": "KOSPI_MCAP_QUARTERLY_V1",
+  "target_portfolio_calculated": false,
+  "verdict": "C8_LIST_PAGE_BUDGET_EXHAUSTED_CHECKPOINT_SAVED"
+}

@@ -1,0 +1,10 @@
+{
+  "total_py": 5003,
+  "errors": [
+    {
+      "file": "E:\\\\1_Data\\_notes\\sample_strategy_tuner.py",
+      "error": "  File \"E:\\\\1_Data\\_notes\\sample_strategy_tuner.py\", line 1\n    전략 튜닝 엔진 (strategy_tuner.py)\n       ^^\nSyntaxError: invalid syntax\n"
+    }
+  ],
+  "error_count": 1
+}

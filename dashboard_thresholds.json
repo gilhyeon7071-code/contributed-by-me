@@ -1,0 +1,59 @@
+﻿{
+  "version": "2026-03-13",
+  "description": "Dashboard KPI threshold policy (SSOT). Percent-like metrics are normalized to pct before comparison.",
+  "sources": {
+    "total_asset": "2_Logs/p0_daily_check_*.json",
+    "cumulative_return": "2_Logs/after_close_summary_last.json",
+    "mdd": "2_Logs/p0_daily_check_*.json",
+    "sharpe": "2_Logs/after_close_summary_last.json",
+    "profit_factor": "2_Logs/after_close_summary_last.json",
+    "win_rate": "2_Logs/after_close_summary_last.json",
+    "regime": "2_Logs/gate_daily_*.json",
+    "sector_concentration": "2_Logs/p0_daily_check_*.json",
+    "data_lag_days": "runs/dashboard_state_latest.json"
+  },
+  "metrics": {
+    "sharpe": {
+      "mode": "higher_better",
+      "unit": "number",
+      "green_min": 1.0,
+      "yellow_min": 0.5
+    },
+    "profit_factor": {
+      "mode": "higher_better",
+      "unit": "number",
+      "green_min": 1.5,
+      "yellow_min": 1.0
+    },
+    "win_rate": {
+      "mode": "higher_better",
+      "unit": "ratio_or_pct",
+      "green_min": 45.0,
+      "yellow_min": 35.0
+    },
+    "mdd": {
+      "mode": "higher_better",
+      "unit": "ratio_or_pct",
+      "green_min": -15.0,
+      "yellow_min": -30.0
+    },
+    "cash_ratio": {
+      "mode": "lower_better",
+      "unit": "ratio_or_pct",
+      "green_max": 40.0,
+      "yellow_max": 70.0
+    },
+    "sector_concentration": {
+      "mode": "lower_better",
+      "unit": "ratio_or_pct",
+      "green_max": 20.0,
+      "yellow_max": 30.0
+    },
+    "data_lag_days": {
+      "mode": "lower_better",
+      "unit": "days",
+      "green_max": 1.0,
+      "yellow_max": 7.0
+    }
+  }
+}

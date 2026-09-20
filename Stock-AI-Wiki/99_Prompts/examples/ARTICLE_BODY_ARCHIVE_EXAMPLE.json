@@ -1,0 +1,13 @@
+{
+  "articles": [
+    {
+      "code": "005930",
+      "title": "Example article title",
+      "source": "Example Publisher",
+      "published_at": "2026-05-18T09:00:00+09:00",
+      "url": "https://example.com/article",
+      "evidence_path": "E:\\1_Data\\Stock-AI-Wiki\\01_Sources\\archive\\005930.txt",
+      "body": "Example archived article body. This text is attached as local evidence only and does not make verification pass automatically."
+    }
+  ]
+}

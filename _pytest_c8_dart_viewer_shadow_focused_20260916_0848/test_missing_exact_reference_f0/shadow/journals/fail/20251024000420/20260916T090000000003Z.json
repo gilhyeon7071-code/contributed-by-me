@@ -1,0 +1,10 @@
+{
+  "detail": "20251024000420",
+  "failed_at": "2026-09-16T00:00:00.000002+00:00",
+  "promotion_allowed": false,
+  "reason_code": "EXACT_RECEIPT_REFERENCE_MISSING",
+  "receipt_no": "20251024000420",
+  "scope": "M1_C8_DART_VIEWER_SHADOW_FAILURE",
+  "status": "SHADOW_FAIL",
+  "strategy_id": "KOSPI_MCAP_QUARTERLY_V1"
+}

@@ -1,0 +1,161 @@
+{
+  "contract_id": "KOSPI_MCAP_QUARTERLY_C8_OFFICIAL_SOURCE_ROUTES",
+  "contract_version": "1.0.0",
+  "strategy_id": "KOSPI_MCAP_QUARTERLY_V1",
+  "verified_at": "2026-09-15T09:55:00+09:00",
+  "verification_method": "LIVE_OFFICIAL_PAGE_DOM_AND_READ_ONLY_API_PREFLIGHT",
+  "last_extended_at": "2026-09-15T10:31:00+09:00",
+  "last_extended_at": "2026-09-15T10:31:00+09:00",
+  "official_api_routes": [
+    {
+      "role": "listing_security_as_of",
+      "source_id": "KRX_OPENAPI_STK_ISU_BASE_INFO",
+      "api_id": "stk_isu_base_info",
+      "endpoint": "https://data-dbg.krx.co.kr/svc/apis/sto/stk_isu_base_info",
+      "documentation_url": "https://openapi.krx.co.kr/contents/OPP/USES/service/OPPUSES002_S2.cmd?BO_ID=PiwgMdTwmsenXhmqqxuj",
+      "method": "GET",
+      "auth_header": "AUTH_KEY",
+      "date_parameter": "basDd",
+      "date_authority": "REQUEST_PARAMETER",
+      "response_rows_key": "OutBlock_1",
+      "code_field": "ISU_SRT_CD",
+      "output_as_of_field": "",
+      "minimum_rows": 100,
+      "required_output_fields": [
+        "ISU_SRT_CD",
+        "ISU_ABBRV",
+        "LIST_DD",
+        "MKT_TP_NM",
+        "SECUGRP_NM",
+        "KIND_STKCERT_TP_NM"
+      ]
+    },
+    {
+      "role": "close_market_cap_as_of",
+      "source_id": "KRX_OPENAPI_STK_BYDD_TRD",
+      "api_id": "stk_bydd_trd",
+      "endpoint": "https://data-dbg.krx.co.kr/svc/apis/sto/stk_bydd_trd",
+      "documentation_url": "https://openapi.krx.co.kr/contents/OPP/USES/service/OPPUSES002_S2.cmd?BO_ID=JvJFzlAENzZlPBDNGAWC",
+      "method": "GET",
+      "auth_header": "AUTH_KEY",
+      "date_parameter": "basDd",
+      "date_authority": "REQUEST_AND_RESPONSE_FIELD",
+      "response_rows_key": "OutBlock_1",
+      "code_field": "ISU_CD",
+      "output_as_of_field": "BAS_DD",
+      "minimum_rows": 100,
+      "required_output_fields": [
+        "BAS_DD",
+        "ISU_CD",
+        "ISU_NM",
+        "MKT_NM",
+        "TDD_CLSPRC",
+        "MKTCAP"
+      ]
+    }
+  ],
+  "official_current_snapshot_routes": [
+    {
+      "role": "listing_security_as_of",
+      "source_id": "KRX_MDCSTAT019_CURRENT_BASIC_INFO",
+      "screen_id": "MDCSTAT019",
+      "page_url": "https://data.krx.co.kr/contents/MDC/MDI/outerLoader/index.cmd?screenId=MDCSTAT019",
+      "bld": "dbms/MDC/STAT/standard/MDCSTAT01901",
+      "response_rows_key": "OutBlock_1",
+      "query_parameters": ["mktId"],
+      "coverage_shape": "CURRENT_ALL_MARKET_FULL_SNAPSHOT_WITHOUT_QUERY_DATE",
+      "date_authority": "RETRIEVAL_TIMESTAMP_ONLY",
+      "historical_replay": false,
+      "access_requirement": "AUTHENTICATED_KRX_DATA_MARKETPLACE_SESSION",
+      "required_output_fields": [
+        "ISU_CD",
+        "ISU_SRT_CD",
+        "ISU_NM",
+        "ISU_ABBRV",
+        "LIST_DD",
+        "MKT_TP_NM",
+        "SECUGRP_NM",
+        "KIND_STKCERT_TP_NM",
+        "LIST_SHRS"
+      ]
+    },
+    {
+      "role": "trade_management_status_as_of",
+      "source_id": "KRX_MDCSTAT237_LIQUIDATION_CURRENT",
+      "screen_id": "MDCSTAT237",
+      "page_url": "https://data.krx.co.kr/contents/MDC/STAT/issue/MDCSTAT237.jsp",
+      "bld": "dbms/MDC/STAT/issue/MDCSTAT23701",
+      "response_rows_key": "output",
+      "query_parameters": ["mktId"],
+      "coverage_shape": "CURRENT_ALL_MARKET_EXCEPTIONS_WITHOUT_QUERY_DATE",
+      "date_authority": "RETRIEVAL_TIMESTAMP_ONLY",
+      "historical_replay": false,
+      "access_requirement": "AUTHENTICATED_KRX_DATA_MARKETPLACE_SESSION",
+      "required_output_fields": [
+        "ISU_CD",
+        "ISU_NM",
+        "MKT_NM",
+        "SECUGRP_NM",
+        "STRT_DD",
+        "END_DD",
+        "DELIST_SCHDL_DD",
+        "DELIST_RSN_DSC"
+      ]
+    }
+  ],
+  "official_manual_history_routes": [
+    {
+      "role": "listing_security_as_of",
+      "source_id": "KRX_MDCSTAT200_LISTING_HISTORY",
+      "screen_id": "MDCSTAT200",
+      "bld": "dbms/MDC/STAT/issue/MDCSTAT20001",
+      "query_parameters": ["mktId", "listClssCd", "secugrpTp", "strtDd", "endDd"],
+      "coverage_shape": "ALL_MARKET_DATE_RANGE"
+    },
+    {
+      "role": "listing_security_as_of",
+      "source_id": "KRX_MDCSTAT238_DELISTING_HISTORY",
+      "screen_id": "MDCSTAT238",
+      "bld": "dbms/MDC/STAT/issue/MDCSTAT23801",
+      "query_parameters": ["mktId", "strtDd", "endDd"],
+      "coverage_shape": "ALL_MARKET_DATE_RANGE"
+    },
+    {
+      "role": "trade_management_status_as_of",
+      "source_id": "KRX_MDCSTAT213_SUSPENSION_HISTORY",
+      "screen_id": "MDCSTAT213",
+      "bld": "dbms/MDC/STAT/issue/MDCSTAT21301",
+      "query_parameters": ["isuCd", "strtDd", "endDd"],
+      "coverage_shape": "PER_SECURITY_DATE_RANGE"
+    },
+    {
+      "role": "trade_management_status_as_of",
+      "source_id": "KRX_MDCSTAT215_MANAGEMENT_HISTORY",
+      "screen_id": "MDCSTAT215",
+      "bld": "dbms/MDC/STAT/issue/MDCSTAT21501",
+      "query_parameters": ["isuCd", "strtDd", "endDd", "designDdYn"],
+      "coverage_shape": "PER_SECURITY_DATE_RANGE"
+    },
+    {
+      "role": "trade_management_status_as_of",
+      "source_id": "KRX_MDCSTAT237_LIQUIDATION_CURRENT",
+      "screen_id": "MDCSTAT237",
+      "bld": "dbms/MDC/STAT/issue/MDCSTAT23701",
+      "query_parameters": ["mktId"],
+      "coverage_shape": "CURRENT_ALL_MARKET_EXCEPTIONS_WITHOUT_QUERY_DATE"
+    }
+  ],
+  "unresolved_roles": [
+    {
+      "role": "trade_management_status_as_of",
+      "status": "PARTIAL",
+      "reason": "suspension and management histories require exhaustive per-security traversal; current liquidation list has no query date"
+    },
+    {
+      "role": "corporate_actions_as_of",
+      "status": "BLOCKED",
+      "reason": "no exhaustive revision-aware pending-to-effective merger lifecycle route has been confirmed"
+    }
+  ],
+  "publication_rule": "preflight never publishes raw sources, acquisition evidence, adapter requests, components, canonical data, M2 state, candidates, targets, or orders"
+}

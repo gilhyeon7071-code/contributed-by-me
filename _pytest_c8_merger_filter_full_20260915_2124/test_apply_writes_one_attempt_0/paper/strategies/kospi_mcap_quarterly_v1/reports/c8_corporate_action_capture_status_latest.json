@@ -1,0 +1,21 @@
+{
+  "base_universe_authorized": true,
+  "bulk_requests_executed": 1,
+  "full_capture_complete": false,
+  "generated_at": "2026-09-15T16:30:00+09:00",
+  "m2_allowed": false,
+  "manifest_integrity_pass": true,
+  "next_pending_requests": [
+    {
+      "code": "000001",
+      "kind": "LIST_PAGE",
+      "page_no": 1,
+      "series": "B001"
+    }
+  ],
+  "orders_generated": false,
+  "reason_codes": [
+    "CORPORATE_ACTION_REQUESTS_PENDING"
+  ],
+  "verdict": "C8_CORPORATE_ACTION_CAPTURE_PENDING"
+}

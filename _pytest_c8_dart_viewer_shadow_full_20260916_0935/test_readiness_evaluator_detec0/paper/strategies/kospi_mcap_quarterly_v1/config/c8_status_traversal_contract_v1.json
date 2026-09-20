@@ -1,0 +1,58 @@
+{
+  "contract_id": "KOSPI_MCAP_QUARTERLY_C8_STATUS_TRAVERSAL",
+  "contract_version": "1.1.0",
+  "strategy_id": "KOSPI_MCAP_QUARTERLY_V1",
+  "purpose": "Track exhaustive, restartable KRX status-history coverage and the approved same-day liquidation retrieval handoff without promoting traversal data to C8 evidence",
+  "role": "trade_management_status_as_of",
+  "required_state_fields": [
+    "trade_status",
+    "management_status",
+    "delisting_procedure_status"
+  ],
+  "sources": [
+    {
+      "source_id": "KRX_MDCSTAT213_SUSPENSION_HISTORY",
+      "coverage_shape": "PER_SECURITY_DATE_RANGE",
+      "temporal_mode": "EXHAUSTIVE_INTERVAL_HISTORY",
+      "covered_fields": ["trade_status"],
+      "required_query_parameters": ["isuCd", "strtDd", "endDd"],
+      "date_authority": "REQUEST_RANGE",
+      "completion_rule": "every exact base-universe code has a PASS result for query_start through selection_as_of"
+    },
+    {
+      "source_id": "KRX_MDCSTAT215_MANAGEMENT_HISTORY",
+      "coverage_shape": "PER_SECURITY_DATE_RANGE",
+      "temporal_mode": "EXHAUSTIVE_INTERVAL_HISTORY",
+      "covered_fields": ["management_status"],
+      "required_query_parameters": ["isuCd", "strtDd", "endDd", "designDdYn"],
+      "date_authority": "REQUEST_RANGE",
+      "completion_rule": "every exact base-universe code has a PASS result for query_start through selection_as_of"
+    },
+    {
+      "source_id": "KRX_MDCSTAT237_LIQUIDATION_CURRENT",
+      "coverage_shape": "CURRENT_ALL_MARKET_EXCEPTIONS_WITHOUT_QUERY_DATE",
+      "temporal_mode": "RETRIEVAL_DATE_SNAPSHOT",
+      "covered_fields": ["delisting_procedure_status"],
+      "required_query_parameters": ["mktId"],
+      "date_authority": "APPROVED_SAME_DAY_RETRIEVAL_TIMESTAMP_VIA_ACQUISITION_EVIDENCE",
+      "completion_rule": "traversal may record the snapshot handoff but date authority requires the approved acquisition evidence contract and is never granted by this manifest alone"
+    }
+  ],
+  "universe_contract": {
+    "scope": "EXACT_BASE_UNIVERSE_CODES",
+    "minimum_codes": 1,
+    "code_set_hash": "SHA256_SORTED_NEWLINE_DELIMITED_CODES",
+    "source_hash_required": true,
+    "query_start_rule": "query_start <= earliest_listed_date",
+    "query_end_rule": "query_end == selection_as_of"
+  },
+  "checkpoint_contract": {
+    "idempotent_replay": "identical latest attempt is a no-op",
+    "conflicting_success_replay": "reject",
+    "failed_attempt_retry": "allowed",
+    "unknown_code": "reject",
+    "write_rule": "atomic strategy-namespace JSON only"
+  },
+  "role_ready_rule": "history traversal alone is never role-ready; all fields require complete official coverage and liquidation date authority from approved acquisition evidence",
+  "publication_rule": "manifest and diagnostic report only; never publish acquisition evidence, adapter request, components, canonical data, M2 state, candidates, targets, or orders"
+}

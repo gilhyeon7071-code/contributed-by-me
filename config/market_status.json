@@ -1,0 +1,20 @@
+{
+  "kospi": {
+    "circuit_breaker": false,
+    "sidecar": false,
+    "last_alert_type": "서킷브레이커",
+    "release_time": "오전 9시 44분 44초"
+  },
+  "kosdaq": {
+    "circuit_breaker": false,
+    "sidecar": false,
+    "last_alert_type": "서킷브레이커",
+    "release_time": "오후 2시 15분 40초"
+  },
+  "other": {
+    "circuit_breaker": false,
+    "sidecar": false,
+    "last_alert_type": "사이드카",
+    "release_time": "오후 2시 30분 0초"
+  }
+}

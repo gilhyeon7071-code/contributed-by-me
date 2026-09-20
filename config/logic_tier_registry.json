@@ -1,0 +1,440 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-06-04T10:26:41+09:00",
+  "root": "E:\\1_Data",
+  "policy_reference": "E:\\1_Data\\docs\\references\\ROOTA_LOGIC_TIER_PROCEDURE.md",
+  "source_reference": "D:\\개발절차.txt",
+  "source_reference_role": "adapted_reference_not_direct_copy",
+  "registry_effect": {
+    "trading_effect": false,
+    "policy_effect": false,
+    "order_path_effect": false,
+    "score_effect": false
+  },
+  "entries": [
+    {
+      "logic_id": "roota_daily_paper_stable_chain",
+      "logic_tier": "stable",
+      "status": "blocked_current_batch",
+      "owner_path": "E:\\1_Data\\run_paper_daily.bat",
+      "source_artifacts": [
+        "E:\\1_Data\\paper\\fills.csv",
+        "E:\\1_Data\\paper\\paper_engine_config.json",
+        "E:\\1_Data\\2_Logs\\final_score_merge_status_latest.json"
+      ],
+      "output_artifacts": [
+        "E:\\1_Data\\paper\\orders_*_exec.xlsx",
+        "E:\\1_Data\\paper\\fills.csv",
+        "E:\\vibe\\buffett\\data\\ledger\\paper_fills_ledger.csv",
+        "E:\\1_Data\\2_Logs\\run_paper_daily_last.txt"
+      ],
+      "trading_effect": true,
+      "policy_effect": true,
+      "order_path_effect": true,
+      "score_effect": true,
+      "stable_comparison_required": false,
+      "promotion_status": "stable_current_blocked",
+      "promotion_blockers": [
+        "latest official batch failed at [0.55/14] krx_update_clean_incremental.py",
+        "orders(D)->fills(D)->ledger->stats E2E not verified for 2026-06-04"
+      ],
+      "validation_evidence": [
+        "E:\\1_Data\\2_Logs\\run_paper_daily_last.txt",
+        "E:\\1_Data\\2_Logs\\run_paper_daily_last.stderr.txt"
+      ],
+      "notes": "Current operating chain remains Stable, but current batch completion is blocked and must not be reported as operationally complete."
+    },
+    {
+      "logic_id": "news_signal_shadow_stage",
+      "logic_tier": "shadow",
+      "status": "read_only_active",
+      "owner_path": "E:\\1_Data\\tools\\build_news_signal_shadow_stage.py",
+      "source_artifacts": [
+        "E:\\1_Data\\2_Logs\\candidates_latest_data.with_final_score.csv",
+        "E:\\1_Data\\2_Logs\\news_score_status_latest.json",
+        "E:\\1_Data\\2_Logs\\surge_lob_latest.csv"
+      ],
+      "output_artifacts": [
+        "E:\\1_Data\\2_Logs\\news_signal_shadow_stage_latest.json",
+        "E:\\1_Data\\2_Logs\\news_signal_shadow_stage_latest.csv"
+      ],
+      "trading_effect": false,
+      "policy_effect": false,
+      "order_path_effect": false,
+      "score_effect": false,
+      "stable_comparison_required": false,
+      "promotion_status": "shadow_only",
+      "promotion_blockers": [
+        "not consumed by paper_engine order path",
+        "news quality validation is separate from pipeline PASS"
+      ],
+      "validation_evidence": [
+        "E:\\1_Data\\2_Logs\\news_signal_shadow_stage_latest.json",
+        "E:\\1_Data\\docs\\exec-plans\\active\\20260603_news_signal_shadow_stage.md"
+      ],
+      "notes": "Records structured news stages without changing score, Gate, order, fill, ledger, broker, or policy behavior."
+    },
+    {
+      "logic_id": "surge_entry_change_exception_policy_candidate",
+      "logic_tier": "candidate",
+      "status": "plan_only",
+      "owner_path": "E:\\1_Data\\docs\\exec-plans\\active\\20260528_surge_entry_change_exception_policy.md",
+      "source_artifacts": [
+        "E:\\1_Data\\2_Logs\\surge_entry_change_block_audit_latest.json",
+        "E:\\1_Data\\2_Logs\\surge_entry_change_conditional_rule_audit_latest.json",
+        "E:\\1_Data\\2_Logs\\surge_entry_change_threshold_sensitivity_latest.json"
+      ],
+      "output_artifacts": [],
+      "trading_effect": false,
+      "policy_effect": false,
+      "order_path_effect": false,
+      "score_effect": false,
+      "stable_comparison_required": true,
+      "promotion_status": "candidate_only",
+      "promotion_blockers": [
+        "plan only",
+        "requires read-only candidate emission before paper or live behavior",
+        "requires LOB quality and same-condition Stable comparison"
+      ],
+      "validation_evidence": [
+        "E:\\1_Data\\docs\\exec-plans\\active\\20260528_surge_entry_change_exception_policy.md"
+      ],
+      "notes": "A narrow exception candidate may be reviewed, but global threshold relaxation is not supported and no order path approval exists."
+    },
+    {
+      "logic_id": "intraday_surge_policy_group_separation",
+      "logic_tier": "candidate",
+      "status": "read_only_partial",
+      "owner_path": "E:\\1_Data\\docs\\exec-plans\\active\\20260526_intraday_surge_isolation_policy.md",
+      "source_artifacts": [
+        "E:\\1_Data\\2_Logs\\entry_policy_group_report_latest.json",
+        "E:\\1_Data\\2_Logs\\entry_policy_change_candidate_review_latest.json"
+      ],
+      "output_artifacts": [
+        "E:\\1_Data\\2_Logs\\entry_policy_group_report_latest.json",
+        "E:\\1_Data\\2_Logs\\entry_policy_change_candidate_review_latest.json"
+      ],
+      "trading_effect": false,
+      "policy_effect": false,
+      "order_path_effect": false,
+      "score_effect": false,
+      "stable_comparison_required": true,
+      "promotion_status": "candidate_only",
+      "promotion_blockers": [
+        "normal, intraday, surge evidence must remain separated",
+        "shadow or probe rows cannot justify live promotion",
+        "requires runtime D consistency and fresh samples"
+      ],
+      "validation_evidence": [
+        "E:\\1_Data\\docs\\exec-plans\\active\\20260526_intraday_surge_isolation_policy.md"
+      ],
+      "notes": "Defines policy-group separation and read-only reports; it does not change operating policy values."
+    },
+    {
+      "logic_id": "logic_tier_registry_procedure",
+      "logic_tier": "hotfix",
+      "status": "procedure_added",
+      "owner_path": "E:\\1_Data\\config\\logic_tier_registry.json",
+      "source_artifacts": [
+        "D:\\개발절차.txt",
+        "E:\\1_Data\\docs\\references\\ROOTA_LOGIC_TIER_PROCEDURE.md"
+      ],
+      "output_artifacts": [
+        "E:\\1_Data\\config\\logic_tier_registry.json",
+        "E:\\1_Data\\docs\\references\\ROOTA_LOGIC_TIER_PROCEDURE.md",
+        "E:\\1_Data\\docs\\exec-plans\\active\\20260604_logic_tier_registry_procedure.md"
+      ],
+      "trading_effect": false,
+      "policy_effect": false,
+      "order_path_effect": false,
+      "score_effect": false,
+      "stable_comparison_required": false,
+      "promotion_status": "hotfix_applied",
+      "promotion_blockers": [],
+      "validation_evidence": [],
+      "notes": "Procedure-only registry for operating-impact classification. It does not alter runtime behavior."
+    },
+    {
+      "logic_id": "final_score_merge_stable_scoring_chain",
+      "logic_tier": "stable",
+      "status": "active_with_freshness_caution",
+      "owner_path": "E:\\1_Data\\tools\\final_score_merge_daily.py",
+      "source_artifacts": [
+        "E:\\1_Data\\2_Logs\\candidates_latest_data.with_news_score.csv",
+        "E:\\1_Data\\2_Logs\\surge_lob_latest.csv",
+        "E:\\1_Data\\2_Logs\\future_signal_preview_latest.json",
+        "E:\\1_Data\\2_Logs\\news_score_status_latest.json"
+      ],
+      "output_artifacts": [
+        "E:\\1_Data\\2_Logs\\candidates_latest_data.with_final_score.csv",
+        "E:\\1_Data\\2_Logs\\final_score_merge_status_latest.json"
+      ],
+      "trading_effect": false,
+      "policy_effect": true,
+      "order_path_effect": false,
+      "score_effect": true,
+      "stable_comparison_required": false,
+      "promotion_status": "stable_current_with_caution",
+      "promotion_blockers": [
+        "final_score asof_ymd is 20260602 while 2026-06-04 score expected date context may differ",
+        "official daily batch is currently failed, so latest score reflection is partial"
+      ],
+      "validation_evidence": [
+        "E:\\1_Data\\2_Logs\\final_score_merge_status_latest.json"
+      ],
+      "notes": "Stable scoring merge path. It affects candidate score interpretation but does not submit orders by itself."
+    },
+    {
+      "logic_id": "risk_orchestration_stable_guard",
+      "logic_tier": "stable",
+      "status": "active_defensive",
+      "owner_path": "E:\\1_Data\\tools\\build_production_risk_playbook.py",
+      "source_artifacts": [
+        "E:\\1_Data\\2_Logs\\risk_orchestration_latest.json",
+        "E:\\1_Data\\2_Logs\\production_risk_playbook_latest.json",
+        "E:\\1_Data\\paper\\trades_calc.csv"
+      ],
+      "output_artifacts": [
+        "E:\\1_Data\\2_Logs\\risk_orchestration_latest.json",
+        "E:\\1_Data\\2_Logs\\production_risk_playbook_latest.json"
+      ],
+      "trading_effect": true,
+      "policy_effect": true,
+      "order_path_effect": true,
+      "score_effect": false,
+      "stable_comparison_required": false,
+      "promotion_status": "stable_current",
+      "promotion_blockers": [
+        "dd_stop_triggered remains true",
+        "es_triggered remains true"
+      ],
+      "validation_evidence": [
+        "E:\\1_Data\\2_Logs\\risk_orchestration_latest.json"
+      ],
+      "notes": "Stable risk sizing and guard layer. It can reduce or block operating exposure and must remain FAIL-CLOSED."
+    },
+    {
+      "logic_id": "p1_entry_gate_stable_guard",
+      "logic_tier": "stable",
+      "status": "active",
+      "owner_path": "E:\\1_Data\\paper_engine.py",
+      "source_artifacts": [
+        "E:\\1_Data\\2_Logs\\p1_entry_gate_status_latest.json",
+        "E:\\1_Data\\2_Logs\\risk_orchestration_latest.json"
+      ],
+      "output_artifacts": [
+        "E:\\1_Data\\2_Logs\\p1_entry_gate_status_latest.json"
+      ],
+      "trading_effect": true,
+      "policy_effect": true,
+      "order_path_effect": true,
+      "score_effect": false,
+      "stable_comparison_required": false,
+      "promotion_status": "stable_current",
+      "promotion_blockers": [
+        "gate status text contains existing mojibake in reason fields",
+        "official daily batch is currently failed, so full E2E reflection is not verified"
+      ],
+      "validation_evidence": [
+        "E:\\1_Data\\2_Logs\\p1_entry_gate_status_latest.json"
+      ],
+      "notes": "Stable P1 entry gate layer. Current artifact shows entry candidates and max-new values but does not replace E2E verification."
+    },
+    {
+      "logic_id": "kis_order_dispatch_stable_path",
+      "logic_tier": "stable",
+      "status": "mock_dry_run_current",
+      "owner_path": "E:\\1_Data\\tools\\kis_order_dispatch_from_exec.py",
+      "source_artifacts": [
+        "E:\\1_Data\\paper\\orders_20260604_exec.xlsx",
+        "E:\\1_Data\\2_Logs\\orderflow_observer_state_latest.json",
+        "E:\\1_Data\\2_Logs\\production_risk_playbook_latest.json"
+      ],
+      "output_artifacts": [
+        "E:\\1_Data\\2_Logs\\kis_order_dispatch_20260604_mock.json",
+        "E:\\1_Data\\paper\\orders_20260604_broker_submit_mock.csv"
+      ],
+      "trading_effect": false,
+      "policy_effect": true,
+      "order_path_effect": true,
+      "score_effect": false,
+      "stable_comparison_required": false,
+      "promotion_status": "stable_current_mock_only",
+      "promotion_blockers": [
+        "current evidence is mock mode and apply=false",
+        "source_fresh=false in orderflow guard requires fail-closed interpretation"
+      ],
+      "validation_evidence": [
+        "E:\\1_Data\\2_Logs\\kis_order_dispatch_20260604_mock.json"
+      ],
+      "notes": "Stable dispatch code path, but current evidence is mock dry-run and must not be reported as live order execution."
+    },
+    {
+      "logic_id": "backtest_validation_acceptance_gate",
+      "logic_tier": "stable",
+      "status": "failed_current",
+      "owner_path": "E:\\1_Data\\tools\\backtest_validation_framework.py",
+      "source_artifacts": [
+        "E:\\1_Data\\paper\\paper_engine_config.json",
+        "E:\\1_Data\\paper\\prices\\ohlcv_paper.parquet",
+        "E:\\vibe\\buffett\\data\\ledger\\paper_fills_ledger.csv"
+      ],
+      "output_artifacts": [
+        "E:\\1_Data\\2_Logs\\backtest_validation_latest.json"
+      ],
+      "trading_effect": false,
+      "policy_effect": true,
+      "order_path_effect": false,
+      "score_effect": false,
+      "stable_comparison_required": false,
+      "promotion_status": "stable_validation_failed",
+      "promotion_blockers": [
+        "backtest_validation_latest.json passed=false"
+      ],
+      "validation_evidence": [
+        "E:\\1_Data\\2_Logs\\backtest_validation_latest.json"
+      ],
+      "notes": "Stable validation gate. Failure must block ready/fixed wording for affected strategy promotion."
+    },
+    {
+      "logic_id": "trading_stage_validation_transition_gate",
+      "logic_tier": "stable",
+      "status": "hold_current",
+      "owner_path": "E:\\1_Data\\tools\\build_trading_stage_validation_report.py",
+      "source_artifacts": [
+        "E:\\1_Data\\2_Logs\\paper_pnl_summary_last.json",
+        "E:\\1_Data\\2_Logs\\live_vs_bt_feedback_latest.json",
+        "E:\\1_Data\\2_Logs\\kis_live_canary_first_latest.json"
+      ],
+      "output_artifacts": [
+        "E:\\1_Data\\2_Logs\\trading_stage_validation_latest.json"
+      ],
+      "trading_effect": false,
+      "policy_effect": true,
+      "order_path_effect": false,
+      "score_effect": false,
+      "stable_comparison_required": false,
+      "promotion_status": "stable_transition_hold",
+      "promotion_blockers": [
+        "paper_judgment_operational",
+        "paper_mdd_live_transition",
+        "paper_quality_gate",
+        "canary_execute_mode"
+      ],
+      "validation_evidence": [
+        "E:\\1_Data\\2_Logs\\trading_stage_validation_latest.json"
+      ],
+      "notes": "Stable transition-readiness gate. Current judgment is paper-stage hold and must not be treated as live readiness."
+    },
+    {
+      "logic_id": "future_signal_preview_shadow",
+      "logic_tier": "shadow",
+      "status": "read_only_active",
+      "owner_path": "E:\\1_Data\\tools\\build_future_signal_preview.py",
+      "source_artifacts": [
+        "E:\\1_Data\\2_Logs\\candidates_latest_data.with_final_score.csv"
+      ],
+      "output_artifacts": [
+        "E:\\1_Data\\2_Logs\\future_signal_preview_latest.json"
+      ],
+      "trading_effect": false,
+      "policy_effect": false,
+      "order_path_effect": false,
+      "score_effect": false,
+      "stable_comparison_required": false,
+      "promotion_status": "shadow_only",
+      "promotion_blockers": [
+        "read_only_for_trading=true",
+        "orders_modified=false",
+        "fills_modified=false",
+        "ledger_modified=false",
+        "gate_modified=false",
+        "risk_lock_modified=false"
+      ],
+      "validation_evidence": [
+        "E:\\1_Data\\2_Logs\\future_signal_preview_latest.json"
+      ],
+      "notes": "Future-signal preview is read-only evidence and cannot approve trading by itself."
+    },
+    {
+      "logic_id": "surge_realtime_detector_stable_observer",
+      "logic_tier": "stable",
+      "status": "observer_active",
+      "owner_path": "E:\\1_Data\\tools\\surge_detector_realtime.py",
+      "source_artifacts": [
+        "E:\\1_Data\\2_Logs\\intraday_prices_history_20260604.csv",
+        "E:\\1_Data\\paper\\surge_params.json"
+      ],
+      "output_artifacts": [
+        "E:\\1_Data\\2_Logs\\surge_realtime_latest.json",
+        "E:\\1_Data\\2_Logs\\surge_realtime_latest.csv"
+      ],
+      "trading_effect": false,
+      "policy_effect": true,
+      "order_path_effect": false,
+      "score_effect": true,
+      "stable_comparison_required": false,
+      "promotion_status": "stable_observer_current",
+      "promotion_blockers": [
+        "surge observations require LOB/orderflow and policy-gate checks before entry interpretation"
+      ],
+      "validation_evidence": [
+        "E:\\1_Data\\2_Logs\\surge_realtime_latest.json"
+      ],
+      "notes": "Stable realtime surge observer. Detection output is not entry approval without downstream gates."
+    },
+    {
+      "logic_id": "surge_lob_orderflow_shadow_guard",
+      "logic_tier": "shadow",
+      "status": "read_only_active",
+      "owner_path": "E:\\1_Data\\tools\\surge_lob_ingest.py",
+      "source_artifacts": [
+        "E:\\1_Data\\2_Logs\\surge_realtime_latest.csv",
+        "E:\\1_Data\\2_Logs\\kis_ws_ticks_20260604.jsonl"
+      ],
+      "output_artifacts": [
+        "E:\\1_Data\\2_Logs\\surge_lob_latest.json",
+        "E:\\1_Data\\2_Logs\\surge_lob_latest.csv"
+      ],
+      "trading_effect": false,
+      "policy_effect": false,
+      "order_path_effect": false,
+      "score_effect": true,
+      "stable_comparison_required": false,
+      "promotion_status": "shadow_guard_current",
+      "promotion_blockers": [
+        "LOB and orderflow diagnostics are evidence inputs, not order approval",
+        "NO_LOB/NO_HISTORY states must remain fail-closed"
+      ],
+      "validation_evidence": [
+        "E:\\1_Data\\2_Logs\\surge_lob_latest.json"
+      ],
+      "notes": "LOB/orderflow evidence can adjust scoring diagnostics but missing or stale data must not relax entry policy."
+    },
+    {
+      "logic_id": "logic_tier_registry_validator",
+      "logic_tier": "hotfix",
+      "status": "validator_added",
+      "owner_path": "E:\\1_Data\\tools\\validate_logic_tier_registry.py",
+      "source_artifacts": [
+        "E:\\1_Data\\config\\logic_tier_registry.json",
+        "E:\\1_Data\\run_paper_daily.bat"
+      ],
+      "output_artifacts": [
+        "E:\\1_Data\\2_Logs\\logic_tier_registry_validation_latest.json",
+        "E:\\1_Data\\2_Logs\\logic_tier_registry_validation_latest.csv"
+      ],
+      "trading_effect": false,
+      "policy_effect": false,
+      "order_path_effect": false,
+      "score_effect": false,
+      "stable_comparison_required": false,
+      "promotion_status": "hotfix_applied",
+      "promotion_blockers": [],
+      "validation_evidence": [
+        "E:\\1_Data\\2_Logs\\logic_tier_registry_validation_latest.json"
+      ],
+      "notes": "Read-only validator for the logic tier registry. It is called from run_paper_daily.bat post-chain step [16.959/16], writes validation reports, and does not alter trading, policy, score, order, fill, ledger, or broker behavior."
+    }
+  ]
+}

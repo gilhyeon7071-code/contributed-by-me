@@ -1,0 +1,91 @@
+{
+  "version": "1.0",
+  "updated_at": "2026-04-22",
+  "max_age_days": 7,
+  "cache_ttl_sec": 3600,
+  "ministry_boost_multiplier": 1.5,
+  "ministries": [
+    {
+      "id": "MOEF",
+      "name": "기획재정부",
+      "url": "https://mofe.go.kr/com/detailRssTagService.do?bbsId=MOSFBBS_000000000028",
+      "method": "GET",
+      "agenda_ids": ["PA007"],
+      "weight": 1.0,
+      "enabled": true,
+      "note": "자본시장·밸류업·재정정책 담당"
+    },
+    {
+      "id": "MOTIR",
+      "name": "산업통상자원부",
+      "url": "https://www.motir.go.kr/kor/article/ATCL3f49a5a8c/rss",
+      "method": "POST",
+      "agenda_ids": ["PA001", "PA002", "PA004", "PA005", "PA009"],
+      "weight": 1.0,
+      "enabled": true,
+      "note": "반도체·방산·에너지·조선·소부장 담당. POST 방식 필수"
+    },
+    {
+      "id": "MSIT",
+      "name": "과학기술정보통신부",
+      "url": "https://www.msit.go.kr/user/rss/rss.do?bbsSeqNo=94",
+      "method": "GET",
+      "agenda_ids": ["PA001", "PA008"],
+      "weight": 1.0,
+      "enabled": true,
+      "note": "AI·반도체·K-콘텐츠 담당"
+    },
+    {
+      "id": "MOLIT",
+      "name": "국토교통부",
+      "url": "https://www.molit.go.kr/dev/board/board_rss.jsp?rss_id=NEWS",
+      "method": "GET",
+      "cookie_seed_url": "https://www.molit.go.kr",
+      "agenda_ids": ["PA006"],
+      "weight": 1.0,
+      "enabled": true,
+      "note": "건설·주택 담당. 세션 쿠키 필요"
+    },
+    {
+      "id": "FSC",
+      "name": "금융위원회",
+      "url": "https://www.fsc.go.kr/about/fsc_bbs_rss/?fid=0111",
+      "method": "GET",
+      "agenda_ids": ["PA007"],
+      "weight": 1.0,
+      "enabled": true,
+      "note": "자본시장·금융규제 담당"
+    },
+    {
+      "id": "MOHW",
+      "name": "보건복지부",
+      "url": "https://www.mohw.go.kr/rss/board.es?mid=a10503000000&bid=0027",
+      "method": "GET",
+      "agenda_ids": ["PA003"],
+      "weight": 1.0,
+      "enabled": true,
+      "note": "바이오헬스 담당"
+    },
+    {
+      "id": "DAPA",
+      "name": "방위사업청",
+      "url": null,
+      "method": "NAVER_NEWS",
+      "naver_query": "방위사업청 방산 방위산업 무기수출 K방산 국방 방산수출",
+      "agenda_ids": ["PA002"],
+      "weight": 0.8,
+      "enabled": true,
+      "note": "공식 RSS 없음. Naver News API 대체"
+    },
+    {
+      "id": "MOF",
+      "name": "해양수산부",
+      "url": "https://www.mof.go.kr/doc/ko/rssFeed.do?bbsSeq=10",
+      "method": "GET",
+      "agenda_ids": ["PA005"],
+      "weight": 1.0,
+      "enabled": true,
+      "note": "조선·해운 담당"
+    }
+  ]
+}

@@ -1,0 +1,356 @@
+{
+  "generated_at": "2026-04-15T15:48:01",
+  "as_of": "20260415",
+  "state_path": "E:\\1_Data\\_runtime\\selection_policy_verify_20260415_154736\\paper_state_ONE_OF_TWO.json",
+  "replay_orders_path": "E:\\vibe\\buffett\\data\\orders\\replay_orders_latest.csv",
+  "open_position_recovery": {
+    "generated_at": "2026-04-15T15:48:01",
+    "open_positions_before": 9,
+    "open_positions_after": 9,
+    "normalized_fields": 18,
+    "auto_recovered_positions": 9,
+    "manual_review_positions": 0,
+    "deduped_positions": 0,
+    "auto_recovered_details": [
+      {
+        "code": "005490",
+        "entry_date": "20260413",
+        "entry_order_id": "PAPER_BUY_005490_20260410_R20260413",
+        "lineage_origin": "RECOVERED_FROM_FILLS",
+        "source_order_id": "PAPER_BUY_005490_20260410_R20260413",
+        "reason": "normalized",
+        "action_hint": "누락 필드를 자동 복구함. 다음 저장부터 동일 필드가 유지되는지 확인"
+      },
+      {
+        "code": "005930",
+        "entry_date": "20260415",
+        "entry_order_id": "PAPER_BUY_005930_20260414_R20260415",
+        "lineage_origin": "RECOVERED_FROM_FILLS",
+        "source_order_id": "PAPER_BUY_005930_20260414_R20260415",
+        "reason": "normalized",
+        "action_hint": "누락 필드를 자동 복구함. 다음 저장부터 동일 필드가 유지되는지 확인"
+      },
+      {
+        "code": "007660",
+        "entry_date": "20260413",
+        "entry_order_id": "PAPER_BUY_007660_20260410_R20260413",
+        "lineage_origin": "RECOVERED_FROM_FILLS",
+        "source_order_id": "PAPER_BUY_007660_20260410_R20260413",
+        "reason": "normalized",
+        "action_hint": "누락 필드를 자동 복구함. 다음 저장부터 동일 필드가 유지되는지 확인"
+      },
+      {
+        "code": "011930",
+        "entry_date": "20260413",
+        "entry_order_id": "PAPER_BUY_011930_20260410_R20260413",
+        "lineage_origin": "RECOVERED_FROM_FILLS",
+        "source_order_id": "PAPER_BUY_011930_20260410_R20260413",
+        "reason": "normalized",
+        "action_hint": "누락 필드를 자동 복구함. 다음 저장부터 동일 필드가 유지되는지 확인"
+      },
+      {
+        "code": "028260",
+        "entry_date": "20260415",
+        "entry_order_id": "PAPER_BUY_028260_20260414_R20260415",
+        "lineage_origin": "RECOVERED_FROM_FILLS",
+        "source_order_id": "PAPER_BUY_028260_20260414_R20260415",
+        "reason": "normalized",
+        "action_hint": "누락 필드를 자동 복구함. 다음 저장부터 동일 필드가 유지되는지 확인"
+      },
+      {
+        "code": "043260",
+        "entry_date": "20260415",
+        "entry_order_id": "PAPER_BUY_043260_20260414_R20260415",
+        "lineage_origin": "RECOVERED_FROM_FILLS",
+        "source_order_id": "PAPER_BUY_043260_20260414_R20260415",
+        "reason": "normalized",
+        "action_hint": "누락 필드를 자동 복구함. 다음 저장부터 동일 필드가 유지되는지 확인"
+      },
+      {
+        "code": "050890",
+        "entry_date": "20260413",
+        "entry_order_id": "PAPER_BUY_050890_20260410_R20260413",
+        "lineage_origin": "RECOVERED_FROM_FILLS",
+        "source_order_id": "PAPER_BUY_050890_20260410_R20260413",
+        "reason": "normalized",
+        "action_hint": "누락 필드를 자동 복구함. 다음 저장부터 동일 필드가 유지되는지 확인"
+      },
+      {
+        "code": "058470",
+        "entry_date": "20260413",
+        "entry_order_id": "PAPER_BUY_058470_20260410_R20260413",
+        "lineage_origin": "RECOVERED_FROM_FILLS",
+        "source_order_id": "PAPER_BUY_058470_20260410_R20260413",
+        "reason": "normalized",
+        "action_hint": "누락 필드를 자동 복구함. 다음 저장부터 동일 필드가 유지되는지 확인"
+      },
+      {
+        "code": "095340",
+        "entry_date": "20260413",
+        "entry_order_id": "PAPER_BUY_095340_20260410_R20260413",
+        "lineage_origin": "RECOVERED_FROM_FILLS",
+        "source_order_id": "PAPER_BUY_095340_20260410_R20260413",
+        "reason": "normalized",
+        "action_hint": "누락 필드를 자동 복구함. 다음 저장부터 동일 필드가 유지되는지 확인"
+      }
+    ],
+    "manual_review_details": []
+  },
+  "replay_filter": {
+    "eligible_rows": 0,
+    "resume_rows": 0,
+    "discard_rows": 0,
+    "discard_codes": [],
+    "discard_source_order_ids": [],
+    "manual_review_rows": 0,
+    "manual_review_codes": [],
+    "queue_guard_reason": "",
+    "queue_guard_rows": 0,
+    "discard_details": [],
+    "manual_review_details": [],
+    "manual_review_snapshot_rows": [],
+    "resume_details": []
+  },
+  "replay_queue_scan": {},
+  "replay_quarantine": {},
+  "replay_prune": {},
+  "replay_consistency": {
+    "generated_at": "2026-04-15T15:48:01",
+    "as_of": "20260415",
+    "status": "OK",
+    "issues": [],
+    "metrics": {
+      "queue_rows": 0,
+      "due_today_rows": 0,
+      "future_rows": 0,
+      "expired_rows": 0,
+      "eligible_rows": 0,
+      "manual_review_rows": 0,
+      "quarantine_rows": 0,
+      "prune_removed_rows": 0,
+      "prune_remaining_rows": 0,
+      "queue_guard_rows": 0
+    }
+  },
+  "replay_consistency_remediation": {
+    "attempted": false,
+    "ok": false,
+    "status": "not_needed",
+    "trigger_issues": [],
+    "started_at": "2026-04-15T15:48:01",
+    "finished_at": "2026-04-15T15:48:01",
+    "returncode": null,
+    "stdout": "",
+    "stderr": "",
+    "action_hints": [],
+    "summary_sync": {},
+    "status_reason": "no_remediable_issue"
+  },
+  "replay_summary_sync": {
+    "attempted": true,
+    "status": "written",
+    "path": "E:\\vibe\\buffett\\data\\orders\\replay_orders_latest.json",
+    "rows": 0
+  },
+  "policy": {
+    "resume_open_positions": 9,
+    "auto_recovered_positions": 9,
+    "manual_review_positions": 0,
+    "resume_replay_rows": 0,
+    "discard_replay_rows": 0,
+    "manual_review_replay_rows": 0
+  },
+  "details": {
+    "auto_recovered_positions": [
+      {
+        "code": "005490",
+        "entry_date": "20260413",
+        "entry_order_id": "PAPER_BUY_005490_20260410_R20260413",
+        "lineage_origin": "RECOVERED_FROM_FILLS",
+        "source_order_id": "PAPER_BUY_005490_20260410_R20260413",
+        "reason": "normalized",
+        "action_hint": "누락 필드를 자동 복구함. 다음 저장부터 동일 필드가 유지되는지 확인"
+      },
+      {
+        "code": "005930",
+        "entry_date": "20260415",
+        "entry_order_id": "PAPER_BUY_005930_20260414_R20260415",
+        "lineage_origin": "RECOVERED_FROM_FILLS",
+        "source_order_id": "PAPER_BUY_005930_20260414_R20260415",
+        "reason": "normalized",
+        "action_hint": "누락 필드를 자동 복구함. 다음 저장부터 동일 필드가 유지되는지 확인"
+      },
+      {
+        "code": "007660",
+        "entry_date": "20260413",
+        "entry_order_id": "PAPER_BUY_007660_20260410_R20260413",
+        "lineage_origin": "RECOVERED_FROM_FILLS",
+        "source_order_id": "PAPER_BUY_007660_20260410_R20260413",
+        "reason": "normalized",
+        "action_hint": "누락 필드를 자동 복구함. 다음 저장부터 동일 필드가 유지되는지 확인"
+      },
+      {
+        "code": "011930",
+        "entry_date": "20260413",
+        "entry_order_id": "PAPER_BUY_011930_20260410_R20260413",
+        "lineage_origin": "RECOVERED_FROM_FILLS",
+        "source_order_id": "PAPER_BUY_011930_20260410_R20260413",
+        "reason": "normalized",
+        "action_hint": "누락 필드를 자동 복구함. 다음 저장부터 동일 필드가 유지되는지 확인"
+      },
+      {
+        "code": "028260",
+        "entry_date": "20260415",
+        "entry_order_id": "PAPER_BUY_028260_20260414_R20260415",
+        "lineage_origin": "RECOVERED_FROM_FILLS",
+        "source_order_id": "PAPER_BUY_028260_20260414_R20260415",
+        "reason": "normalized",
+        "action_hint": "누락 필드를 자동 복구함. 다음 저장부터 동일 필드가 유지되는지 확인"
+      },
+      {
+        "code": "043260",
+        "entry_date": "20260415",
+        "entry_order_id": "PAPER_BUY_043260_20260414_R20260415",
+        "lineage_origin": "RECOVERED_FROM_FILLS",
+        "source_order_id": "PAPER_BUY_043260_20260414_R20260415",
+        "reason": "normalized",
+        "action_hint": "누락 필드를 자동 복구함. 다음 저장부터 동일 필드가 유지되는지 확인"
+      },
+      {
+        "code": "050890",
+        "entry_date": "20260413",
+        "entry_order_id": "PAPER_BUY_050890_20260410_R20260413",
+        "lineage_origin": "RECOVERED_FROM_FILLS",
+        "source_order_id": "PAPER_BUY_050890_20260410_R20260413",
+        "reason": "normalized",
+        "action_hint": "누락 필드를 자동 복구함. 다음 저장부터 동일 필드가 유지되는지 확인"
+      },
+      {
+        "code": "058470",
+        "entry_date": "20260413",
+        "entry_order_id": "PAPER_BUY_058470_20260410_R20260413",
+        "lineage_origin": "RECOVERED_FROM_FILLS",
+        "source_order_id": "PAPER_BUY_058470_20260410_R20260413",
+        "reason": "normalized",
+        "action_hint": "누락 필드를 자동 복구함. 다음 저장부터 동일 필드가 유지되는지 확인"
+      },
+      {
+        "code": "095340",
+        "entry_date": "20260413",
+        "entry_order_id": "PAPER_BUY_095340_20260410_R20260413",
+        "lineage_origin": "RECOVERED_FROM_FILLS",
+        "source_order_id": "PAPER_BUY_095340_20260410_R20260413",
+        "reason": "normalized",
+        "action_hint": "누락 필드를 자동 복구함. 다음 저장부터 동일 필드가 유지되는지 확인"
+      }
+    ],
+    "manual_review_positions": [],
+    "discard_replay_rows": [],
+    "manual_review_replay_rows": [],
+    "resume_replay_rows": []
+  },
+  "entry_exit_lifecycle": {
+    "generated_at": "2026-04-15T15:48:01",
+    "status": "PASS",
+    "open_positions_before": 9,
+    "open_positions_after": 9,
+    "opened_position_rows": 0,
+    "closed_position_rows": 0,
+    "entry_fill_rows": 0,
+    "exit_fill_rows": 0,
+    "closed_trade_rows": 0,
+    "exit_trade_delta": 0,
+    "exit_trade_delta_tolerated": false,
+    "exit_trade_delta_legacy_tolerated": false,
+    "expected_open_positions_after": 9,
+    "open_position_delta": 0,
+    "open_position_delta_tolerated": false,
+    "pending_signal_rows": 0,
+    "replay_due_today": 0,
+    "replay_manual_review_rows": 0,
+    "recovery_manual_review_positions": 0,
+    "replay_discard_rows": 0,
+    "issues": []
+  },
+  "state_machine_summary": {
+    "generated_at": "2026-04-15T15:48:01",
+    "status": "PASS",
+    "lifecycle_status": "PASS",
+    "replay_consistency_status": "OK",
+    "states_present": [
+      "OPEN_POSITION"
+    ],
+    "allowed_states": [
+      "IDLE",
+      "PENDING_SIGNAL",
+      "ENTRY_FILLED",
+      "OPEN_POSITION",
+      "REPLAY_DUE",
+      "REPLAY_FUTURE",
+      "REPLAY_EXPIRED",
+      "REPLAY_DISCARDED",
+      "MANUAL_REVIEW",
+      "EXIT_FILLED",
+      "CLOSED_TRADE"
+    ],
+    "allowed_transitions": [
+      "IDLE->PENDING_SIGNAL",
+      "PENDING_SIGNAL->ENTRY_FILLED",
+      "ENTRY_FILLED->OPEN_POSITION",
+      "OPEN_POSITION->REPLAY_DUE",
+      "REPLAY_DUE->ENTRY_FILLED",
+      "OPEN_POSITION->EXIT_FILLED",
+      "EXIT_FILLED->CLOSED_TRADE",
+      "OPEN_POSITION->MANUAL_REVIEW",
+      "REPLAY_DUE->MANUAL_REVIEW",
+      "REPLAY_DUE->REPLAY_DISCARDED"
+    ],
+    "counts": {
+      "pending_signal_rows": 0,
+      "replay_due_today": 0,
+      "replay_future_rows": 0,
+      "replay_expired_rows": 0,
+      "replay_discard_rows": 0,
+      "replay_manual_review_rows": 0,
+      "recovery_manual_review_positions": 0,
+      "entry_fill_rows": 0,
+      "open_positions_after": 9,
+      "exit_fill_rows": 0,
+      "closed_trade_rows": 0
+    },
+    "issues": []
+  },
+  "symbol_stop_summary": {
+    "generated_at": "2026-04-15T15:48:01",
+    "status": "PASS",
+    "stop_loss": -0.05,
+    "take_profit": null,
+    "trail_pct": null,
+    "counts": {
+      "stop_sell_rows": 0,
+      "stop_trade_rows": 0
+    },
+    "stop_reasons": [],
+    "issues": []
+  },
+  "legacy_derisk_summary": {
+    "generated_at": "2026-04-15T15:48:01",
+    "status": "PASS",
+    "ddm_enabled": true,
+    "ddm_stage_idx": -1,
+    "current_mdd_abs": 0.10694847232464544,
+    "threshold": 0.0,
+    "liquidate_weakest_pct": 0.0,
+    "selected_target_codes": [],
+    "executed_target_codes": [],
+    "remaining_target_codes": [],
+    "counts": {
+      "open_positions_before": 9,
+      "open_positions_after": 9,
+      "selected_targets": 0,
+      "executed_targets": 0,
+      "remaining_targets": 0
+    },
+    "issues": []
+  }
+}

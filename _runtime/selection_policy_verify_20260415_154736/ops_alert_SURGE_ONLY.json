@@ -1,0 +1,32 @@
+{
+  "generated_at": "2026-04-15T15:47:59",
+  "market_regime": "NORMAL",
+  "day_ret": 0.01911311392112469,
+  "max_new": 1,
+  "candidates_after_caps": 2,
+  "price_universe_codes": 11,
+  "evaluated": 1,
+  "entry_ready": 0,
+  "filled": 0,
+  "no_next_day": 0,
+  "cap_block": 0,
+  "processed_skip": 0,
+  "max_new_skip": 0,
+  "idempotent_skip": 0,
+  "stale_replay_used": 0,
+  "open_order_replay_used": 0,
+  "slo_target": 0.1,
+  "expected_min_fills": 0,
+  "slo_pass": true,
+  "universe_shrink_candidates": true,
+  "no_fill_reasons": [
+    "NO_ENTRY_READY"
+  ],
+  "open_notional_before_entry": 40057400.0,
+  "open_notional_after_exit": 40057400.0,
+  "gross_recalc_delta": 0.0,
+  "gross_recalc_applied": true,
+  "gross_cap_krw": 50000000.0,
+  "gross_headroom_after_exit": 9942600.0,
+  "gross_cap_util_after_exit": 0.801148
+}

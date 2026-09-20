@@ -1,0 +1,46 @@
+﻿{
+    "boot_sync":  {
+                      "enabled":  false,
+                      "description":  "창 우선 실행; 상태 동기화는 refresh loop에서 즉시/주기 수행"
+                  },
+    "market_hours":  {
+                         "open":  "09:00",
+                         "close":  "15:30"
+                     },
+    "windows":  {
+                    "pre_market":  {
+                                       "label":  "장전",
+                                       "start":  "00:00",
+                                       "end":  "09:00",
+                                       "screen_refresh_minutes":  0,
+                                       "state_refresh_minutes":  30
+                                   },
+                    "intraday":  {
+                                     "label":  "장중",
+                                     "start":  "09:00",
+                                     "end":  "15:30",
+                                     "screen_refresh_minutes":  10,
+                                     "state_refresh_minutes":  5,
+                                     "screen_refresh_seconds":  30
+                                 },
+                    "after_close":  {
+                                        "label":  "장후",
+                                        "start":  "15:30",
+                                        "end":  "18:00",
+                                        "screen_refresh_minutes":  0,
+                                        "state_refresh_minutes":  0
+                                    },
+                    "night":  {
+                                  "label":  "야간",
+                                  "start":  "18:00",
+                                  "end":  "24:00",
+                                  "screen_refresh_minutes":  0,
+                                  "state_refresh_minutes":  60
+                              },
+                    "weekend":  {
+                                    "label":  "주말/휴장",
+                                    "screen_refresh_minutes":  0,
+                                    "state_refresh_minutes":  60
+                                }
+                }
+}

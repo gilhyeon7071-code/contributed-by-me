@@ -1,0 +1,6 @@
+{
+  "notifyBuy": false,
+  "notifySell": false,
+  "notifyError": true,
+  "notifyMaintenance": true
+}

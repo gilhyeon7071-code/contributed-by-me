@@ -1,0 +1,51 @@
+{
+  "acquisition_evidence_published": false,
+  "candidate_selection_calculated": false,
+  "canonical_generated": false,
+  "capture_status_updated": true,
+  "checkpoint_attempt_count_after": 1,
+  "checkpoint_attempt_count_before": 0,
+  "full_capture_complete": false,
+  "generated_at": "2026-09-15T16:30:00.000000+09:00",
+  "m2_allowed": false,
+  "manifest_code_count": 2,
+  "manifest_updated": true,
+  "matched_code_count": 2,
+  "minimum_request_count": 5,
+  "minimum_requests_remaining": 4,
+  "missing_code_count": 0,
+  "missing_codes": [],
+  "network_execution_authorized": false,
+  "network_request_count": 0,
+  "next_pending_requests": [
+    {
+      "code": "000001",
+      "kind": "LIST_PAGE",
+      "page_no": 1,
+      "series": "B001"
+    }
+  ],
+  "operational_change": false,
+  "orders_generated": false,
+  "outputs": [
+    "E:\\1_Data\\_pytest_c8_dart_viewer_shadow_full_20260916_0935\\test_apply_writes_one_attempt_0\\paper\\strategies\\kospi_mcap_quarterly_v1\\data\\acquisition\\checkpoints\\manifest.json",
+    "E:\\1_Data\\_pytest_c8_dart_viewer_shadow_full_20260916_0935\\test_apply_writes_one_attempt_0\\paper\\strategies\\kospi_mcap_quarterly_v1\\reports\\c8_corporate_action_capture_status_20260915163000.json",
+    "E:\\1_Data\\_pytest_c8_dart_viewer_shadow_full_20260916_0935\\test_apply_writes_one_attempt_0\\paper\\strategies\\kospi_mcap_quarterly_v1\\reports\\c8_corporate_action_capture_status_latest.json"
+  ],
+  "package_mapping_count": 2,
+  "prospective_bulk_requests_executed": 1,
+  "prospective_capture_verdict": "C8_CORPORATE_ACTION_CAPTURE_PENDING",
+  "prospective_reason_codes": [
+    "CORPORATE_ACTION_REQUESTS_PENDING"
+  ],
+  "raw_path": "E:\\1_Data\\_pytest_c8_dart_viewer_shadow_full_20260916_0935\\test_apply_writes_one_attempt_0\\paper\\strategies\\kospi_mcap_quarterly_v1\\data\\inbox\\raw\\corp.zip",
+  "raw_sha256": "5bbea46616abd26c2eaab43d371a3fa4567340cf31774b100b77cf591f6cb808",
+  "raw_size_bytes": 447,
+  "reason_codes": [],
+  "scope": "M1_C8_CORP_CODE_PACKAGE_OFFLINE_CHECKPOINT",
+  "selection_as_of": "20260915",
+  "status": "PASS",
+  "strategy_id": "KOSPI_MCAP_QUARTERLY_V1",
+  "target_portfolio_calculated": false,
+  "verdict": "C8_CORP_CODE_CHECKPOINT_APPLIED"
+}

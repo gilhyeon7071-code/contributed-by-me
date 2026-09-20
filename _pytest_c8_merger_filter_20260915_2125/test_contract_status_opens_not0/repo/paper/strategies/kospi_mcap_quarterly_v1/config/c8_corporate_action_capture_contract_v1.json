@@ -1,0 +1,99 @@
+{
+  "contract_id": "KOSPI_MCAP_QUARTERLY_C8_CORPORATE_ACTION_CAPTURE",
+  "contract_version": "1.0.1",
+  "strategy_id": "KOSPI_MCAP_QUARTERLY_V1",
+  "adapter_contract_id": "KOSPI_MCAP_QUARTERLY_C8_CORPORATE_ACTION_ADAPTER",
+  "source_id": "DART_CORPORATE_ACTIONS_COMPOSITE",
+  "purpose": "Build a fail-closed exact-universe manifest and restartable checkpoints before any full OpenDART corporate-action collection",
+  "base_universe": {
+    "role": "listing_security_as_of",
+    "official_source_id": "KRX_MDCSTAT019_CURRENT_BASIC_INFO",
+    "method": "KRX_DATA_MARKETPLACE_MANUAL",
+    "temporal_mode": "RETRIEVAL_DATE_SNAPSHOT",
+    "transform_profile_id": "MDCSTAT019_ACTIVE_LISTING_MEMBERSHIP_V1",
+    "raw_path_prefix": "paper/strategies/kospi_mcap_quarterly_v1/data/inbox/raw/",
+    "selection_rule": "market=KOSPI AND security_group=주권 AND share_type=보통주",
+    "stock_code_pattern": "^[0-9A-Z]{6}$",
+    "minimum_code_count": 100,
+    "minimum_capture_time_kst": "15:40:00",
+    "required_query_parameters": ["mktId"],
+    "source_page_url": "https://data.krx.co.kr/contents/MDC/MDI/outerLoader/index.cmd?screenId=MDCSTAT019",
+    "download_host": "data.krx.co.kr",
+    "accepted_csv_profiles": {
+      "KRX_DATA_MARKETPLACE_KO_V1": {
+        "code": "단축코드",
+        "market": "시장구분",
+        "security_group": "증권구분",
+        "share_type": "주식종류",
+        "listed_date": "상장일"
+      },
+      "KRX_MDCSTAT019_API_V1": {
+        "code": "ISU_SRT_CD",
+        "market": "MKT_TP_NM",
+        "security_group": "SECUGRP_NM",
+        "share_type": "KIND_STKCERT_TP_NM",
+        "listed_date": "LIST_DD"
+      }
+    }
+  },
+  "required_capture_evidence_fields": [
+    "strategy_id",
+    "role",
+    "official_source_id",
+    "method",
+    "temporal_mode",
+    "transform_profile_id",
+    "selection_as_of",
+    "capture_started_at",
+    "retrieved_at",
+    "http_response_timestamp",
+    "captured_at",
+    "authenticated_session_verified",
+    "http_status",
+    "historical_replay",
+    "source_page_url",
+    "download_url",
+    "query_parameters",
+    "raw_path",
+    "raw_sha256",
+    "raw_size_bytes",
+    "raw_file_mtime_ns"
+  ],
+  "traversal": {
+    "query_start_rule": "query_start equals earliest listed_date in the exact selected base universe",
+    "query_end_rule": "query_end equals selection_as_of",
+    "corp_code_package_requests": 1,
+    "required_series": [
+      "MERGER_DECISION_HISTORY",
+      "MERGER_COMPLETION_HISTORY"
+    ],
+    "first_page_requests_per_code": 2,
+    "additional_page_rule": "every page 2 through total_page returned by each first-page request",
+    "document_rule": "every accepted unique rcept_no has one PASS original document package",
+    "order": "stock_code ascending, series contract order, page ascending, rcept_no ascending"
+  },
+  "checkpoint_contract": {
+    "idempotent_replay": "identical latest PASS or FAIL attempt is a no-op",
+    "failed_attempt_retry": "allowed",
+    "conflicting_success_replay": "reject",
+    "list_success_rule": "dart_status 013 requires first page, total_page 0, row_count 0, and no receipts; dart_status 000 requires total_page at least 1",
+    "unknown_code_or_receipt": "reject",
+    "write_rule": "atomic strategy-namespace JSON only"
+  },
+  "request_budget": {
+    "minimum_request_formula": "1 + code_count * first_page_requests_per_code",
+    "default_max_requests_per_run": 1000,
+    "hard_stop_statuses": ["020"],
+    "daily_limit_note": "OpenDART documents status 020 as generally occurring above 20000 requests, but the effective limit may differ; this is advisory and never an execution authorization"
+  },
+  "publication_rule": "manifest, checkpoint, and diagnostic status only; never publish acquisition evidence, adapter components, canonical, M2, candidates, targets, or orders",
+  "execution_permissions": {
+    "network_collection_allowed_by_contract_status": false,
+    "bulk_requests_allowed_without_ready_manifest": false,
+    "acquisition_evidence_publish_allowed": false,
+    "canonical_publish_allowed": false,
+    "m2_allowed": false,
+    "candidate_selection_allowed": false,
+    "orders_allowed": false
+  }
+}

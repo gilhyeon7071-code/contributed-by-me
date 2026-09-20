@@ -1,0 +1,83 @@
+---
+id: thesis-2026-06-08-KRX-322000-google-rss-blocked
+type: thesis
+title: KRX 322000 Google RSS Thesis Blocked
+created: 2026-06-08
+updated: 2026-06-08
+status: thesis
+stage: 2
+
+market: KRX
+ticker: "322000"
+company: HD현대에너지솔루션
+theme: []
+
+verification:
+  verified: false
+  verification_status: unknown
+  source_count: 1
+  confidence: unknown
+
+thesis:
+  thesis_status: blocked_unverified_source
+  source_verified_required: true
+  source_verified: false
+  claim: unknown
+  supporting_notes:
+    - [[2026-06-08_KRX_322000_google-rss-coverage-source]]
+    - [[2026-06-08_KRX_322000_google-rss-coverage-verification]]
+  opposing_notes:
+    - Source verification is unknown.
+  invalidation_conditions:
+    - Original article body remains unavailable.
+    - Source verification remains unknown.
+  time_horizon: unknown
+  impact_direction: unknown
+  impact_strength: unknown
+
+trading:
+  used_for_trading: false
+  trading_approved: false
+  direct_candidate_allowed: false
+  execution_allowed: false
+  gate_checked: false
+  policy_link:
+
+audit:
+  human_reviewed: false
+  ai_generated: false
+  last_reviewed_at:
+  change_reason: generated blocked thesis note
+---
+
+# KRX 322000 Google RSS Thesis Blocked
+
+## Claim
+- unknown
+
+## Supporting Evidence
+- [[2026-06-08_KRX_322000_google-rss-coverage-source]]
+- [[2026-06-08_KRX_322000_google-rss-coverage-verification]]
+
+## Remaining Uncertainty
+- Coverage exists, but no verified event claim exists.
+
+## Trading Boundary
+- This blocked thesis does not approve trading, candidates, signals, orders, fills, ledger rows, stats, or gate pass status.
+
+<!-- STOCK_AI_AUTO_LINKS_BEGIN -->
+## Auto Links
+- Updated at: `2026-06-08T18:15:43+09:00`
+- Company: [[KRX_322000_HD현대에너지솔루션]]
+- Article archive seed: `E:\1_Data\Stock-AI-Wiki\01_Sources\article_archive\google_rss_article_archive_seed_2026-06-08.json`
+- Latest observation title: `HD현대에너지솔루션, ‘RE100’ 파트너로 우뚝… 태양광 영토 넓힌다 - 핀포인트뉴스`
+- Latest observation source: `핀포인트뉴스`
+- Latest observation published_at: `2026-05-12T16:00:00+09:00`
+- Latest observation url: `https://news.google.com/rss/articles/CBMic0FVX3lxTFB2dkVsMkR4dndfYTc5TXRVUXE4dk1KN0ctVzFRc2tSVS0xRmVxbnM4M29RdTUwa2hHQVVlbXVlQkxOSzBtSTFtdldYZkxBRExkcU1jTlJQLVQ1YmFab2txVGhCUlI5MU9rT1FMTFR0ZUptQ0XSAXdBVV95cUxOTnYybXAtUWwtX0ZqSHMybUgtSWdIanBqNGxORUdra09QbDQyaXFIVlRtRU4xMzlSUlM2SnBqcXNwa3ZuSi1xSC1rUURPV2RhV0h1dmE3UVl6NmhjblZfYVZKTm5rZUJjeU5aZmtKdEpGZHlzdDhGOA?oc=5`
+- Body status: `missing_original_text`
+- Original text available: `false`
+- Concept: [[concept_gas-energy_가스-에너지]]
+
+## Safety Boundary
+- This auto-link block does not approve trading, candidates, signals, orders, fills, ledger rows, stats, or gate pass status.
+<!-- STOCK_AI_AUTO_LINKS_END -->

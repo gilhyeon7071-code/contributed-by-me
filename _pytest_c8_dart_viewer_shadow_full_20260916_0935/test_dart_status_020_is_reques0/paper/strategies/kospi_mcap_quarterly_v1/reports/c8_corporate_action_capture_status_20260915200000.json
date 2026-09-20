@@ -1,0 +1,24 @@
+{
+  "acquisition_evidence_published": false,
+  "adapter_components_generated": false,
+  "base_universe_authorized": true,
+  "bulk_requests_executed": 4,
+  "candidate_selection_calculated": false,
+  "canonical_generated": false,
+  "full_capture_complete": false,
+  "generated_at": "2026-09-15T20:00:00.000003+09:00",
+  "m2_allowed": false,
+  "manifest_integrity_pass": true,
+  "network_execution_authorized": false,
+  "next_pending_requests": [],
+  "operational_change": false,
+  "orders_generated": false,
+  "reason_codes": [
+    "CORPORATE_ACTION_REQUESTS_PENDING"
+  ],
+  "scope": "M1_C8_CORPORATE_ACTION_CAPTURE_STATUS",
+  "status": "BLOCKED",
+  "strategy_id": "KOSPI_MCAP_QUARTERLY_V1",
+  "target_portfolio_calculated": false,
+  "verdict": "C8_CORPORATE_ACTION_CAPTURE_PENDING"
+}
