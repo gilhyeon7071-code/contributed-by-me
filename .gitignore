@@ -205,3 +205,8 @@ scratchpad/
 
 # [2026-09-20] 런타임 플래그
 dashboard_boot_sync_disabled.flag
+
+# [2026-09-20] 파이썬 런타임(설치물)·시험 임시 폴더
+_runtime/
+_pytest_tmp/
+_pytest_*/
