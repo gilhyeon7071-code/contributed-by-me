@@ -51196,3 +51196,12 @@ account_clear_min_scale 바닥                                = 0.25    (applied
 - 처리: 루트 .py 45개 + pyproject.toml + cleanup_1_data_v2.cmd + 대시보드 기준서 추가 커밋 **70198138**. 셸 오타로 생긴 12개는 **삭제하지 않고** `backup/20260920_shell_junk/` 로 이동. 런타임 플래그·`_runtime/`(설치물 547)·`_pytest_*`·`live/`·`state/`·로그 제외 규칙 추가(커밋 4995ca0a·0c9acf06·마지막).
 - 검증: `intraday_paper_loop.py` 추적됨, 파일 그대로(170,623B), 미추적 0건, **pytest 246 passed(새로 실행)**.
 - 교훈: 명령이 시간 초과로 죽어도 다음 줄은 그냥 실행된다. **시간 초과를 성공으로 읽지 말 것.**
+
+## 556. 루트 코드 30개 누락분 커밋 + virtual_ledger.csv 추적 해제 (2026-09-20)
+- 발견: 재검증 중 변경(M) 31건. 원인은 앞 커밋의 `git add "*.py"` 시간 초과 — **같은 형태 세 번째**
+  (① parquet 126MB 추적 중 ② 루트 스크립트 미담김(intraday_paper_loop.py 포함) ③ 이번 변경분)
+- 조치: 파일별 add 30건(시간 초과 회피) → `934d2d98`. `virtual_ledger.csv` 는 매일 갱신되는 데이터라
+  `git rm --cached` + .gitignore. 파일 실체 17,088B 그대로 확인
+- 실측: 커밋 31 files / +5,705 −878. 미추적 0, 변경 0. 추적 데이터 파일 38건은 전부 골든 픽스처·증거(합 76KB)
+- 시험: **전체 `pytest tests/ -q` = 711 passed** (앞서 보고한 246 은 V2 관련 파일만 돌린 부분 실행이었다 — 전수 아님)
+- 교훈: 시간 초과를 성공으로 읽지 말 것. 루프 add 는 건별 rc 를 본다
