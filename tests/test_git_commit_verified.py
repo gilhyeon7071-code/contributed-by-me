@@ -89,3 +89,11 @@ def test_timeout_is_not_reported_as_success(monkeypatch):
     monkeypatch.setattr(T.subprocess, "run", boom)
     rc, _, err = T.run(["status"], ".", timeout=1)
     assert rc == 124 and "TIMEOUT" in err
+
+
+def test_korean_commit_message_does_not_crash_the_verifier(repo, capsys):
+    """2026-09-20 실측: Windows cp949 로 git 출력을 읽어 검증 단계에서 터졌다.
+    커밋은 나갔는데 검증이 죽으면 '됐는지' 를 알 수 없다 — 그 자리를 막는다."""
+    (repo / "b.py").write_text("y=2\n", encoding="utf-8")
+    assert call(repo, "b.py", msg="한글 메시지 — 검증된 커밋 확인") == 0
+    assert "[OK]" in capsys.readouterr().out

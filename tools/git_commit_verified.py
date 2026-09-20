@@ -24,8 +24,10 @@ GIT = ["git", "-c", "core.fsmonitor=false"]
 def run(args, cwd, timeout=600):
     """rc 를 숨기지 않는다. 시간 초과는 시간 초과로 돌려준다."""
     try:
-        p = subprocess.run(GIT + args, cwd=cwd, capture_output=True, text=True, timeout=timeout)
-        return p.returncode, p.stdout, p.stderr
+        # Windows 기본 인코딩(cp949)으로 읽으면 한글 커밋 메시지에서 터진다 (2026-09-20 실측)
+        p = subprocess.run(GIT + args, cwd=cwd, capture_output=True, timeout=timeout)
+        dec = lambda b: (b or b"").decode("utf-8", errors="replace")  # noqa: E731
+        return p.returncode, dec(p.stdout), dec(p.stderr)
     except subprocess.TimeoutExpired:
         return 124, "", f"TIMEOUT after {timeout}s: git {' '.join(args)}"
 
