@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import io
 import json
 import logging
 import os
@@ -38,6 +39,46 @@ DEFAULT_ORDERFLOW_OBSERVER_PATH = LOG_DIR / "orderflow_observer_state_latest.jso
 DEFAULT_PRODUCTION_RISK_PLAYBOOK_PATH = LOG_DIR / "production_risk_playbook_latest.json"
 P0_DAILY_CHECK_REPORT_RE = re.compile(r"^p0_daily_check_\d{8}_\d{6}\.json$")
 logger = logging.getLogger("kis_order_dispatch_from_exec")
+
+
+
+def _append_dispatch_ledger(summary: dict, rows: "pd.DataFrame") -> None:
+    """발주 1회를 **append-only 원장**에 한 줄 남긴다.
+
+    [2026-09-10] 신설. `kis_order_dispatch_<날짜>_<mode>.json` 은 **날짜당 1개**라
+    같은 날 여러 번 돌면 나중 실행이 덮어쓴다. 그래서 이력이 아니라 "마지막 실행" 이다.
+
+    2026-09-08 에 브로커에는 주문번호 7건이 있는데 우리 쪽 요약의 generated_at 은 12:57 이었고
+    주문은 13:05·13:15 에도 나갔다. 그 7건이 topn 주문이라는 것을 **주문 금액이 슬롯의
+    99.9~100% 라는 산술로 역산**해서야 알았다. 원장이 있었으면 한 줄로 끝났다.
+
+    주문번호(`ord_no`)를 반드시 남긴다. 계좌가 하나라 **귀속은 주문번호로만** 가능하다.
+    """
+    try:
+        led = LOG_DIR / "kis_order_dispatch_ledger.jsonl"
+        keep = ["code", "side", "qty", "price", "dispatch_status", "ord_no", "note"]
+        orders = []
+        if rows is not None and len(rows):
+            for _, r in rows.iterrows():
+                orders.append({k: (None if pd.isna(r.get(k)) else str(r.get(k))) for k in keep if k in rows.columns})
+        line = {
+            "ts": dt.datetime.now().isoformat(timespec="seconds"),
+            "D": summary.get("D"),
+            "mode": summary.get("mode"),
+            "apply": summary.get("apply"),
+            "orders_path": summary.get("orders_path"),
+            "submit_log": summary.get("submit_log"),
+            "rows_eligible": summary.get("rows_eligible"),
+            "rows_new": summary.get("rows_new"),
+            "counts": summary.get("counts"),
+            "orders": orders,
+        }
+        led.parent.mkdir(parents=True, exist_ok=True)
+        with io.open(led, "a", encoding="utf-8") as f:
+            f.write(json.dumps(line, ensure_ascii=False) + chr(10))
+    except Exception as exc:
+        # 원장 실패가 발주를 막으면 안 된다. 다만 조용히 넘기지는 않는다.
+        logger.error("[DISPATCH_LEDGER] 기록 실패 (%s: %s)", type(exc).__name__, exc)
 
 
 def _env_float(name: str, default: float) -> float:
@@ -191,11 +232,18 @@ def _load_risk_gate_guard() -> Dict[str, object]:
     account_basis = metrics.get("account_basis") if isinstance(metrics.get("account_basis"), dict) else {}
     account_ok = str(account_basis.get("status") or "").upper() == "PASS"
 
+    # [2026-09-09 사용자 결정] 낙폭 차단의 SSOT 는 account_equity 계열뿐이다.
+    #   hard_trigger_metrics 의 basis 도 capital_total_plus_realized_pnl 로 같은 계열이다(실측).
+    #   세 번째였던 metrics.max_drawdown_pct 는 rolling_weighted_mean_60(전략 관측 지표)이라
+    #   **차단 판정에서 제거한다.** 실측 20260908: account -0.1324 / rolling -0.5523,
+    #   한도 0.36 기준으로 전자는 통과 후자는 전면 차단 - 폴백이 정책을 조용히 바꾸고 있었다.
+    # 그리고 원래 이 값이 None 이면 expected_dd=False 가 되어 **fail-open** 이었다.
+    #   출처가 없으면 위험을 모르는 것이므로 막는다.
     hard_max_dd = _pick_float(
         hard_metrics.get("max_drawdown_pct"),
         account_basis.get("max_drawdown_pct") if account_ok else None,
-        metrics.get("max_drawdown_pct"),
     )
+    account_mdd_unavailable = bool(hard_max_dd is None)
     hard_day_loss = _pick_float(
         hard_metrics.get("daily_loss_pct"),
         hard_metrics.get("last_day_ret"),
@@ -207,6 +255,8 @@ def _load_risk_gate_guard() -> Dict[str, object]:
     day_limit = abs(_pick_float(limits.get("max_daily_loss_pct")) or 0.0)
     daily_active = _bool_from_obj(metrics.get("hard_daily_loss_active", metrics.get("daily_loss_active")), True)
     expected_dd = bool(hard_max_dd is not None and dd_limit > 0.0 and hard_max_dd <= -dd_limit)
+    if account_mdd_unavailable:
+        expected_dd = True  # fail-closed: Account Risk SSOT 부재
     expected_day = bool(daily_active and hard_day_loss is not None and day_limit > 0.0 and hard_day_loss <= -day_limit)
     risk_off_enabled = bool(ro.get("enabled", False))
     risk_reasons = [str(x) for x in (ro.get("reasons") or [])]
@@ -217,7 +267,9 @@ def _load_risk_gate_guard() -> Dict[str, object]:
         reasons.append("risk_off_enabled")
     if kill_triggered:
         reasons.append("kill_switch_triggered")
-    if expected_dd:
+    if account_mdd_unavailable:
+        reasons.append("account_mdd_unavailable")
+    elif expected_dd:
         reasons.append("expected_max_dd_trigger")
     if expected_day:
         reasons.append("expected_daily_loss_trigger")
@@ -241,6 +293,9 @@ def _load_risk_gate_guard() -> Dict[str, object]:
         "expected_max_dd_trigger": expected_dd,
         "expected_daily_loss_trigger": expected_day,
         "account_basis_status": str(account_basis.get("status") or ""),
+        "account_mdd_unavailable": bool(account_mdd_unavailable),
+        # 아래는 **관측 전용**이다 (Strategy Health Observer). 차단 판정에 쓰지 않는다.
+        "strategy_metrics_role": "observer_only_not_used_for_blocking",
         "strategy_max_drawdown_pct": (
             (metrics.get("strategy_basis") or {}).get("max_drawdown_pct")
             if isinstance(metrics.get("strategy_basis"), dict)
@@ -400,8 +455,40 @@ def _parse_prefixes(raw: str) -> List[str]:
 
 
 def _detect_latest_orders_path() -> Optional[Path]:
-    cand = sorted(PAPER_DIR.glob("orders_*_exec.xlsx"), key=lambda p: p.stat().st_mtime, reverse=True)
+    """`--date` 가 없을 때 쓸 주문 파일. **파일명의 거래일**로 고른다.
+
+    [2026-09-10] 종전에는 `mtime` 최신으로 골랐다. 그런데 후처리 도구가
+    `paper/orders_20260824_exec.xlsx` 를 **매일 다시 쓴다**. 그래서 그 파일이 늘 최신이 되고,
+    dispatch 가 매일 **11거래일 묵은 주문 파일**을 집었다(2026-09-10 실측).
+
+    mtime 은 "언제 손댔나" 이고 우리가 원하는 건 "어느 거래일 주문인가" 다. 파일명이 정본이다.
+    09-02~09-09 파일이 전부 0행인 것(PAPER_EXIT_ONLY)이 이 고리를 오래 감춰 왔다.
+    """
+    def _key(x: Path):
+        m = re.search(r"orders_(\d{8})_exec\.xlsx$", x.name)
+        return (m.group(1) if m else "", x.stat().st_mtime)
+    cand = sorted(PAPER_DIR.glob("orders_*_exec.xlsx"), key=_key, reverse=True)
     return cand[0] if cand else None
+
+
+def _orders_staleness(orders_path: Path) -> tuple:
+    """주문 파일이 며칠 묵었는지. (거래일수, 파일의 거래일, 기준 거래일)"""
+    m = re.search(r"orders_(\d{8})_exec\.xlsx$", orders_path.name)
+    if not m:
+        return (None, None, None)
+    ymd = m.group(1)
+    try:
+        sys.path.insert(0, str(ROOT))
+        from holiday_manager import HolidayManager
+        hm = HolidayManager()
+        ref = hm.previous_trading_day(dt.date.today().strftime("%Y%m%d"), include_target=True)
+        n, cur = 0, ref
+        while cur > ymd and n < 400:
+            cur = hm.previous_trading_day(cur)
+            n += 1
+        return (n, ymd, ref)
+    except Exception:
+        return (None, ymd, None)
 
 
 def _load_orders(
@@ -1126,12 +1213,17 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Dispatch KIS live orders from orders_{D}_exec.xlsx")
     ap.add_argument("--date", default="", help="YYYYMMDD. empty => infer from latest orders file name")
     ap.add_argument("--orders-path", default="", help="Path to orders_{D}_exec.xlsx")
+    ap.add_argument("--max-orders-stale-days", type=int, default=1,
+                    help="--date 없이 자동 선택한 주문 파일이 이 거래일수보다 묵으면 발주하지 않는다. "
+                         "0 이면 당일만 허용. --date 를 명시한 재생에는 적용되지 않는다")
     ap.add_argument("--slicing-preview", default="", help="Path to execution_slicing_preview CSV; dry-run dispatch log only")
     ap.add_argument("--apply", action="store_true", help="Actually send orders. default is dry-run")
     ap.add_argument("--order-type", default="limit", choices=["market", "limit"])
     ap.add_argument("--max-orders", type=int, default=0, help="0 means all")
     ap.add_argument("--sleep-ms", type=int, default=120)
     ap.add_argument("--mock", default="auto", choices=["auto", "true", "false"])
+    ap.add_argument("--confirm-live", dest="confirm_live", default="",
+                    help="실계좌(prod) --apply 에 필요한 토큰. LIVE_APPLY 만 통과한다")
     ap.add_argument("--force-resend", action="store_true", help="Ignore existing submit log idempotency")
     ap.add_argument(
         "--no-pending-broker-check",
@@ -1168,6 +1260,17 @@ def main() -> int:
     ap.add_argument("--general-max-spread-bps", type=float, default=_env_float("GENERAL_ENTRY_MAX_SPREAD_BPS", 30.0))
     ap.add_argument("--general-min-signed-markout", type=float, default=_env_float("GENERAL_ENTRY_MIN_SIGNED_MARKOUT", 0.0))
     ap.add_argument("--general-lob-depth-levels", type=int, default=10)
+    # [2026-09-09] 지정가가 ask1 아래인 것은 지정가 주문의 정상 상태예요.
+    #   기존 프리체크는 즉시 체결 가능한 수량만 보고 주문을 죽였어요. PLANS (278) 참조.
+    ap.add_argument(
+        "--allow-resting-limit",
+        dest="allow_resting_limit",
+        action="store_true",
+        default=True,
+        help="지정가 주문은 ask1 아래여도 제출한다(호가창에 걸어둔다). "
+             "호가 부재·스프레드·주문흐름·리스크 가드는 그대로 적용된다",
+    )
+    ap.add_argument("--no-allow-resting-limit", dest="allow_resting_limit", action="store_false")
     ap.add_argument("--orderflow-guard", dest="orderflow_guard", action="store_true", default=True)
     ap.add_argument("--no-orderflow-guard", dest="orderflow_guard", action="store_false")
     ap.add_argument("--orderflow-observer-path", default=str(DEFAULT_ORDERFLOW_OBSERVER_PATH))
@@ -1225,6 +1328,21 @@ def main() -> int:
     if not orders_path.exists():
         logger.error("[STOP] orders file not found: %s", orders_path)
         return 2
+
+    # [2026-09-10] **묵은 주문 파일로는 발주하지 않는다.**
+    #   --date 없이 불리면 자동으로 파일을 고른다. 그 파일이 11거래일 묵은 것이었다.
+    #   그날 시장은 이미 다른 곳에 있다. 그 주문을 내는 것은 사고다.
+    #   --date 를 명시한 재생(replay)은 의도된 것이므로 건드리지 않는다.
+    if bool(args.apply) and not args.date and not args.orders_path:
+        stale_n, stale_ymd, stale_ref = _orders_staleness(orders_path)
+        if stale_n is not None and stale_n > int(getattr(args, "max_orders_stale_days", 1) or 1):
+            logger.error(
+                "[STOP] 주문 파일이 %d거래일 묵었어요 (파일 %s / 기준 %s). "
+                "**발주하지 않습니다.** 의도한 재생이면 --date %s 를 명시하거나 "
+                "--max-orders-stale-days 로 한도를 올리세요. path=%s",
+                stale_n, stale_ymd, stale_ref, stale_ymd, orders_path,
+            )
+            return 3
 
     if not d:
         stem_digits = "".join(ch for ch in orders_path.stem if ch.isdigit())
@@ -1343,6 +1461,26 @@ def main() -> int:
             logger.warning("validation fallback failed: %s", e)
 
     mock_opt: Optional[bool] = _resolve_mock_arg(args.mock, default_auto_mock=True)
+
+    # [2026-09-08] 실계좌 발주는 토큰 없이는 나가지 않는다.
+    #   그 전까지 실화폐 경로를 막는 것은 배치 레이어의 관례뿐이었고, 그것도 고르지 않았다.
+    #     run_paper_daily.bat  BROKER_MODE=APPLY 에 BROKER_CONFIRM=LIVE_APPLY 요구  (있음)
+    #     run_daily.bat        APPLY / APPLY_SYNC 에 확인 토큰 없음.  BROKER_MODE 기본값이
+    #                          APPLY_SYNC 라 **BROKER_MOCK=false 하나로 실화폐 발주가 된다** (없음)
+    #     run_intraday_paper.bat  KIS_MOCK=0 이면 LOOP_DISPATCH_APPLY=0 (관례. 환경변수로 뒤집힌다)
+    #   디스패처가 유일한 길목이므로 여기에 둔다. topn_dispatch.py 의 --confirm 과 같은 방식이다.
+    #   실이력: 실계좌 발주는 2026-07-29(035720) 과 2026-08-25(462860/001510) 6건뿐이고
+    #   전부 수동 카나리아였다. 자동 경로에서 실화폐가 나간 적은 없다 - 그 상태를 계약으로 만든다.
+    if args.apply and (mock_opt is False):
+        token = str(args.confirm_live or os.getenv("KIS_LIVE_CONFIRM", "")).strip()
+        if token != "LIVE_APPLY":
+            logger.error(
+                "[STOP] live(prod) apply requires an explicit token. "
+                "pass --confirm-live LIVE_APPLY (or set KIS_LIVE_CONFIRM=LIVE_APPLY). "
+                "mock=%s apply=%s", args.mock, args.apply,
+            )
+            return 2
+        logger.warning("[LIVE] 실계좌 발주가 토큰으로 승인됐다. 실화폐다")
 
     client: Optional[KISOrderClient] = None
     if args.apply:
@@ -1660,7 +1798,10 @@ def main() -> int:
             spread_bps = 0.0
             hoga_features: Dict[str, object] = {}
             try:
-                hoga = client.inquire_hoga(str(rec["code"]))
+                # [2026-08-25] inquire_hoga 는 * 뒤라 code 가 키워드 전용이다.
+                #   위치 인자로 넘겨 TypeError 가 났고 precheck 가 항상 FAIL 이었다.
+                #   -> 실주문 6건이 PRECHECK_LOB_UNAVAILABLE 로 전부 막혔다.
+                hoga = client.inquire_hoga(code=str(rec["code"]))
                 output = hoga.get("output", {}) if isinstance(hoga, dict) else {}
                 if isinstance(output, dict):
                     hoga_features = _extract_buy_lob_features(
@@ -1692,12 +1833,50 @@ def main() -> int:
                 rec["bidq1"] = round(float(_to_float(hoga_features.get("bidq1"), 0.0) or 0.0), 4)
                 rec["imbalance"] = round(float(imbalance), 6)
                 rec["spread_bps"] = round(float(spread_bps), 4)
-                if str(rec["pretrade_lob_status"]).upper() != "OK":
-                    rec["dispatch_status"] = "PRECHECK_LOB_UNAVAILABLE"
-                    rec["precheck"] = "FAIL"
-                    rec["precheck_msg"] = f"general BUY LOB unavailable: {rec['pretrade_lob_reason']}"
-                    records.append(rec)
-                    continue
+                _lob_st = str(rec["pretrade_lob_status"]).upper()
+                if _lob_st != "OK":
+                    # [2026-09-08] 두 가지를 한 이름으로 부르고 있었다.
+                    #   NO_LOB           호가 자체를 못 받았다 (데이터 부재)
+                    #   NO_EXECUTABLE_ASK 호가는 멀쩡한데 우리 지정가로 살 수 있는 수량이 0
+                    #                     (지정가가 최우선매도호가보다 아래)
+                    # 둘 다 PRECHECK_LOB_UNAVAILABLE 로 찍혀서 원인 귀속이 불가능했다.
+                    # 실측 20260908 13:0x: 351320 지정가 4,360 / ask1 4,750 -> NO_EXECUTABLE_ASK.
+                    #   호가는 depth 10 까지 정상 수신 중이었다. "호가를 못 받았다" 가 아니다.
+                    #   같은 시각 012210 도 NO_EXECUTABLE_ASK 였는데 그 종목은 10:02 에
+                    #   실제로 체결됐다 - 즉 이 상태는 데이터 장애가 아니라 **가격 미달**이다.
+                    # 1단계의 측정값이 "언제 매매 가능해졌는가" 이므로 이 둘은 반드시 갈려야 한다.
+                    # [2026-09-09] 지정가가 ask1 아래인 건 지정가 주문의 정상 상태예요.
+                    #   호가창에 걸어두면 값이 내려올 때 체결돼요. 실측(ARM_SCORE 선정 120건,
+                    #   신호일 종가 -> 다음 거래일): 저가가 지정가(종가x1.005)를 건드린 비율 92.5%,
+                    #   시가 기준으로도 61.7% 예요. 그런데 이 프리체크가 09:05 시점의 순간 ask1 만
+                    #   보고 주문을 죽여서 92.5% 의 기회를 0% 로 만들고 있었어요.
+                    #   가드가 틀린 게 아니라 시장성 주문용 판정을 지정가 전략에 적용한 거예요.
+                    #   호가 부재(LOB_UNAVAILABLE)는 그대로 막아요. 그게 이 가드의 본래 목적이에요.
+                    if (_lob_st == "NO_EXECUTABLE_ASK"
+                            and bool(getattr(args, "allow_resting_limit", False))
+                            and str(args.order_type).strip().lower() == "limit"):
+                        rec["pretrade_lob_resting"] = True
+                        _append_precheck_msg(
+                            rec,
+                            f"resting_limit: limit={rec['price']} ask1={rec.get('ask1')} "
+                            f"(즉시체결 불가. 호가창에 걸어둬요)",
+                        )
+                        # 막지 않고 아래 스프레드 검사로 넘어가요
+                    elif _lob_st == "NO_EXECUTABLE_ASK":
+                        rec["dispatch_status"] = "PRECHECK_LIMIT_UNREACHABLE"
+                        rec["precheck_msg"] = (
+                            f"limit not marketable: limit={rec['price']} ask1={rec.get('ask1')} "
+                            f"({rec['pretrade_lob_reason']})"
+                        )
+                        rec["precheck"] = "FAIL"
+                        records.append(rec)
+                        continue
+                    else:
+                        rec["dispatch_status"] = "PRECHECK_LOB_UNAVAILABLE"
+                        rec["precheck_msg"] = f"general BUY LOB unavailable: {rec['pretrade_lob_reason']}"
+                        rec["precheck"] = "FAIL"
+                        records.append(rec)
+                        continue
                 max_spread = max(0.0, float(args.general_max_spread_bps))
                 if max_spread > 0.0 and float(spread_bps) > max_spread:
                     rec["dispatch_status"] = "PRECHECK_LOB_SPREAD_BLOCK"
@@ -1706,7 +1885,19 @@ def main() -> int:
                     records.append(rec)
                     continue
                 executable_qty = int(_to_int(hoga_features.get("executable_qty"), 0))
-                if executable_qty < int(rec["qty"]):
+                # [2026-09-09] 두 번째 층이에요. 위에서 통과시켜도 여기서 다시 막혔어요.
+                #   executable_qty 는 "지금 당장 지정가 이하로 살 수 있는 수량" 이라
+                #   지정가를 걸어두는 주문에는 0 이 정상이에요. 0 이면 차단하고,
+                #   부분 가용이면 수량을 그만큼 잘라버리는데 절단도 틀렸어요 -
+                #   의도한 포지션이 아니라 지금 체결되는 만큼만 걸게 되니까요.
+                #   걸어둔 주문은 나중에 값이 내려오면 전량 체결될 수 있어요.
+                _resting = bool(rec.get("pretrade_lob_resting")) or (
+                    bool(getattr(args, "allow_resting_limit", False))
+                    and str(args.order_type).strip().lower() == "limit"
+                )
+                if _resting:
+                    _append_precheck_msg(rec, f"lob_executable_qty={executable_qty};resting_no_truncate")
+                elif executable_qty < int(rec["qty"]):
                     if executable_qty > 0:
                         original_qty = int(rec["qty"])
                         rec.setdefault("requested_qty", original_qty)
@@ -1923,7 +2114,36 @@ def main() -> int:
         try:
             old = pd.read_csv(out_csv, dtype=str)
             out_df = pd.concat([old, new_df], ignore_index=True)
-        except Exception:
+        except pd.errors.EmptyDataError:
+            # [2026-09-10 추가] **빈 파일은 격리 대상이 아니다.**
+            #   발주가 0건인 날은 이 파일이 BOM 5바이트로만 남는데,
+            #   그것을 "읽지 못했다" 로 보고 격리하면 매 사이클 격리본이 하나씩 쌓인다.
+            #   실측: 격리 도입 당일에만 85개, 전부 5바이트였다.
+            #   격리는 **내용이 있는데 파싱이 안 될 때** 하는 것이다. 잃을 기록이 없으면 안 한다.
+            logger.info("[SUBMIT_LOG] 기존 파일이 비어 있다(보존할 기록 없음) path=%s", out_csv)
+            out_df = new_df
+        except Exception as exc:
+            # [2026-09-10] 종전에는 조용히 `out_df = new_df` 로 떨어졌다.
+            #   그러면 **읽기에 실패한 순간 그날의 기존 발주 기록이 사라진다.**
+            #   이 파일은 "무엇을 발주했는가" 의 유일한 원장이다. 지우면 복구가 안 된다.
+            #   2026-09-08 에 브로커에는 주문번호 7건이 있는데 우리 쪽 기록이 0건이었고,
+            #   그 7건이 topn 주문이라는 것을 **주문 금액(슬롯의 99.9~100%)으로 역산**해서야 알았다.
+            #   앞으로는 읽지 못한 파일을 격리해 남기고 크게 알린다. 덮어쓰지 않는다.
+            quarantine = out_csv.with_name(
+                out_csv.stem + ".unreadable_" + dt.datetime.now().strftime("%Y%m%d_%H%M%S") + out_csv.suffix
+            )
+            try:
+                out_csv.replace(quarantine)
+                logger.error(
+                    "[SUBMIT_LOG] 기존 기록을 읽지 못했다(%s: %s). **덮어쓰지 않고 격리한다** -> %s",
+                    type(exc).__name__, exc, quarantine,
+                )
+            except Exception as mv_exc:
+                logger.error(
+                    "[SUBMIT_LOG] 읽기 실패(%s) + 격리 실패(%s). "
+                    "**기존 기록이 손실될 수 있다** path=%s",
+                    type(exc).__name__, type(mv_exc).__name__, out_csv,
+                )
             out_df = new_df
     else:
         out_df = new_df
@@ -1982,6 +2202,7 @@ def main() -> int:
         "PRECHECK_ERROR_BUY_PSBL",
         "PRECHECK_SCORE_BLOCK",
         "PRECHECK_LOB_UNAVAILABLE",
+        "PRECHECK_LIMIT_UNREACHABLE",
         "PRECHECK_LOB_SPREAD_BLOCK",
         "PRECHECK_LOB_QTY_BLOCK",
         "PRECHECK_MARKOUT_BLOCK",
@@ -2018,6 +2239,8 @@ def main() -> int:
         "latest_ok": bool(metrics_latest_ok),
     }
     out_json.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 날짜당 1개인 위 요약은 덮어써진다. 이력은 여기 남는다.
+    _append_dispatch_ledger(summary, new_df)
 
     reject_rows = new_df[reject_mask].copy()
     reject_pattern = {

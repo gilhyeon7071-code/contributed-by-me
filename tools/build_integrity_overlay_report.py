@@ -6,6 +6,7 @@ import glob
 import json
 from pathlib import Path
 from typing import Any, Dict, List
+import logging
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_REPORT_GLOB = str(ROOT / "checkfile" / "outputs" / "verification_report_*.json")
@@ -89,6 +90,19 @@ STATUS_FAIL = {"FAILED", "ERROR"}
 STATUS_SKIP = {"SKIPPED"}
 
 
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
 def _now() -> str:
     return dt.datetime.now().isoformat(timespec="seconds")
 
@@ -240,10 +254,10 @@ def main() -> int:
     out_latest.write_text(json.dumps(overlay, ensure_ascii=False, indent=2), encoding="utf-8-sig")
     out_md.write_text(_render_md(overlay), encoding="utf-8-sig")
 
-    print(f"[OK] source={report_path}")
-    print(f"[OK] json={out_json}")
-    print(f"[OK] latest={out_latest}")
-    print(f"[OK] md={out_md}")
+    _log_print(f"[OK] source={report_path}")
+    _log_print(f"[OK] json={out_json}")
+    _log_print(f"[OK] latest={out_latest}")
+    _log_print(f"[OK] md={out_md}")
 
     return 0
 

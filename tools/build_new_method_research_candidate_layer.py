@@ -1,0 +1,21 @@
+"""Separate read-only daily candidate layer for historically supported strategy grammars."""
+from __future__ import annotations
+import importlib.util,json
+from datetime import datetime
+from pathlib import Path
+import numpy as np,pandas as pd
+ROOT=Path(__file__).resolve().parents[1];LOG=ROOT/'2_Logs';BASE=ROOT/'tools'/'build_new_method_price_structure_validation.py';START=pd.Timestamp('2026-07-01')
+OUT=LOG/'new_method_research_candidates_history.csv'; OUT_L=LOG/'new_method_research_candidates_latest.csv'; OUT_J=LOG/'new_method_research_candidates_latest.json'; OUT_M=LOG/'new_method_research_candidates_latest.md'
+def base():
+ s=importlib.util.spec_from_file_location('research_layer_base',BASE);m=importlib.util.module_from_spec(s);s.loader.exec_module(m);return m
+def main():
+ b=base(); axis=b.load_base(); report=axis._load_report_module();raw=report.load_data();integrity=raw.attrs.get('price_history_integrity',{});f=report.compute_factors(raw);f['date']=pd.to_datetime(f['date'],errors='coerce').dt.normalize();f['research_regime']=f['date'].map(report._assign_report_research_regime(f));f=axis._exact_returns(f)
+ p=f[(f.date>=START)&f.market.astype(str).str.upper().isin(['KOSPI','KOSDAQ'])&(pd.to_numeric(f.close,errors='coerce')>0)&(pd.to_numeric(f.value,errors='coerce')>0)].copy().sort_values(['price_history_key','price_session_index'],kind='mergesort');g=p.groupby('price_history_key',sort=False);prev_close=g.close.shift(1);prev_high20=g.close.transform(lambda x:x.rolling(20,min_periods=20).max().shift(1));p['gap_pct']=p.open/(prev_close+1e-9)-1;p['residual_ret20']=p.ret_20-p.m_ret_20;width=g.close.transform(lambda x:x.rolling(20,min_periods=20).std(ddof=0)/(x.rolling(20,min_periods=20).mean()+1e-9));wr=width.groupby(p.date,sort=False).rank(method='first',pct=True);gr=p.gap_pct.groupby(p.date,sort=False).rank(method='first',pct=True);rr=p.residual_ret20.groupby(p.date,sort=False).rank(method='first',pct=True);vr=p.v_accel.groupby(p.date,sort=False).rank(method='first',pct=True)
+ rules={'BOLLINGER_MR':(p.close-g.close.transform(lambda x:x.rolling(20,min_periods=20).mean()))/(g.close.transform(lambda x:x.rolling(20,min_periods=20).std(ddof=0))+1e-9)<=-1.5,'BREAKOUT_252D':p.high_52w_gap.le(0)&p.close.notna(),'RESIDUAL_MOMENTUM':rr.ge(.8),'SQUEEZE_VOLUME_BREAK':wr.le(.2)&vr.ge(.8)&p.close.gt(prev_high20)}
+ rows=[]
+ for name,mask in rules.items():
+  q=p[mask.fillna(False)].copy();q['strategy_name']=name;q['signal_date']=q.date.dt.strftime('%Y-%m-%d');q['research_only']=True;q['operational_use']=False;q['strategy_rank']=q.groupby('date')['residual_ret20' if name=='RESIDUAL_MOMENTUM' else 'v_accel'].rank(ascending=False,method='first');rows.append(q)
+ out=pd.concat(rows,ignore_index=True) if rows else pd.DataFrame();cols=['signal_date','code','market','research_regime','strategy_name','strategy_rank','close','value','rs','rs_slope','stretch','v_accel','atr_pct','rsi14','gap_pct','residual_ret20','path_return_h1','path_return_h2','path_return_h5','research_only','operational_use'];out=out[[c for c in cols if c in out]].sort_values(['signal_date','strategy_name','strategy_rank','code']);
+ if out.duplicated(['signal_date','code','strategy_name']).any():raise SystemExit('duplicate research keys')
+ out.to_csv(OUT,index=False,encoding='utf-8-sig'); latest=out[out.signal_date.eq(out.signal_date.max())].copy() if len(out) else out;latest.to_csv(OUT_L,index=False,encoding='utf-8-sig');payload={'generated_at':datetime.now().isoformat(timespec='seconds'),'scope':'research_only_supported_strategy_candidate_layer','window':{'start':str(START.date()),'data_max':str(p.date.max().date())},'price_history_contract':integrity,'row_counts':{'history_rows':int(len(out)),'history_dates':int(out.signal_date.nunique()) if len(out) else 0,'latest_rows':int(len(latest))},'strategies':list(rules),'operational_change':False};OUT_J.write_text(json.dumps(payload,ensure_ascii=False,indent=2),encoding='utf-8');OUT_M.write_text('# Research Candidate Layer\n\n'+ '\n'.join([f'- {k}: {v}' for k,v in payload['row_counts'].items()])+ '\n- operating_use: false\n',encoding='utf-8');print(json.dumps({'status':'OK','history':str(OUT),'latest':str(OUT_L)},ensure_ascii=False))
+if __name__=='__main__':main()

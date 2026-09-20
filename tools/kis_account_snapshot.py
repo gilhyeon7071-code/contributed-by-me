@@ -3,6 +3,7 @@
 import argparse
 import datetime as dt
 import json
+import logging
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -13,6 +14,18 @@ from kis_order_client import KISOrderClient
 
 ROOT = Path(__file__).resolve().parents[1]
 LOG_DIR = ROOT / "2_Logs"
+logger = logging.getLogger("kis_account_snapshot")
+
+
+def _api_error_fields(e: Exception) -> Dict[str, object]:
+    return {
+        "error_type": type(e).__name__,
+        "error_code": str(getattr(e, "code", "") or ""),
+        "error_category": str(getattr(e, "category", "") or ""),
+        "status_code": getattr(e, "status_code", None),
+        "path": str(getattr(e, "path", "") or ""),
+        "message": str(e),
+    }
 
 
 def _to_int(v: object, default: int = 0) -> int:
@@ -48,6 +61,9 @@ def _pick_first_int(d: Dict[str, object], keys: List[str], default: int = 0) -> 
 
 
 def main() -> int:
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+
     ap = argparse.ArgumentParser(description="Build centralized KIS account snapshot (avg price + unrealized pnl)")
     ap.add_argument("--mock", default="auto", choices=["auto", "true", "false"])
     ap.add_argument("--with-quotes", action="store_true", help="Fetch latest quote per position")
@@ -68,7 +84,7 @@ def main() -> int:
     try:
         client = KISOrderClient.from_env(mock=mock_opt)
     except Exception as e:
-        print(f"[STOP] KIS env/config failed: {e}")
+        logger.error("[STOP] KIS env/config failed: %s", e)
         return 2
 
     mode = "mock" if client.cfg.mock else "prod"
@@ -76,12 +92,13 @@ def main() -> int:
     try:
         bal = client.inquire_balance_positions(max_pages=10)
     except Exception as e:
-        print(f"[STOP] inquire_balance failed: {e}")
+        logger.error("[STOP] inquire_balance failed: %s", e)
         return 2
 
     rows = bal.get("rows", []) or []
 
     pos_rows: List[Dict[str, object]] = []
+    quote_fail_count = 0
     for r in rows:
         code = str(r.get("pdno", "") or r.get("code", "") or "").strip().zfill(6)
         if not code.isdigit() or len(code) != 6:
@@ -102,8 +119,18 @@ def main() -> int:
                 lp = _to_float(qo.get("stck_prpr", 0), 0.0)
                 if lp > 0:
                     last_price = lp
-            except Exception:
-                pass
+            except Exception as e:
+                quote_fail_count += 1
+                ef = _api_error_fields(e)
+                logger.warning(
+                    "[WARN] quote failed code=%s type=%s code=%s category=%s status=%s path=%s",
+                    code,
+                    ef.get("error_type", ""),
+                    ef.get("error_code", ""),
+                    ef.get("error_category", ""),
+                    ef.get("status_code", ""),
+                    ef.get("path", ""),
+                )
 
         unrealized_krw = 0.0
         unrealized_pct = 0.0
@@ -137,6 +164,7 @@ def main() -> int:
         "mode": mode,
         "with_quotes": bool(args.with_quotes),
         "positions": int(len(df)),
+        "quote_fail_count": int(quote_fail_count),
         "total_notional_krw": total_notional,
         "total_unrealized_krw": total_unreal,
         "paths": {"positions_csv": str(out_csv), "snapshot_json": str(out_json)},
@@ -146,8 +174,8 @@ def main() -> int:
     out_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     out_latest.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print(f"[OK] positions_csv={out_csv} rows={len(df)}")
-    print(f"[OK] snapshot_json={out_json}")
+    logger.info("[OK] positions_csv=%s rows=%s", out_csv, len(df))
+    logger.info("[OK] snapshot_json=%s", out_json)
     return 0
 
 

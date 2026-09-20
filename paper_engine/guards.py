@@ -857,6 +857,7 @@ def evaluate_global_outlier_watcher(cfg: Dict[str, Any], log_dir: Path) -> Dict[
         "as_of_ymd": None,
         "age_days": None,
         "issues": [],
+        "display_health": "",
     }
     if not enabled:
         out["reason"] = "policy_disabled"
@@ -1004,10 +1005,18 @@ def evaluate_global_outlier_watcher(cfg: Dict[str, Any], log_dir: Path) -> Dict[
         if key in ignore_stage_keys:
             continue
         status = str(row.get("status") or "").upper()
-        # Dashboard status is a display/consumer health signal.  Do not let
-        # dashboard WARN/PARTIAL/FAIL become an entry gate caution by itself;
-        # real trade blockers must be present in blocking_issues_effective.
-        if key == "dashboard" and not has_effective_blocking:
+        # [2026-08-21] 대시보드는 표시/소비자 건강 신호다. 매매 결정의 입력이 아니다.
+        #
+        # 예전 조건은 `not has_effective_blocking` 일 때만 건너뛰는 것이었다. 그런데
+        # blocking_issues_effective 에 행이 있어도 그 행들이 아래 예외 처리로 전부
+        # 걸러지면 `issues` 에 대시보드 FAIL 만 남는다. 그러면 **화면 빌드 실패가
+        # 단독으로 매매를 BLOCK 시킨다.** 2026-08-21 09:09 진입 판정의 사유가
+        # `outlier=stage:dashboard:FAIL` 이었고, paper_engine.py 에는 그 문자열을 보고
+        # BLOCK 을 REDUCE 로 낮추는 특례까지 붙어 있었다 - 배선을 끊는 대신 완화를 얹은 것이다.
+        #
+        # 정보는 버리지 않는다. 결정에서 빼고 display_health 로 남긴다.
+        if key == "dashboard":
+            out["display_health"] = f"stage:{key}:{status}"
             continue
         if status in block_stage_statuses:
             issues.append(f"stage:{key}:{status}")
@@ -1367,15 +1376,28 @@ def evaluate_backtest_validation_guard(cfg: Dict[str, Any]) -> Dict[str, Any]:
     if not gate_results and isinstance(obj.get("gates"), list):
         gate_results = obj.get("gates")
     failed_names: List[str] = []
+    # [2026-08-29] 판정을 못 한 게이트가 조용히 통과로 흡수되던 것을 분리한다.
+    #   backtest_validation_framework 는 표본이 모자라면 deferred=True 로 두고
+    #   **passed=True 를 준다**(look_ahead_proxy / walk_forward / cpcv_pbo 등 4곳).
+    #   여기서는 passed==False 만 실패로 모았으므로, "돌지 않은 검사" 가
+    #   "통과한 검사" 와 구별되지 않았다 - fail-open 이다.
+    #   실패로 바꾸지는 않는다(미평가와 실패는 다르다). 별도로 세어 주의로 올린다.
+    unevaluated_names: List[str] = []
     for g in gate_results:
         if not isinstance(g, dict):
             continue
+        _d = g.get("details") if isinstance(g.get("details"), dict) else {}
+        _name = str(g.get("name") or "").strip()
+        if bool(_d.get("deferred")) or bool(_d.get("skipped")):
+            if _name:
+                unevaluated_names.append(_name)
+            continue
         if bool(g.get("passed", False)):
             continue
-        name = str(g.get("name") or "").strip()
-        if name:
-            failed_names.append(name)
+        if _name:
+            failed_names.append(_name)
     out["failed_gates"] = sorted(set(failed_names))
+    out["unevaluated_gates"] = sorted(set(unevaluated_names))
 
     block_names = {str(x).strip() for x in list(pol.get("block_gate_names") or []) if str(x).strip()}
     caution_names = {str(x).strip() for x in list(pol.get("caution_gate_names") or []) if str(x).strip()}
@@ -1389,6 +1411,9 @@ def evaluate_backtest_validation_guard(cfg: Dict[str, Any]) -> Dict[str, Any]:
         issues.extend([f"gate_block:{x}" for x in hit_block])
     if hit_caution:
         issues.extend([f"gate_caution:{x}" for x in hit_caution])
+    # 미평가는 "통과" 가 아니다. 주의로 올려 눈에 보이게 한다(차단은 하지 않는다).
+    for _u in out.get("unevaluated_gates") or []:
+        issues.append(f"gate_unevaluated:{_u}")
 
     overall_passed = bool(obj.get("passed", True))
     if (not overall_passed) and bool(pol.get("caution_on_overall_fail", True)):

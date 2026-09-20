@@ -141,22 +141,35 @@ def _ddm_select_action(cfg: Dict[str, Any], p0_snapshot: Dict[str, Any], context
     use_lifetime = bool(dm.get("use_debug_lifetime_mdd", False))
     metric_mode = str(metrics.get("mode") or "")
     has_rolling_metric = metric_mode.startswith("rolling") and ("max_drawdown_pct" in metrics)
+    # [2026-09-09 사용자 결정] MDD SSOT 를 두 갈래로 분리했다.
+    #   Account Risk SSOT      account_equity drawdown  -> DDM stage / 신규진입 capacity
+    #   Strategy Health Observer  rolling_weighted_mean_60 -> 관측·경고·전략 검증 전용.
+    #                             **DDM 직접 차단에는 사용하지 않는다.**
+    # 왜 폴백을 끊는가: 2026-05-27 감사(ddm_risk_policy_value_source_audit)가 잰 대로
+    #   전략 계열 정의 5종은 전부 Stage4_HARD_BLOCK(진입 0%)로 가고 account_equity 는 비발동이다.
+    #   중간이 없으므로 "account 가 없을 때 rolling 으로 대신한다" 는 대체가 아니라
+    #   **다른 정책으로의 조용한 전환**이다. 그래서 대체하지 않고 막는다(fail-closed).
+    #   rolling/lifetime 값은 metric_details 에 그대로 남겨 관측 용도로 쓴다.
+    account_unavailable = False
     if str(account_basis.get("status") or "").upper() == "PASS" and account_basis.get("max_drawdown_pct") is not None:
         current_mdd_abs = _ddm_pct01(abs(_ddm_to_float(account_basis.get("max_drawdown_pct"), 0.0)), 0.0)
         metric_basis = "account_equity"
-    elif has_rolling_metric:
-        # Keep DDM aligned with rolling-window auto-release when rolling risk is available.
-        current_mdd_abs = dd_rolling
-        metric_basis = "strategy_rolling"
     else:
-        current_mdd_abs = dd_lifetime if use_lifetime else dd_rolling
-        metric_basis = "strategy_lifetime" if use_lifetime else "strategy_rolling"
+        # Account Risk SSOT 가 없다. 위험을 모르는 상태이므로 신규 진입을 열지 않는다.
+        current_mdd_abs = 0.0
+        metric_basis = "account_equity_unavailable"
+        account_unavailable = True
     metric_details = {
         "basis": metric_basis,
         "account_basis": account_basis,
         "strategy_basis": strategy_basis,
+        # 아래 두 값은 **관측 전용**이다 (Strategy Health Observer). 차단 판정에 쓰지 않는다.
         "strategy_rolling_mdd_abs": dd_rolling,
         "strategy_lifetime_mdd_abs": dd_lifetime,
+        "strategy_metrics_role": "observer_only_not_used_for_blocking",
+        "has_rolling_metric": bool(has_rolling_metric),
+        "use_debug_lifetime_mdd": bool(use_lifetime),
+        "account_unavailable": bool(account_unavailable),
     }
 
     default_action = DrawdownAction(
@@ -169,6 +182,20 @@ def _ddm_select_action(cfg: Dict[str, Any], p0_snapshot: Dict[str, Any], context
         metric_basis=metric_basis,
         metric_details=metric_details,
     )
+
+    if account_unavailable:
+        # Account Risk SSOT 부재 = 위험 미상. 전략 계열 지표로 대체하지 않고 신규 진입만 닫는다.
+        #   강제 청산은 하지 않는다 - 값을 모르는 상태에서 파는 것은 판단이 아니라 추측이다.
+        return DrawdownAction(
+            current_mdd_abs=0.0,
+            stage_idx=-2,
+            threshold=0.0,
+            new_entry_allowed_pct=0.0,
+            liquidate_weakest_pct=0.0,
+            max_exposure=0.0,
+            metric_basis=metric_basis,
+            metric_details=metric_details,
+        )
 
     raw_stages = dm.get("stages")
     if not isinstance(raw_stages, list) or (not raw_stages):

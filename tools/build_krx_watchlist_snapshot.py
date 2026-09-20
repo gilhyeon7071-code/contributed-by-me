@@ -20,8 +20,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import requests
+import logging
 
-BASE_DIR = Path(os.environ.get("STOC_BASE_DIR", r"E:\1_Data"))
+BASE_DIR = Path(os.environ.get("STOC_BASE_DIR", str(Path(__file__).resolve().parents[1])))
 CACHE_DIR = BASE_DIR / "_cache"
 
 ADMIN_URL = "https://kind.krx.co.kr/investwarn/adminissue.do"
@@ -36,6 +37,19 @@ HEADERS = {
 }
 
 
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
 def _norm_code6(v: object) -> str:
     s = str(v).strip()
     s = "".join(ch for ch in s if ch.isalnum())
@@ -332,6 +346,28 @@ def _parse_args() -> argparse.Namespace:
     return ap.parse_args()
 
 
+
+def _read_watchlist_rows(path: Path) -> int:
+    if not path.exists():
+        return 0
+    for enc in ("utf-8-sig", "utf-8", "cp949"):
+        try:
+            df = pd.read_csv(path, dtype=str, encoding=enc)
+            return int(len(df)) if "code" in df.columns else 0
+        except Exception:
+            continue
+    return 0
+
+
+def _latest_nonempty_watchlist(exclude_ymd: str) -> Path | None:
+    files = sorted(CACHE_DIR.glob("krx_watchlist_*.csv"), key=lambda p: p.stat().st_mtime, reverse=True)
+    for p in files:
+        if p.name in {"krx_watchlist_latest.csv", f"krx_watchlist_{exclude_ymd}.csv"}:
+            continue
+        if _read_watchlist_rows(p) > 0:
+            return p
+    return None
+
 def main() -> int:
     args = _parse_args()
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -369,10 +405,23 @@ def main() -> int:
 
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out.to_csv(out_path, index=False, encoding="utf-8-sig")
 
     dated_path = CACHE_DIR / f"krx_watchlist_{as_of_ymd}.csv"
     out.to_csv(dated_path, index=False, encoding="utf-8-sig")
+
+    publish_mode = "current"
+    fallback_path = None
+    if out.empty:
+        fallback_path = _latest_nonempty_watchlist(as_of_ymd)
+        if fallback_path is not None:
+            fallback_df = pd.read_csv(fallback_path, dtype=str, encoding="utf-8-sig").fillna("")
+            fallback_df.to_csv(out_path, index=False, encoding="utf-8-sig")
+            publish_mode = "fallback_previous_nonempty"
+        else:
+            out.to_csv(out_path, index=False, encoding="utf-8-sig")
+            publish_mode = "empty_no_fallback"
+    else:
+        out.to_csv(out_path, index=False, encoding="utf-8-sig")
 
     meta = {
         "as_of_ymd": as_of_ymd,
@@ -397,6 +446,11 @@ def main() -> int:
         },
         "output": str(out_path),
         "dated_output": str(dated_path),
+        "publish": {
+            "mode": publish_mode,
+            "fallback_output": str(fallback_path) if fallback_path is not None else "",
+            "output_rows": _read_watchlist_rows(out_path),
+        },
         "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
 
@@ -404,7 +458,7 @@ def main() -> int:
     meta_path.parent.mkdir(parents=True, exist_ok=True)
     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print(
+    _log_print(
         "[WATCH] done rows={rows} admin={admin} warning={warn} risk={risk} caution={caut}".format(
             rows=int(len(out)),
             admin=int(meta["active"]["admin_flags"]),
@@ -413,10 +467,12 @@ def main() -> int:
             caut=int(meta["active"]["caution_flags"]),
         )
     )
-    print(f"[WATCH] output={out_path}")
-    print(f"[WATCH] meta={meta_path}")
+    _log_print(f"[WATCH] output={out_path}")
+    _log_print(f"[WATCH] meta={meta_path}")
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+

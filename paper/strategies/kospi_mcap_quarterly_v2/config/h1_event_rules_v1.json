@@ -1,0 +1,28 @@
+{
+  "version": "1.0.0",
+  "written_at": "2026-09-18",
+  "note": "H1(가격과 무관하게 체결되어야 하는 자금) 후보 사건 분류 규칙. 원본 공시는 전부 따로 쌓으므로 이 규칙을 나중에 바꿔도 과거를 다시 분류할 수 있어요.",
+  "market": "Y",
+  "rules": [
+    {"event_type": "BUYBACK_DIRECT", "direction": "BUY_PRESSURE",
+     "any": ["자기주식취득결정", "자기주식 취득 결정"], "none": ["신탁", "처분"]},
+    {"event_type": "BUYBACK_TRUST", "direction": "BUY_PRESSURE",
+     "any": ["자기주식취득신탁계약체결결정", "신탁계약체결"], "none": ["해지"]},
+    {"event_type": "BUYBACK_TRUST_END", "direction": "NONE",
+     "any": ["자기주식취득신탁계약해지결정", "신탁계약해지"], "none": []},
+    {"event_type": "BUYBACK_DISPOSAL", "direction": "SELL_PRESSURE",
+     "any": ["자기주식처분결정"], "none": []},
+    {"event_type": "RIGHTS_OFFERING", "direction": "SELL_PRESSURE",
+     "any": ["유상증자결정"], "none": []},
+    {"event_type": "BONUS_ISSUE", "direction": "NONE",
+     "any": ["무상증자결정"], "none": []},
+    {"event_type": "CB_BW", "direction": "SELL_PRESSURE",
+     "any": ["전환사채권발행결정", "신주인수권부사채권발행결정", "교환사채권발행결정"], "none": []},
+    {"event_type": "BLOCK_SALE", "direction": "SELL_PRESSURE",
+     "any": ["주식등의대량보유상황보고서", "임원ㆍ주요주주특정증권등소유상황보고서"], "none": []},
+    {"event_type": "SPLIT_MERGE", "direction": "NONE",
+     "any": ["주식분할결정", "주식병합결정", "액면분할"], "none": []},
+    {"event_type": "DELISTING_RISK", "direction": "SELL_PRESSURE",
+     "any": ["상장폐지", "관리종목지정", "합병결정"], "none": []}
+  ]
+}

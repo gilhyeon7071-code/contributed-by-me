@@ -3,7 +3,9 @@
 import argparse
 import datetime as dt
 import json
+import logging
 import os
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -13,6 +15,7 @@ from notify_channels import send_alert
 
 ROOT = Path(__file__).resolve().parents[1]
 LOG_DIR = ROOT / "2_Logs"
+logger = logging.getLogger("kis_healthcheck")
 
 
 def _norm_ymd(v: object) -> str:
@@ -26,9 +29,33 @@ def _env_true(name: str, default: str = "0") -> bool:
     return v in {"1", "true", "y", "yes"}
 
 
+def _is_rate_limit_error(exc: Exception) -> bool:
+    s = str(exc or "").lower()
+    return ("egw00201" in s) or ("초당 거래건수" in s) or ("호출 제한" in s) or ("rate limit" in s)
+
+
+def _run_optional_with_retry(fn, *, retries: int, sleep_sec: float):
+    last_err: Optional[Exception] = None
+    for i in range(max(1, int(retries) + 1)):
+        try:
+            return fn()
+        except Exception as e:
+            last_err = e
+            if (not _is_rate_limit_error(e)) or i >= int(retries):
+                raise
+            if float(sleep_sec) > 0:
+                time.sleep(float(sleep_sec))
+    if last_err is not None:
+        raise last_err
+    raise RuntimeError("optional check retry failed")
+
+
 def main() -> int:
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+
     ap = argparse.ArgumentParser(description="KIS API healthcheck (token/quote/balance/open-orders)")
-    ap.add_argument("--mock", default="auto", choices=["auto", "true", "false"])
+    ap.add_argument("--mock", default="true", choices=["auto", "true", "false"])
     ap.add_argument("--code", default="005930", help="6-digit stock code for quote check")
     ap.add_argument("--date", default="", help="YYYYMMDD for open-order check (default=today)")
     ap.add_argument("--check-balance", action="store_true")
@@ -45,7 +72,9 @@ def main() -> int:
     else:
         mock_opt = args.mock == "true"
 
-    strict_optional = _env_true("KIS_HEALTHCHECK_STRICT_OPTIONAL", "0")
+    strict_optional = _env_true("KIS_HEALTHCHECK_STRICT_OPTIONAL", "1")
+    optional_retry_n = max(0, int(float(os.getenv("KIS_HEALTHCHECK_OPTIONAL_RETRY", "3") or 3)))
+    optional_retry_sleep = max(0.0, float(os.getenv("KIS_HEALTHCHECK_OPTIONAL_RETRY_SLEEP_SEC", "2.0") or 2.0))
 
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     out_json = LOG_DIR / f"kis_healthcheck_{today}.json"
@@ -61,6 +90,8 @@ def main() -> int:
             "check_open_orders": bool(args.check_open_orders),
             "notify_on_fail": bool(args.notify_on_fail),
             "strict_optional": bool(strict_optional),
+            "optional_retry_n": int(optional_retry_n),
+            "optional_retry_sleep_sec": float(optional_retry_sleep),
         },
         "checks": {},
         "warnings": [],
@@ -94,7 +125,11 @@ def main() -> int:
 
         if args.check_balance:
             try:
-                bal = client.inquire_balance_positions(max_pages=3)
+                bal = _run_optional_with_retry(
+                    lambda: client.inquire_balance_positions(max_pages=3),
+                    retries=optional_retry_n,
+                    sleep_sec=optional_retry_sleep,
+                )
                 payload["checks"]["balance"] = {
                     "ok": True,
                     "rows": int(len(bal.get("rows", []) or [])),
@@ -107,7 +142,11 @@ def main() -> int:
 
         if args.check_open_orders:
             try:
-                oo = client.inquire_open_orders(ymd=d)
+                oo = _run_optional_with_retry(
+                    lambda: client.inquire_open_orders(ymd=d),
+                    retries=optional_retry_n,
+                    sleep_sec=optional_retry_sleep,
+                )
                 payload["checks"]["open_orders"] = {
                     "ok": True,
                     "rows": int(len(oo.get("rows", []) or [])),
@@ -130,13 +169,13 @@ def main() -> int:
         payload["ok"] = False
 
     out_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"[CHECK] ok={payload['ok']} json={out_json}")
+    logger.info("[CHECK] ok=%s json=%s", payload["ok"], out_json)
 
     if payload.get("warnings"):
-        print(f"[CHECK] warnings={len(payload['warnings'])}")
+        logger.warning("[CHECK] warnings=%s", len(payload["warnings"]))
 
     if not payload["ok"]:
-        print(f"[CHECK] error={payload['error']}")
+        logger.error("[CHECK] error=%s", payload["error"])
         if args.notify_on_fail:
             send_alert(
                 f"[HEALTHCHECK] FAIL code={args.code} mock={args.mock} error={payload['error']}",

@@ -1,11 +1,12 @@
-﻿@echo off
+@echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
 chcp 65001 >nul
 cd /d %~dp0
 
 set "PY="
-if exist "%~dp0.venv\Scripts\python.exe" set "PY=%~dp0.venv\Scripts\python.exe"
+if exist "E:\1_Data\_runtime\python312-embed\python.exe" set "PY=E:\1_Data\_runtime\python312-embed\python.exe"
+if not defined PY if exist "%~dp0.venv\Scripts\python.exe" set "PY=%~dp0.venv\Scripts\python.exe"
 if not defined PY if exist "E:\vibe\buffett\.venv\Scripts\python.exe" set "PY=E:\vibe\buffett\.venv\Scripts\python.exe"
 if not defined PY if exist "C:\Users\jjtop\AppData\Local\Programs\Python\Python312\python.exe" set "PY=C:\Users\jjtop\AppData\Local\Programs\Python\Python312\python.exe"
 if not defined PY (
@@ -28,7 +29,9 @@ if not defined PY (
 )
 
 echo [1/2] Refresh KRX clean parquet (incremental to prev weekday)
-"%PY%" krx_update_clean_incremental.py
+if "%KRX_MIN_UNI%"=="" set "KRX_MIN_UNI=1800"
+echo [INFO] KRX_MIN_UNI=%KRX_MIN_UNI%
+"%PY%" krx_update_clean_incremental.py --min-uni %KRX_MIN_UNI%
 if errorlevel 1 (
   echo [FAILED] krx_update_clean_incremental.py
   exit /b 1

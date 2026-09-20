@@ -1,0 +1,75 @@
+{
+  "generated_at": "2026-05-18T10:30:35",
+  "root": "E:\\1_Data",
+  "scope": "read_only_external_readiness_probe",
+  "policy_effect": false,
+  "trading_effect": false,
+  "task_name": "VIBE_LLM_Wiki_Pipeline",
+  "status": "PARTIAL",
+  "blockers": [
+    "SLACK_TOKEN_NOT_CONFIGURED",
+    "SLACK_CHANNELS_NOT_CONFIGURED",
+    "MEETING_SOURCE_DIR_NOT_CONFIGURED"
+  ],
+  "local_pipeline": {
+    "status": "READY",
+    "blockers": []
+  },
+  "external_api": {
+    "status": "BLOCKED",
+    "blockers": [
+      "SLACK_TOKEN_NOT_CONFIGURED",
+      "SLACK_CHANNELS_NOT_CONFIGURED",
+      "MEETING_SOURCE_DIR_NOT_CONFIGURED"
+    ]
+  },
+  "paths": {
+    "pipeline_runner": {
+      "path": "E:\\1_Data\\run_llm_wiki_pipeline.bat",
+      "exists": true
+    },
+    "collect_script": {
+      "path": "E:\\1_Data\\tools\\collect_llm_wiki_exports.py",
+      "exists": true
+    },
+    "contract_validator": {
+      "path": "E:\\1_Data\\tools\\validate_llm_wiki_source_contract.py",
+      "exists": true
+    },
+    "ingest_script": {
+      "path": "E:\\1_Data\\tools\\ingest_llm_wiki_inbox.py",
+      "exists": true
+    },
+    "snapshot_script": {
+      "path": "E:\\1_Data\\tools\\build_llm_wiki_snapshot.py",
+      "exists": true
+    },
+    "slack_import_dir": {
+      "path": "E:\\1_Data\\docs\\llm_wiki\\00_Inbox\\import_exports\\slack_json",
+      "exists": true
+    },
+    "meeting_import_dir": {
+      "path": "E:\\1_Data\\docs\\llm_wiki\\00_Inbox\\import_exports\\meeting_text",
+      "exists": true
+    },
+    "doc_import_dir": {
+      "path": "E:\\1_Data\\docs\\llm_wiki\\00_Inbox\\import_exports\\doc_text",
+      "exists": true
+    }
+  },
+  "environment": {
+    "LLM_WIKI_SLACK_BOT_TOKEN": false,
+    "LLM_WIKI_SLACK_CHANNELS": false,
+    "LLM_WIKI_MEETING_SOURCE_DIR": false
+  },
+  "scheduler": {
+    "checked": true,
+    "exists": true,
+    "returncode": 0,
+    "stderr": ""
+  },
+  "notes": [
+    "This report does not create credentials, register scheduler tasks, call Slack, call meeting APIs, or change trading runtime.",
+    "External API or scheduler apply requires separate explicit approval."
+  ]
+}

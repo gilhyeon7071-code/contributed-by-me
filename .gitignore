@@ -44,7 +44,18 @@ data/
 _cache/
 _krx_seed_full/
 _krx_manual/
-paper/
+# [2026-09-20] paper/ 를 통째로 빼면 **새 로직 코드가 버전 관리 밖**이 된다(V2 src·config·spec).
+#   데이터(state·fixtures·plan_runs·events)는 계속 제외하고 코드만 추적한다.
+paper/*
+!paper/strategies/
+paper/strategies/*
+!paper/strategies/kospi_mcap_quarterly_v2/
+paper/strategies/kospi_mcap_quarterly_v2/*
+!paper/strategies/kospi_mcap_quarterly_v2/src/
+!paper/strategies/kospi_mcap_quarterly_v2/config/
+!paper/strategies/kospi_mcap_quarterly_v2/spec/
+!paper/strategies/kospi_mcap_quarterly_v2/README.md
+paper/strategies/kospi_mcap_quarterly_v2/src/__pycache__/
 runs/
 0/
 
@@ -101,7 +112,9 @@ _notes/
 risk_off/
 news_trading/
 tasks/
-tests/
+# [2026-09-20] 시험은 코드다. 안전망을 버전 관리 밖에 두지 않는다.
+tests/__pycache__/
+tests/.pytest_cache/
 checkfile/outputs/
 
 # === Local backups / captures / browser temp ===
@@ -172,3 +185,13 @@ docs/03-operations/*_latest.md
 docs/03-operations/integrity_gate_20*.md
 docs/03-operations/integrity_overlay_20*.md
 *_work.py
+
+# [2026-09-20] 가격 패널 등 대용량 데이터
+krx_daily_archive/
+Raw/
+*.parquet
+
+# [2026-09-20] 바이너리는 저장소에 넣지 않는다
+tools/cosign/
+*.exe
+*.dll

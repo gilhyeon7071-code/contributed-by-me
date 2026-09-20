@@ -7,12 +7,26 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+import logging
 
 
 ROOT = Path(__file__).resolve().parents[1]
 LOG_DIR = ROOT / "2_Logs"
 
 
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
 def _now_ts() -> str:
     return dt.datetime.now().isoformat(timespec="seconds")
 
@@ -39,7 +53,7 @@ def _run(cmd: List[str]) -> Dict[str, Any]:
 def _detect_python() -> str:
     candidates = [
         ROOT / ".venv" / "Scripts" / "python.exe",
-        Path(r"E:\vibe\buffett\.venv\Scripts\python.exe"),
+        ROOT.parent / "vibe" / "buffett" / ".venv" / "Scripts" / "python.exe",
         Path(r"C:\Users\jjtop\AppData\Local\Programs\Python\Python312\python.exe"),
     ]
     for p in candidates:
@@ -139,8 +153,8 @@ def main() -> int:
     out_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     out_latest.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print(f"[OK] summary={out_json}")
-    print(f"[OK] task={task_name} dry_run={args.dry_run} ok={ok}")
+    _log_print(f"[OK] summary={out_json}")
+    _log_print(f"[OK] task={task_name} dry_run={args.dry_run} ok={ok}")
     return 0 if ok else 2
 
 

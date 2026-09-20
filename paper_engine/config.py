@@ -18,6 +18,7 @@ __all__ = [
     'load_config',
 ]
 
+import hashlib
 import json
 import os
 import re
@@ -138,19 +139,29 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     },
 
     # Transaction cost defaults.
-    "fee_pct": 0.005,
+    # [2026-09-10] 0.005 -> 0.0. 브로커 실측 수수료는 **0** 이다(tr_id TTTC8715R).
+    #   설정 파일이 이 값을 덮으므로 지금 동작은 안 바뀐다(load_config 로 확인).
+    #   그러나 파일에서 키가 빠지면 편도 0.5% = 왕복 1.0% 가 조용히 적용된다.
+    "fee_pct": 0.0,
     "slippage_pct": 0.001,
     "tiered_slippage": {
         "enabled": False,
         "large_cap_krw": 1_000_000_000_000,
         "mid_cap_krw":   300_000_000_000,
-        "large_slip_pct": 0.003,
-        "mid_slip_pct":   0.005,
-        "small_slip_pct": 0.010,
+        # [2026-09-10] 0.003/0.005/0.010 은 아무도 재지 않은 코드 상수였고
+        #   실제로 그 값이 켜진 채 쓰였다(BROKEN_WINDOW_REGISTER C8).
+        #   현행 설정 파일의 실측치와 같은 값으로 맞춘다.
+        #   (설정 파일이 이 값을 덮으므로 지금 동작은 바뀌지 않는다 - 확인함)
+        "large_slip_pct": 0.00139,
+        "mid_slip_pct":   0.00178,
+        "small_slip_pct": 0.00238,
     },
 
-    # tax (optional, default 0)
-    "sell_tax_pct": 0.0,
+    # [2026-09-10] "optional, default 0" 이었다. **선택이 아니다** -
+    #   한국 주식 매도 거래세는 법정 비용이고 브로커 실측 0.19723% 다(tr_id TTTC8715R).
+    #   0 으로 두면 키가 빠졌을 때 왕복이 0.200% 로 **절반만** 청구된다.
+    #   설정 파일이 이 값을 덮으므로 지금 동작은 안 바뀐다(load_config 로 확인).
+    "sell_tax_pct": 0.002,
     "entry_liquidity_check": {
         "enabled": False,
         "min_trading_value_krw": 1_000_000_000,   # 10억
@@ -938,7 +949,16 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "fundamental_risk": {
             "enabled": True,
             "critical_debt_ratio": 300.0,       # 200→300: 부채비율 기준 완화
-            "critical_roe": -0.15,              # 0→-0.15: ROE -15% 이하만 위험 처리
+            # [2026-08-31 O5-4] 단위 오류 수정  -0.15 -> -15.0
+            #   이 블록의 값은 전부 **퍼센트 척도**다(critical_debt_ratio 300.0,
+            #   critical_revenue_growth_yoy -30.0, warning_operating_margin, dividend_yield_floor).
+            #   원 데이터도 퍼센트다 - fundamental CSV 실측에서 ROE=330.89, debt_ratio=705.86.
+            #   그런데 이 한 줄만 비율(-0.15)로 적혀 있었다. exit.py:399 는 `roe < critical_roe` 로
+            #   직접 비교하므로 -0.15 는 "ROE < -0.15%" 가 되어 거의 모든 음수 ROE 에 발동한다.
+            #   주석이 밝힌 의도("ROE -15% 이하만 위험 처리")와도 어긋난다.
+            #   _deep_merge_dict 는 깊은 병합이라 config 에 이 키가 없으면 이 값이 실제로 쓰인다.
+            #   현재 paper_engine_config.json 에는 -15 가 있어 동작은 바뀌지 않는다(잠재 결함 수정).
+            "critical_roe": -15.0,              # ROE -15% 이하만 위험 처리 (퍼센트 척도)
             "critical_revenue_growth_yoy": -30.0,  # -20→-30: 매출 기준 완화
             "warning_operating_margin": 0.0,    # 5→0: warning 청산 사실상 비활성
             "dividend_yield_floor": 3.0,
@@ -1075,3 +1095,50 @@ def load_config() -> Dict[str, Any]:
     if missing:
         print(f"[CONFIG] missing keys defaulted in-memory only: {missing}")
     return cfg
+
+
+LOCK_PATH = _path_from_env("PAPER_CONFIG_LOCK_PATH", PAPER_DIR / "paper_engine_config.lock.json")
+
+
+def verify_config_lock() -> Dict[str, Any]:
+    """Compare the on-disk config hash against approved_sha256 in the lock file.
+
+    Read-only and never raises: the caller decides what to do with the verdict.
+    This mirrors LOCK-B in tasks/task_00_config_lock.bat, which only runs in the
+    daily batch ([0/14]); intraday_paper_loop.py spawns paper_engine.py directly
+    and therefore never reached that check.  See
+    docs/exec-plans/active/20260820_config_lock_enforcement.md
+    """
+    out: Dict[str, Any] = {
+        "ok": False,
+        "reason": "",
+        "config_path": str(CONFIG_PATH),
+        "lock_path": str(LOCK_PATH),
+        "current_sha256": "",
+        "approved_sha256": "",
+        "enforced": True,
+    }
+    raw_enforce = str(os.environ.get("PAPER_CONFIG_LOCK_ENFORCE", "1")).strip().lower()
+    out["enforced"] = raw_enforce not in {"0", "false", "no", "off"}
+    try:
+        if not CONFIG_PATH.exists():
+            out["reason"] = "config_missing"
+            return out
+        out["current_sha256"] = hashlib.sha256(CONFIG_PATH.read_bytes()).hexdigest()
+        if not LOCK_PATH.exists():
+            out["reason"] = "lock_missing"
+            return out
+        lock = json.loads(LOCK_PATH.read_text(encoding="utf-8-sig"))
+        approved = str(lock.get("approved_sha256") or "").strip().lower()
+        out["approved_sha256"] = approved
+        if not approved:
+            out["reason"] = "approved_sha256_missing"
+            return out
+        if approved != out["current_sha256"].strip().lower():
+            out["reason"] = "lock_mismatch"
+            return out
+        out["ok"] = True
+        return out
+    except Exception as exc:
+        out["reason"] = "lock_check_failed:" + type(exc).__name__
+        return out

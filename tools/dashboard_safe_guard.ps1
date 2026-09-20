@@ -32,14 +32,26 @@ function Get-LatestBackup {
 
 function Compile-Ok {
   param([string]$PathToCompile)
-  try {
-    if (Test-Path $venvPy) {
+  $venvTried = $false
+
+  if (Test-Path $venvPy) {
+    $venvTried = $true
+    try {
       & $venvPy -m py_compile $PathToCompile | Out-Null
-      return ($LASTEXITCODE -eq 0)
+      if ($LASTEXITCODE -eq 0) { return $true }
+      Write-GuardLog ("venv py_compile failed(exit={0}), fallback python" -f $LASTEXITCODE)
+    } catch {
+      Write-GuardLog ("venv py_compile exception, fallback python: {0}" -f $_.Exception.Message)
     }
+  }
+
+  try {
     & python -m py_compile $PathToCompile | Out-Null
     return ($LASTEXITCODE -eq 0)
   } catch {
+    if ($venvTried) {
+      Write-GuardLog ("python fallback exception after venv fail: {0}" -f $_.Exception.Message)
+    }
     return $false
   }
 }

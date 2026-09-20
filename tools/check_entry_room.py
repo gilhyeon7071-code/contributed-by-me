@@ -1,9 +1,11 @@
 # tools/check_entry_room.py
 import json
+import logging
 import os
 import pandas as pd
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+logger = logging.getLogger("check_entry_room")
 
 def P(*parts: str) -> str:
     return os.path.join(BASE, *parts)
@@ -33,6 +35,9 @@ def read_json(path: str):
         return json.load(f)
 
 def main():
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+
     cfg_path = P("paper", "paper_engine_config.json")
     st_path = P("paper", "paper_state.json")
     cand_path = P("2_Logs", "candidates_latest_data.csv")
@@ -83,32 +88,32 @@ def main():
     except Exception:
         slots_left = None
 
-    print("CFG_FILE=", os.path.relpath(cfg_path, BASE), "EXISTS=", os.path.exists(cfg_path))
-    print("max_positions=", max_positions)
-    print("max_new_trades_per_day=", max_new_per_day)
-    print("crash_risk_off_cfg=", crash_cfg)
+    logger.info("CFG_FILE=%s EXISTS=%s", os.path.relpath(cfg_path, BASE), os.path.exists(cfg_path))
+    logger.info("max_positions=%s", max_positions)
+    logger.info("max_new_trades_per_day=%s", max_new_per_day)
+    logger.info("crash_risk_off_cfg=%s", crash_cfg)
 
-    print("STATE_FILE=", os.path.relpath(st_path, BASE), "EXISTS=", os.path.exists(st_path))
-    print("open_positions_len=", len(op))
-    print("open_pos_codes=", op_codes)
-    print("processed_signals_len=", len(ps))
-    print("processed_signals_sample=", list(sorted(ps_set))[:30])
+    logger.info("STATE_FILE=%s EXISTS=%s", os.path.relpath(st_path, BASE), os.path.exists(st_path))
+    logger.info("open_positions_len=%s", len(op))
+    logger.info("open_pos_codes=%s", op_codes)
+    logger.info("processed_signals_len=%s", len(ps))
+    logger.info("processed_signals_sample=%s", list(sorted(ps_set))[:30])
 
-    print("CANDS_FILE=", os.path.relpath(cand_path, BASE), "EXISTS=", os.path.exists(cand_path))
-    print("cand_codes=", cand_codes_set)
-    print("cand_keys_sample=", cand_keys_set[:30])
+    logger.info("CANDS_FILE=%s EXISTS=%s", os.path.relpath(cand_path, BASE), os.path.exists(cand_path))
+    logger.info("cand_codes=%s", cand_codes_set)
+    logger.info("cand_keys_sample=%s", cand_keys_set[:30])
 
-    print("new_candidate_keys_not_processed=", new_keys)
-    print("new_candidate_codes_not_processed=", new_codes)
+    logger.info("new_candidate_keys_not_processed=%s", new_keys)
+    logger.info("new_candidate_codes_not_processed=%s", new_codes)
 
-    print("slots_left=", slots_left)
+    logger.info("slots_left=%s", slots_left)
 
     if slots_left is not None and slots_left <= 0:
-        print("DECISION=NO_NEW_ENTRIES_EXPECTED (slots_full)")
+        logger.info("DECISION=NO_NEW_ENTRIES_EXPECTED (slots_full)")
     elif len(new_codes) == 0:
-        print("DECISION=NO_NEW_ENTRIES_EXPECTED (no_new_candidates)")
+        logger.info("DECISION=NO_NEW_ENTRIES_EXPECTED (no_new_candidates)")
     else:
-        print("DECISION=NEW_ENTRIES_POSSIBLE (need risk_off OFF and engine allowed)")
+        logger.info("DECISION=NEW_ENTRIES_POSSIBLE (need risk_off OFF and engine allowed)")
 
 if __name__ == "__main__":
     main()

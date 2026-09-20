@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Iterable, List, Optional
 
 import pandas as pd
+import logging
 
 ROOT = Path(__file__).resolve().parents[1]
 LOG_DIR = ROOT / "2_Logs"
@@ -20,6 +21,13 @@ EXCLUDE_DIR_HINTS = {
     "_bad",
 }
 
+MARKET_PARQUET_SEARCH_DIRS = [
+    "krx_daily_archive",
+    "_krx_manual",
+    "_krx_seed_full",
+    "_cache",
+]
+
 CORE6_BASENAMES = [
     "krx_daily_20200101_20201231_clean.parquet",
     "krx_daily_20210101_20211231_clean.parquet",
@@ -30,6 +38,19 @@ CORE6_BASENAMES = [
 ]
 
 
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
 def _is_excluded(path: Path) -> bool:
     low_parts = {p.lower() for p in path.parts}
     return any(h.lower() in low_parts for h in EXCLUDE_DIR_HINTS)
@@ -37,7 +58,25 @@ def _is_excluded(path: Path) -> bool:
 
 def _find_parquet_files(root: Path) -> List[Path]:
     cands: List[Path] = []
-    for p in root.rglob("*.parquet"):
+    search_roots = [root / x for x in MARKET_PARQUET_SEARCH_DIRS if (root / x).exists()]
+    if not search_roots:
+        search_roots = [root]
+    for search_root in search_roots:
+        for p in search_root.rglob("*.parquet"):
+            if _is_excluded(p):
+                continue
+            name = p.name.lower()
+            if "krx_daily" not in name:
+                continue
+            if "clean" not in name and "valuefix" not in name:
+                continue
+            try:
+                if p.stat().st_size < 4096:
+                    continue
+            except Exception:
+                continue
+            cands.append(p)
+    for p in root.glob("*.parquet"):
         if _is_excluded(p):
             continue
         name = p.name.lower()
@@ -194,11 +233,11 @@ def main() -> int:
     out_json.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     out_latest_json.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print(f"[OK] csv={out_csv}")
-    print(f"[OK] latest_csv={out_latest_csv}")
-    print(f"[OK] json={out_json}")
-    print(f"[OK] latest_json={out_latest_json}")
-    print(f"[OK] rows={meta['rows']} files={meta['source_file_count']} range={meta['date_min']}..{meta['date_max']}")
+    _log_print(f"[OK] csv={out_csv}")
+    _log_print(f"[OK] latest_csv={out_latest_csv}")
+    _log_print(f"[OK] json={out_json}")
+    _log_print(f"[OK] latest_json={out_latest_json}")
+    _log_print(f"[OK] rows={meta['rows']} files={meta['source_file_count']} range={meta['date_min']}..{meta['date_max']}")
 
     return 0
 

@@ -26,8 +26,22 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import pandas as pd
+import logging
 
 
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
 def _now_ts() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -78,6 +92,7 @@ def main() -> int:
     base_dir = Path(__file__).resolve().parents[1]  # ...\tools -> base
     state_file = base_dir / "paper" / "paper_state.json"
     prices_file = base_dir / "paper" / "prices" / "ohlcv_paper.parquet"
+    intraday_prices_file = base_dir / "2_Logs" / "intraday_prices_latest.csv"
     out_dir = base_dir / "2_Logs"
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -91,15 +106,21 @@ def main() -> int:
         "base_dir": str(base_dir),
         "state_file": str(state_file),
         "prices_file": str(prices_file),
+        "intraday_prices_file": str(intraday_prices_file),
         "prices_date_max": None,
+        "eod_prices_date_max": None,
+        "intraday_prices_date_max": None,
+        "intraday_price_codes": 0,
         "pending": [],
         "active": [],
+        "carryover_queue_file": str(out_dir / "pending_entry_signals_latest.csv"),
+        "carryover_queue": [],
         "notes": [],
     }
 
     if not state_file.exists():
         msg = f"[FATAL] STATE_FILE not found: {state_file}"
-        print(msg)
+        _log_print(msg)
         out_txt.write_text(msg + "\n", encoding="utf-8")
         report["notes"].append(msg)
         out_json.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -107,7 +128,7 @@ def main() -> int:
 
     if not prices_file.exists():
         msg = f"[FATAL] PRICES_FILE not found: {prices_file}"
-        print(msg)
+        _log_print(msg)
         out_txt.write_text(msg + "\n", encoding="utf-8")
         report["notes"].append(msg)
         out_json.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -122,6 +143,22 @@ def main() -> int:
     df = pd.read_parquet(prices_file, columns=["code", "date"])
     df["code"] = df["code"].apply(_normalize_code)
     df["ymd"] = _to_ymd_series(df["date"])
+    eod_prices_date_max = str(df["ymd"].max())
+    report["eod_prices_date_max"] = eod_prices_date_max
+    if intraday_prices_file.exists():
+        try:
+            rdf = pd.read_csv(intraday_prices_file, usecols=["code", "date"], dtype=str)
+            rdf["code"] = rdf["code"].apply(_normalize_code)
+            rdf["ymd"] = rdf["date"].astype(str).str.replace(r"[^0-9]", "", regex=True).str[:8]
+            rdf = rdf[(rdf["code"].str.len() == 6) & (rdf["ymd"].str.len() == 8)].copy()
+            if not rdf.empty:
+                report["intraday_prices_date_max"] = str(rdf["ymd"].max())
+                report["intraday_price_codes"] = int(rdf["code"].nunique())
+                df = pd.concat([df[["code", "ymd"]], rdf[["code", "ymd"]]], ignore_index=True)
+                df = df.drop_duplicates(["code", "ymd"], keep="last")
+                report["notes"].append(f"intraday_prices_merged_rows={len(rdf)}")
+        except Exception as e:
+            report["notes"].append(f"intraday_prices_read_failed: {type(e).__name__}: {e}")
 
     prices_date_max = str(df["ymd"].max())
     report["prices_date_max"] = prices_date_max
@@ -135,6 +172,26 @@ def main() -> int:
 
     pending_items: List[PendingItem] = []
     active_items: List[Dict[str, Any]] = []
+    carryover_items: List[Dict[str, Any]] = []
+
+    carryover_file = out_dir / "pending_entry_signals_latest.csv"
+    if carryover_file.exists():
+        try:
+            qdf = pd.read_csv(carryover_file)
+            if len(qdf) > 0 and "carry_reason" in qdf.columns:
+                qdf["carry_reason"] = qdf["carry_reason"].astype(str).str.strip().str.upper()
+                qdf = qdf[qdf["carry_reason"].eq("NO_NEXT_DAY")].copy()
+                if len(qdf) > 0:
+                    if "code" in qdf.columns:
+                        qdf["code"] = qdf["code"].apply(_normalize_code)
+                    keep_cols = [
+                        c
+                        for c in ["signal_date", "code", "name", "carry_reason", "captured_at", "final_score"]
+                        if c in qdf.columns
+                    ]
+                    carryover_items = qdf[keep_cols].to_dict(orient="records")
+        except Exception as e:
+            report["notes"].append(f"carryover_queue_read_failed: {type(e).__name__}: {e}")
 
     for x in op:
         if not isinstance(x, dict):
@@ -158,6 +215,7 @@ def main() -> int:
         after = [d for d in dd if d > entry_date] if entry_date else dd
 
         if not after:
+            reason = "SAME_DAY_ENTRY_WAIT_NEXT_SESSION" if entry_date and entry_date == prices_date_max else "NO_PRICES_AFTER_ENTRY_DATE"
             pending_items.append(
                 PendingItem(
                     code=code,
@@ -168,7 +226,7 @@ def main() -> int:
                     stop_price=stop_price,
                     prices_date_max=prices_date_max,
                     last_price_date_for_code=last_for_code,
-                    reason="NO_PRICES_AFTER_ENTRY_DATE",
+                    reason=reason,
                 )
             )
         else:
@@ -220,17 +278,51 @@ def main() -> int:
     else:
         lines.append("(none)")
 
+    lines.append("")
+    lines.append("[PENDING_QUEUE] NO_NEXT_DAY carryover queue")
+    lines.append(f"carryover_queue_count={len(carryover_items)}")
+    if carryover_items:
+        lines.append("signal_date code name carry_reason captured_at final_score")
+        for it in carryover_items:
+            lines.append(
+                f"{it.get('signal_date', '')} {it.get('code', '')} {it.get('name', '')} "
+                f"{it.get('carry_reason', '')} {it.get('captured_at', '')} {it.get('final_score', '')}"
+            )
+    else:
+        lines.append("(none)")
+
     text = "\n".join(lines) + "\n"
-    print(text)
+    _log_print(text)
 
     report["pending"] = [asdict(x) for x in pending_items]
     report["active"] = active_items
+    report["carryover_queue"] = carryover_items
+    allowed_wait_reasons = {"SAME_DAY_ENTRY_WAIT_NEXT_SESSION"}
+    blocking_pending = []
+    for item in report["pending"]:
+        reason = str(item.get("reason") or "")
+        entry_date = str(item.get("entry_date") or "")
+        if reason in allowed_wait_reasons:
+            continue
+        if reason == "NO_PRICES_AFTER_ENTRY_DATE" and entry_date >= eod_prices_date_max:
+            continue
+        blocking_pending.append(item)
+    report["verdict"] = {
+        "ok": len(blocking_pending) == 0,
+        "pending_total": len(report["pending"]),
+        "pending_blocking_count": len(blocking_pending),
+        "pending_allowed_wait_count": len(report["pending"]) - len(blocking_pending),
+        "allowed_wait_reasons": sorted(allowed_wait_reasons | {"NO_PRICES_AFTER_ENTRY_DATE when entry_date>=eod_prices_date_max"}),
+        "eod_prices_date_max": eod_prices_date_max,
+        "intraday_prices_date_max": report.get("intraday_prices_date_max"),
+        "reason": "ok" if len(blocking_pending) == 0 else "BLOCKING_PENDING_PRICE_GAP",
+    }
 
     out_txt.write_text(text, encoding="utf-8")
     out_json.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print(f"[OK] wrote: {out_txt}")
-    print(f"[OK] wrote: {out_json}")
+    _log_print(f"[OK] wrote: {out_txt}")
+    _log_print(f"[OK] wrote: {out_json}")
     return 0
 
 

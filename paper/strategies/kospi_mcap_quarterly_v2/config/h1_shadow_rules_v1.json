@@ -1,0 +1,15 @@
+{
+  "version": "1.0.0",
+  "written_at": "2026-09-18",
+  "note": "그림자 기록 규칙. 사건이 뜨면 '이 규칙대로 샀다면' 을 그날 미리 적어 두고, 가격이 나오면 채운다. 규칙을 뒤에 바꾸면 그 시점부터 새 버전으로 기록한다(과거를 다시 쓰지 않는다). 값은 전부 Claude 설정 — 근거는 2026-09-18 1차 관측과 유동성 실측.",
+  "event_types": ["BUYBACK_DIRECT", "BUYBACK_TRUST"],
+  "entry": "t0_open",
+  "t0_rule": "접수일의 다음 거래일",
+  "hold_days": 5,
+  "position_krw": 3000000,
+  "min_daily_value_krw": 200000000,
+  "max_share_of_daily_value": 0.02,
+  "round_trip_cost_pct": 0.0035,
+  "exclude_amendments": true,
+  "max_open_positions": 10
+}

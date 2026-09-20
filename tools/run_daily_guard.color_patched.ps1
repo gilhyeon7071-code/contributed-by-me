@@ -84,10 +84,16 @@ try {
   Log "rootb=$ROOTB"
 
   $Py = Join-Path $ROOTB ".venv\Scripts\python.exe"
+  $KrxMinUni = 1800
+  if ($env:KRX_MIN_UNI) { try { $KrxMinUni = [int]$env:KRX_MIN_UNI } catch { $KrxMinUni = 1800 } }
 
   # 0) Update data inputs (KRX + Candidates). Prices updater will be added when available.
   Step "update krx_clean (incremental)" {
-    & $Py "E:\1_Data\krx_update_clean_incremental.py"
+    & $Py "E:\1_Data\krx_update_clean_incremental.py" --min-uni $KrxMinUni
+  }
+
+  Step "sync krx reference cache" {
+    & $Py "E:\1_Data\tools\sync_krx_reference_cache.py"
   }
 
   Step "update candidates (v41_1)" {

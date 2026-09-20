@@ -4,10 +4,15 @@ import argparse
 import datetime as dt
 import json
 import math
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from backtest_module_progress import build_module_progress
+import logging
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,9 +25,11 @@ TITLE_MAP = {
     "data_time_index_integrity": "데이터 시간축 무결성",
     "look_ahead_proxy": "Look-ahead 편향",
     "position_lag": "포지션 랙(신호 지연)",
+    "signal_quality_ic_ir": "신호 품질(IC/IR)",
     "strategy_parameter_validation": "전략 파라미터 검증",
     "walk_forward": "워크포워드(WFE)",
     "monte_carlo": "몬테카를로(MDD)",
+    "deflated_sharpe_ratio": "DSR 게이트",
     "market_regime_response": "과거 시장 대응 검증(레짐)",
     "historical_scenario_response": "과거 시장 대응 검증(시나리오)",
     "inflation_real_return": "인플레이션 반영 검증",
@@ -30,6 +37,8 @@ TITLE_MAP = {
     "psychological_tolerance": "심리적 허용치 검증",
     "outlier_concentration": "아웃라이어 집중도 검증",
     "cpcv_pbo": "CPCV/PBO",
+    "statistical_power_mde": "사전등록 MDE/검출력",
+    "acceptance_pnl_turnover": "PnL/회전율 수용성",
 }
 
 ACTION_MAP = {
@@ -40,6 +49,7 @@ ACTION_MAP = {
     "position_lag": "position=signal.shift(1) 강제 및 예외 케이스 점검",
     "walk_forward": "파라미터 단순화/탐색축소 후 OOS 재검증",
     "monte_carlo": "포지션 사이즈 축소, 리스크 한도 및 손절 재조정",
+    "deflated_sharpe_ratio": "탐색횟수/표본 수 대비 통계적 우위(DSR) 재검증 및 과최적화 축소",
     "cpcv_pbo": "탐색공간 축소 + 교차검증 강도 상향",
     "strategy_parameter_validation": "파라미터 범위/경계값/강건성 점검 후 재탐색",
     "market_regime_response": "상승/하락/고변동 레짐별 진입/청산 규칙 보정",
@@ -48,6 +58,8 @@ ACTION_MAP = {
     "temporal_consistency": "연도별 편차가 큰 구간의 규칙 과적합 축소",
     "psychological_tolerance": "허용 MDD 초과 시 포지션 크기/손실한도 하향",
     "outlier_concentration": "소수 거래/종목 의존도 완화(분산/필터 재설계)",
+    "statistical_power_mde": "표본 수/독립 윈도우 확충 또는 경제적 MDE 기준 재사전등록",
+    "acceptance_pnl_turnover": "PnL 신뢰구간 하단이 0을 넘도록 표본/진입품질 보강 후 재검증",
 }
 
 CRITICAL_GATES = {
@@ -55,6 +67,7 @@ CRITICAL_GATES = {
     "data_return_finite",
     "look_ahead_proxy",
     "position_lag",
+    "deflated_sharpe_ratio",
     "psychological_tolerance",
 }
 STATUS_PASS = "PASS"
@@ -62,6 +75,19 @@ STATUS_FAIL = "FAIL"
 STATUS_NOT_EVALUABLE = "NOT_EVALUABLE"
 
 
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
 def _fmt_num(v: Any) -> str:
     try:
         f = float(v)
@@ -72,6 +98,21 @@ def _fmt_num(v: Any) -> str:
     if math.isinf(f):
         return "Inf" if f > 0 else "-Inf"
     return f"{f:.6g}"
+
+
+def _has_value(details: Dict[str, Any], key: str) -> bool:
+    try:
+        f = float(details.get(key))
+    except Exception:
+        return False
+    return math.isfinite(f)
+
+
+def _float_or_nan(v: Any) -> float:
+    try:
+        return float(v)
+    except Exception:
+        return math.nan
 
 
 def _metric_and_threshold(name: str, details: Dict[str, Any]) -> Tuple[str, str]:
@@ -91,14 +132,42 @@ def _metric_and_threshold(name: str, details: Dict[str, Any]) -> Tuple[str, str]
             "index_monotonic=True and duplicate_index_count=0",
         )
     if name == "look_ahead_proxy":
-        return f"corr={_fmt_num(details.get('corr'))}", f"abs(corr)<={_fmt_num(details.get('threshold', 0.2))}"
+        n_obs = details.get("n_obs")
+        min_n = details.get("min_n")
+        suffix = ""
+        if n_obs is not None or min_n is not None:
+            suffix = f", n_obs={_fmt_num(n_obs)}, min_n={_fmt_num(min_n)}"
+        return f"corr={_fmt_num(details.get('corr'))}{suffix}", f"abs(corr)<={_fmt_num(details.get('threshold', 0.2))}"
     if name == "position_lag":
         return f"mismatch_ratio={_fmt_num(details.get('mismatch_ratio'))}", "<=0.10"
+    if name == "signal_quality_ic_ir":
+        return (
+            f"ic_mean={_fmt_num(details.get('ic_mean'))}, ic_std={_fmt_num(details.get('ic_std'))}, ess={_fmt_num(details.get('ess'))}, min_ess={_fmt_num(details.get('min_ess'))}",
+            f"ess>={_fmt_num(details.get('min_ess', 200))}",
+        )
     if name == "walk_forward":
+        required_rows = details.get("required_rows")
+        if not _has_value(details, "median_wfe"):
+            return (
+                f"len={_fmt_num(details.get('len'))}, required_rows={_fmt_num(required_rows)}, median_wfe=검증 데이터 없음",
+                f"len>={_fmt_num(required_rows)}",
+            )
         return f"median_wfe={_fmt_num(details.get('median_wfe'))}", ">=50"
     if name == "monte_carlo":
+        if _has_value(details, "mc_tail_mdd"):
+            return f"mc_tail_mdd={_fmt_num(details.get('mc_tail_mdd'))}, alpha={_fmt_num(details.get('mc_alpha'))}", f">={_fmt_num(details.get('limit', -0.3))}"
         return f"mc95_mdd={_fmt_num(details.get('mc95_mdd'))}", f">={_fmt_num(details.get('limit', -0.3))}"
+    if name == "deflated_sharpe_ratio":
+        return (
+            f"dsr={_fmt_num(details.get('deflated_sharpe_ratio'))}, n_obs={_fmt_num(details.get('n_obs'))}, n_trials={_fmt_num(details.get('n_trials'))}",
+            f">={_fmt_num(details.get('min_dsr', 0.1))}",
+        )
     if name == "cpcv_pbo":
+        if not (_has_value(details, "pbo_approx") and _has_value(details, "median_oos_sharpe")):
+            return (
+                f"len={_fmt_num(details.get('len'))}, min_n={_fmt_num(details.get('min_n'))}, pbo=검증 데이터 없음, med_oos_sharpe=검증 데이터 없음",
+                f"len>={_fmt_num(details.get('min_n'))}, pbo<=0.50 and med_oos_sharpe>=0",
+            )
         pbo = _fmt_num(details.get("pbo_approx"))
         med = _fmt_num(details.get("median_oos_sharpe"))
         return f"pbo={pbo}, med_oos_sharpe={med}", "pbo<=0.50 and med_oos_sharpe>=0"
@@ -112,9 +181,16 @@ def _metric_and_threshold(name: str, details: Dict[str, Any]) -> Tuple[str, str]
         vr = _fmt_num(details.get("valid_regimes"))
         wm = _fmt_num(details.get("worst_mdd"))
         ms = _fmt_num(details.get("median_regime_sharpe"))
-        return f"valid_regimes={vr}, worst_mdd={wm}, median_regime_sharpe={ms}", "valid_regimes>=2, worst_mdd>-0.60, median_regime_sharpe>=-0.50"
+        cr = _fmt_num(details.get("catastrophic_regimes"))
+        return f"valid_regimes={vr}, catastrophic_regimes={cr}, worst_mdd={wm}, median_regime_sharpe={ms}", "valid_regimes>=2, worst_mdd>-0.60, median_regime_sharpe>=-0.50"
     if name == "historical_scenario_response":
         cv = _fmt_num(details.get("covered_scenarios"))
+        try:
+            covered = int(float(details.get("covered_scenarios")))
+        except Exception:
+            covered = 0
+        if covered <= 0:
+            return f"covered_scenarios={cv}, scenario_result=검증 데이터 없음", "covered_scenarios>=2, worst_mdd>-0.65"
         wm = _fmt_num(details.get("worst_mdd"))
         ms = _fmt_num(details.get("median_sharpe"))
         return f"covered_scenarios={cv}, worst_mdd={wm}, median_sharpe={ms}", "covered_scenarios>=2, worst_mdd>-0.65"
@@ -136,6 +212,24 @@ def _metric_and_threshold(name: str, details: Dict[str, Any]) -> Tuple[str, str]
         tr = _fmt_num(details.get("top_contrib_ratio"))
         sn = _fmt_num(details.get("sample_n"))
         return f"top_contrib_ratio={tr}, sample_n={sn}", "top_contrib_ratio<=0.80, sample_n>=20"
+    if name == "statistical_power_mde":
+        ne = _fmt_num(details.get("n_eff"))
+        sig = _fmt_num(details.get("sigma"))
+        mr = _fmt_num(details.get("mde_return"))
+        ms = _fmt_num(details.get("mde_sharpe"))
+        ers = _fmt_num(details.get("economic_mde_sharpe"))
+        scale = details.get("sharpe_scale", "-")
+        return f"n_eff={ne}, sigma={sig}, mde_return={mr}, mde_sharpe={ms}({scale})", f"mde_sharpe<=economic_mde_sharpe({ers}) or mde_return<=economic_mde_return"
+    if name == "acceptance_pnl_turnover":
+        low = _fmt_num(details.get("pnl_ci95_low"))
+        med = _fmt_num(details.get("pnl_ci95_med"))
+        high = _fmt_num(details.get("pnl_ci95_high"))
+        turnover = _fmt_num(details.get("turnover_monthly"))
+        turnover_limit = _fmt_num(details.get("turnover_limit_monthly"))
+        return (
+            f"pnl_ci95_low={low}, pnl_ci95_med={med}, pnl_ci95_high={high}, turnover_monthly={turnover}",
+            f"pnl_ci95_low>0 and turnover_monthly<={turnover_limit}",
+        )
 
     keys = [k for k in details.keys()][:2]
     if not keys:
@@ -143,14 +237,102 @@ def _metric_and_threshold(name: str, details: Dict[str, Any]) -> Tuple[str, str]
     metric = ", ".join([f"{k}={_fmt_num(details.get(k))}" for k in keys])
     return metric, "-"
 
-def _is_not_evaluable(metric: str) -> bool:
-    return ("NaN" in metric) or ("Inf" in metric)
+
+def _scenario_coverage_suffix(report: Dict[str, Any]) -> str:
+    artifacts = report.get("artifacts", {}) if isinstance(report.get("artifacts"), dict) else {}
+    hs = artifacts.get("historical_scenario_response", {}) if isinstance(artifacts.get("historical_scenario_response"), dict) else {}
+    scenarios = hs.get("scenarios", []) if isinstance(hs.get("scenarios"), list) else []
+    if not scenarios:
+        return ""
+
+    target_tokens = {
+        "2008": ("gfc_2008",),
+        "2020": ("covid_crash",),
+        "2022": ("rate_hike_2022",),
+    }
+
+    out: List[str] = []
+    for year, keys in target_tokens.items():
+        matched = None
+        for row in scenarios:
+            if not isinstance(row, dict):
+                continue
+            name = str(row.get("scenario", "")).strip()
+            if name in keys:
+                matched = row
+                break
+        if matched is None:
+            out.append(f"{year}=MISSING")
+            continue
+
+        covered = bool(matched.get("covered", False))
+        if covered:
+            mdd = _fmt_num(matched.get("max_drawdown"))
+            out.append(f"{year}=Y(mdd={mdd})")
+        else:
+            out.append(f"{year}=N")
+
+    return ", scenario_coverage[" + "; ".join(out) + "]"
+
+def _is_regime_coverage_limited(name: str, details: Dict[str, Any]) -> bool:
+    if name != "market_regime_response":
+        return False
+
+    valid_regimes = _float_or_nan(details.get("valid_regimes"))
+    catastrophic = _float_or_nan(details.get("catastrophic_regimes"))
+    worst_mdd = _float_or_nan(details.get("worst_mdd"))
+    median_sharpe = _float_or_nan(details.get("median_regime_sharpe"))
+
+    if math.isfinite(valid_regimes) and valid_regimes >= 2:
+        return False
+    if math.isfinite(catastrophic) and catastrophic > 0:
+        return False
+    if math.isfinite(worst_mdd) and worst_mdd <= -0.60:
+        return False
+    if math.isfinite(median_sharpe) and median_sharpe < -0.50:
+        return False
+    return True
 
 
-def _status_label(passed: bool, metric: str) -> str:
-    if _is_not_evaluable(metric):
+def _is_not_evaluable(name: str, details: Dict[str, Any], metric: str, summary: str = "") -> bool:
+    text = f"{metric} {summary}"
+    return (
+        _is_regime_coverage_limited(name, details)
+        or
+        ("NaN" in text)
+        or ("Inf" in text)
+        or ("검증 데이터 없음" in text)
+        or ("deferred:" in text.lower())
+        or ("insufficient operating" in text.lower())
+        or ("insufficient data" in text.lower())
+        or ("no valid split" in text.lower())
+    )
+
+
+def _status_label(name: str, passed: bool, details: Dict[str, Any], metric: str, summary: str = "") -> str:
+    if _is_not_evaluable(name, details, metric, summary):
         return STATUS_NOT_EVALUABLE
     return STATUS_PASS if passed else STATUS_FAIL
+
+
+def _action_for(name: str, status: str) -> str:
+    if name == "look_ahead_proxy" and status == STATUS_NOT_EVALUABLE:
+        return "운영 표본을 min_n까지 확충한 뒤 signal-future 상관 재검증"
+    if name == "signal_quality_ic_ir" and status == STATUS_NOT_EVALUABLE:
+        return "운영 표본 ESS를 min_ess까지 확충한 뒤 IC/IR 재검증"
+    if name == "market_regime_response" and status == STATUS_NOT_EVALUABLE:
+        return "레짐별 최소 표본(valid_regimes>=2) 확보 후 재검증"
+    if name == "walk_forward" and status == STATUS_NOT_EVALUABLE:
+        return "운영 표본을 required_rows까지 확충한 뒤 WFE 재검증"
+    if name == "historical_scenario_response" and status == STATUS_NOT_EVALUABLE:
+        return "운영 구간에 시나리오 커버리지(covered_scenarios>=2)가 확보된 뒤 재검증"
+    if name == "inflation_real_return" and status == STATUS_NOT_EVALUABLE:
+        return "운영 구간의 연도 커버리지(years_covered>=2)가 확보된 뒤 실질수익 재검증"
+    if name == "temporal_consistency" and status == STATUS_NOT_EVALUABLE:
+        return "운영 연도 표본(n_years>=3)이 확보된 뒤 시간적 일관성 재검증"
+    if name == "cpcv_pbo" and status == STATUS_NOT_EVALUABLE:
+        return "운영 표본을 min_n까지 확충한 뒤 CPCV/PBO 재검증"
+    return ACTION_MAP.get(name, "세부지표 기반 보정 후 재검증")
 
 
 def _issue_tag(status: str) -> str:
@@ -177,17 +359,69 @@ def _operation_judgment(items: List[Dict[str, Any]]) -> str:
     return "운영보류"
 
 
+def _evaluation_scope(report: Dict[str, Any]) -> Dict[str, Any]:
+    artifacts = report.get("artifacts", {}) if isinstance(report.get("artifacts"), dict) else {}
+    base_meta = artifacts.get("base_meta", {}) if isinstance(artifacts.get("base_meta"), dict) else {}
+    source = base_meta.get("source", {}) if isinstance(base_meta.get("source"), dict) else {}
+    engine = str(base_meta.get("engine", "") or "").strip()
+    ledger_csv = str(source.get("ledger_csv", "") or "").strip()
+    is_paper_ledger = bool(ledger_csv) and "paper_fills_ledger" in ledger_csv.replace("\\", "/")
+    if engine == "real_strategy_backtest" and is_paper_ledger:
+        return {
+            "scope": "paper_early_logic_check",
+            "label": "초기 가상매매 데이터 기반 백테스트 로직 검증",
+            "interpretation": "현재 결과는 전략 성과 확정 판정이 아니라, 원장 입력을 기준으로 계산/차단 로직이 정직하게 동작하는지 보는 검증이다.",
+            "strategy_conclusion_allowed": False,
+        }
+    return {
+        "scope": "strategy_backtest_validation",
+        "label": "전략 백테스트 검증",
+        "interpretation": "백테스트 입력 범위 기준의 전략 검증 결과다.",
+        "strategy_conclusion_allowed": True,
+    }
+
+
 def _render_md(data: Dict[str, Any]) -> str:
     lines: List[str] = []
     lines.append(f"# 백테스트 검증 체크리스트 ({data['generated_at']})")
     lines.append("")
     lines.append(f"- overall: **{'PASS' if data['passed'] else 'FAIL'}**")
     lines.append(f"- operation_judgment: **{data.get('operation_judgment','-')}**")
+    scope = data.get("evaluation_scope", {}) if isinstance(data.get("evaluation_scope"), dict) else {}
+    if scope:
+        lines.append(f"- evaluation_scope: **{scope.get('label', '-')}**")
+        lines.append(f"- interpretation: {scope.get('interpretation', '-')}")
     lines.append(
         f"- total: **{data['total']}**, pass: **{data['pass_n']}**, fail: **{data['fail_n']}**, not_evaluable: **{data['not_evaluable_n']}**"
     )
     lines.append(f"- source_json: `{data['source_json']}`")
+    module_progress = data.get("module_progress", {}) if isinstance(data.get("module_progress"), dict) else {}
+    if module_progress:
+        lines.append(
+            f"- module_optimizer_ready: **{module_progress.get('optimizer_ready', False)}**"
+        )
+        blockers = module_progress.get("optimizer_blockers", []) or []
+        if blockers:
+            lines.append(f"- module_optimizer_blockers: **{', '.join(str(x) for x in blockers)}**")
     lines.append("")
+    if module_progress:
+        lines.append("## 모듈별 개발진행")
+        lines.append("")
+        lines.append("| 탭 | 모듈 | 상태 | 완료율 | 최적화 반영 | 보완 포인트 |")
+        lines.append("|---:|---|---|---:|---|---|")
+        for module in module_progress.get("modules", []) or []:
+            blockers = ", ".join(module.get("blockers", [])[:3]) or "-"
+            lines.append(
+                "| {tab} | {title} | {status} | {pct:.1f}% | {ready} | {blockers} |".format(
+                    tab=int(module.get("tab_no", 0)),
+                    title=module.get("title", "-"),
+                    status=module.get("status", "-"),
+                    pct=float(module.get("completion_pct", 0.0)),
+                    ready="READY" if bool(module.get("ready_for_optimize", False)) else "WAIT",
+                    blockers=blockers,
+                )
+            )
+        lines.append("")
     lines.append("## 항목별 상태")
     lines.append("")
     lines.append("| No | 검증항목 | 상태 | 문제표시 | 핵심지표 | 기준 | 권고조치 |")
@@ -226,7 +460,10 @@ def build_checklist(report: Dict[str, Any], source_json: Path) -> Dict[str, Any]
         passed = bool(g.get("passed", False))
         details = g.get("details", {}) or {}
         metric, threshold = _metric_and_threshold(name, details)
-        status = _status_label(passed, metric)
+        if name == "historical_scenario_response":
+            metric = f"{metric}{_scenario_coverage_suffix(report)}"
+        summary = str(g.get("summary", "") or "")
+        status = _status_label(name, passed, details, metric, summary)
 
         row = {
             "name": name,
@@ -236,7 +473,7 @@ def build_checklist(report: Dict[str, Any], source_json: Path) -> Dict[str, Any]
             "issue": _issue_tag(status),
             "metric": metric,
             "threshold": threshold,
-            "action": ACTION_MAP.get(name, "세부지표 기반 보정 후 재검증"),
+            "action": _action_for(name, status),
         }
         items.append(row)
 
@@ -245,6 +482,8 @@ def build_checklist(report: Dict[str, Any], source_json: Path) -> Dict[str, Any]
     not_eval_n = sum(1 for x in items if x["status"] == STATUS_NOT_EVALUABLE)
     total = len(items)
     operation_judgment = _operation_judgment(items)
+    module_progress = build_module_progress(items)
+    evaluation_scope = _evaluation_scope(report)
 
     return {
         "generated_at": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -255,6 +494,8 @@ def build_checklist(report: Dict[str, Any], source_json: Path) -> Dict[str, Any]
         "fail_n": fail_n,
         "not_evaluable_n": not_eval_n,
         "operation_judgment": operation_judgment,
+        "evaluation_scope": evaluation_scope,
+        "module_progress": module_progress,
         "items": items,
     }
 
@@ -296,15 +537,15 @@ def main() -> int:
     df.to_csv(out_csv, index=False, encoding="utf-8-sig")
     df.to_csv(out_csv_latest, index=False, encoding="utf-8-sig")
 
-    print(
+    _log_print(
         f"[CHK] overall={'PASS' if checklist['passed'] else 'FAIL'} pass={checklist['pass_n']} fail={checklist['fail_n']} not_evaluable={checklist['not_evaluable_n']}"
     )
-    print(f"[CHK] json={out_json}")
-    print(f"[CHK] md={out_md}")
-    print(f"[CHK] csv={out_csv}")
-    print(f"[CHK] latest_json={out_json_latest}")
-    print(f"[CHK] latest_md={out_md_latest}")
-    print(f"[CHK] latest_csv={out_csv_latest}")
+    _log_print(f"[CHK] json={out_json}")
+    _log_print(f"[CHK] md={out_md}")
+    _log_print(f"[CHK] csv={out_csv}")
+    _log_print(f"[CHK] latest_json={out_json_latest}")
+    _log_print(f"[CHK] latest_md={out_md_latest}")
+    _log_print(f"[CHK] latest_csv={out_csv_latest}")
 
     return 0
 

@@ -1,14 +1,15 @@
 import os
 import pandas as pd
+import logging
 
 p = r"paper\trades.csv"
-print("FILE=", p, "EXISTS=", os.path.exists(p))
+_log_print("FILE=", p, "EXISTS=", os.path.exists(p))
 if not os.path.exists(p):
     raise SystemExit(0)
 
 df = pd.read_csv(p)
-print("rows=", len(df))
-print("cols=", list(df.columns))
+_log_print("rows=", len(df))
+_log_print("cols=", list(df.columns))
 
 open_mask = None
 if "exit_date" in df.columns:
@@ -18,14 +19,27 @@ elif "is_open" in df.columns:
 elif "status" in df.columns:
     open_mask = df["status"].astype(str).str.lower().isin(["open","opened","holding"])
 else:
-    print("OPEN_DETECT=UNKNOWN (no exit_date/is_open/status columns)")
+    _log_print("OPEN_DETECT=UNKNOWN (no exit_date/is_open/status columns)")
     raise SystemExit(0)
 
 odf = df[open_mask].copy()
-print("open_positions=", len(odf))
+_log_print("open_positions=", len(odf))
 cols_show = [c for c in ["code","entry_date","entry_price","shares","qty","exit_date","exit_price","pnl_pct"] if c in odf.columns]
-print("open_cols_show=", cols_show)
+_log_print("open_cols_show=", cols_show)
 if cols_show:
-    print(odf[cols_show].tail(20).to_string(index=False))
+    _log_print(odf[cols_show].tail(20).to_string(index=False))
 else:
-    print(odf.tail(20).to_string(index=False))
+    _log_print(odf.tail(20).to_string(index=False))
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)

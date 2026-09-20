@@ -750,10 +750,17 @@ def _process_single_position_exit(
     max_close = float(pos.get("max_close", entry_price))
 
     pos_market_cap = float(pos.get("market_cap") or 0)
-    pos_slip_pct = max(
-        resolve_slip_pct(pos_market_cap, cfg, slip_pct),
-        float(_to_float(pos.get("entry_slippage_pct"), 0.0) or 0.0),
-    )
+    # [2026-08-25] 시총이 유효하면 티어를 신뢰한다.
+    #   기존에는 max(티어, entry_slippage_pct) 였다. 그 의도(청산도 진입만큼은 겪는다)는
+    #   타당하나, 진입 시 market_cap=0 버그로 small(1.0%) 이 박히면 시총을 고쳐도
+    #   옛 값이 영원히 이겼다. 실측: 005690 이 시총 6,396억(mid 0.5%)인데 왕복 2.15% 를 먹었다.
+    #   오염은 시총을 모를 때만 생기므로, 그때만 저장값에 기댄다.
+    _tier_slip = resolve_slip_pct(pos_market_cap, cfg, slip_pct)
+    _entry_slip = float(_to_float(pos.get("entry_slippage_pct"), 0.0) or 0.0)
+    if pos_market_cap > 0:
+        pos_slip_pct = _tier_slip
+    else:
+        pos_slip_pct = max(_tier_slip, _entry_slip)
 
     if not str(pos.get("sector") or "").strip() and isinstance(sector_db, dict):
         pos["sector"] = str(sector_db.get(code, "") or "").strip()
@@ -1478,6 +1485,9 @@ def _process_single_position_exit(
             f"source_trace_id={pos.get('source_trace_id', '')};"
             f"replay_chain_id={pos.get('replay_chain_id', '')};"
             f"replay_depth={pos.get('replay_depth', 0)};"
+            # [2026-08-31 O5-11] 경로와 무관한 진입 점수. 급등 필드와 별개로 항상 남긴다
+            f"entry_final_score={pos.get('entry_final_score', '')};"
+            f"entry_rank_score={pos.get('entry_rank_score', '')};"
             f"surge_type={pos.get('surge_type', '')};"
             f"surge_score={pos.get('surge_score', '')};"
             f"surge_score_final={pos.get('surge_score_final', '')};"
@@ -1520,6 +1530,10 @@ def _process_single_position_exit(
                     trade_id = f"T{next_seq:06d}"
                     pnl_krw = round(float(pnl_pct) * float(entry_price) * float(sell_qty), 2)
                     trades_new.append([trade_id, code, entry_date, entry_price, exit_day, float(exit_price), round(pnl_pct, 8), pnl_krw, exit_reason, exit_note, int(_truthy(pos.get("_surge_immediate", 0)))])
+                    _append_trade_cost(trade_id, code, entry_date, exit_day, exit_reason,
+                                       "exit_pos_slip", sell_qty, entry_price, float(exit_price),
+                                       pos_market_cap, _tier_slip, _entry_slip, pos_slip_pct,
+                                       fee_pct, sell_tax_pct)
                     existing_trade_sigs.add(sig)
                     if _src_oid:
                         committed_source_order_ids.add(_src_oid)
@@ -1761,6 +1775,60 @@ def _build_sell_order_lifecycle_summary(schema: str, runtime_ymd: str) -> Dict[s
         "rows": rows[:50],
         "issues": sorted(set(issues)),
     }
+
+
+# [2026-08-25] 청산 비용 원장. trades.csv 는 헤더가 스키마 판정에 쓰여 못 늘린다.
+#   값이 아니라 산식을 남긴다: cost_rate = price_factor * (fee_pct + slip_pct_applied)
+_TRADE_COST_HEADER = [
+    "ts", "trade_id", "code", "entry_date", "exit_date", "exit_reason", "site",
+    "qty", "entry_price", "exit_price",
+    "market_cap", "tier_slip_pct", "entry_slip_stored_pct", "slip_pct_applied",
+    "fee_pct", "sell_tax_pct", "price_factor", "cost_rate", "total_cost_pct",
+    "gross_ret", "net_ret",
+]
+
+
+def _append_trade_cost(trade_id, code, entry_date, exit_date, exit_reason, site,
+                       qty, entry_price, exit_price, market_cap,
+                       tier_slip_pct, entry_slip_stored_pct, slip_applied,
+                       fee_pct, sell_tax_pct):
+    """청산 1건의 비용 근거를 남긴다. 실패해도 청산을 막지 않는다."""
+    try:
+        import csv as _csv
+        import datetime as _dt
+        from paper_engine.io import PAPER_DIR as _PD
+        ep = float(entry_price or 0.0)
+        xp = float(exit_price or 0.0)
+        if ep <= 0:
+            return
+        pf = (ep + xp) / ep
+        cr = pf * (float(fee_pct or 0.0) + float(slip_applied or 0.0))
+        gross = (xp - ep) / ep
+        net = gross - cr - float(sell_tax_pct or 0.0)
+        row = [
+            _dt.datetime.now().isoformat(timespec="seconds"), trade_id, code,
+            entry_date, exit_date, exit_reason, site,
+            qty, round(ep, 4), round(xp, 4),
+            round(float(market_cap or 0.0), 0),
+            round(float(tier_slip_pct or 0.0), 6),
+            round(float(entry_slip_stored_pct or 0.0), 6),
+            round(float(slip_applied or 0.0), 6),
+            round(float(fee_pct or 0.0), 6),
+            round(float(sell_tax_pct or 0.0), 6),
+            round(pf, 6), round(cr, 8),
+            round(cr + float(sell_tax_pct or 0.0), 8),
+            round(gross, 8), round(net, 8),
+        ]
+        f = _PD / "trade_costs.csv"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        new = not f.exists()
+        with f.open("a", newline="", encoding="utf-8-sig") as fh:
+            w = _csv.writer(fh)
+            if new:
+                w.writerow(_TRADE_COST_HEADER)
+            w.writerow(row)
+    except Exception:
+        pass
 
 
 def _build_partial_exit_policy_summary(schema: str, runtime_ymd: str) -> Dict[str, Any]:
@@ -2563,6 +2631,21 @@ def _write_intraday_residual_overnight_guard_shadow(
     shadow_only = bool(guard_cfg.get("shadow_only", False)) if isinstance(guard_cfg, dict) else False
     active = bool(enabled or shadow_only)
     scope = str(guard_cfg.get("scope", "intraday_realtime") if isinstance(guard_cfg, dict) else "intraday_realtime").strip().lower()
+    # [2026-09-12] 미결 대장 C14. 아래 세 키는 **현재 동작을 정확히 기술하는데 제어하지 않았다.**
+    #   설정이 갖지 않은 제어권을 선언하고 있었고, 검사기(validate_..._activation.py)는
+    #   그 셋이 True 인지 검사했다. 셋 다 True 라 아무도 눈치채지 못했다.
+    #   - apply_to_surge / apply_to_non_surge: `is_surge` 를 계산해 **기록만** 하고 거르지 않았다
+    #   - trigger_on_same_day_loss: 산식(`entry_date != exit_date or net_ret >= 0`)에 하드코딩
+    #   앞 둘은 의미가 분명하므로 엔진이 읽는다. 기본값 True 라 동작 변화는 없다.
+    #   셋째는 **유일하게 구현된 트리거**다. 끄면 가드가 사라지는데 그 의미를 임의로 만들지
+    #   않는다 - True 가 아니면 fail-closed 로 알린다. PLANS (376).
+    apply_to_surge = bool(guard_cfg.get("apply_to_surge", True)) if isinstance(guard_cfg, dict) else True
+    apply_to_non_surge = bool(guard_cfg.get("apply_to_non_surge", True)) if isinstance(guard_cfg, dict) else True
+    trigger_on_same_day_loss = bool(guard_cfg.get("trigger_on_same_day_loss", True)) if isinstance(guard_cfg, dict) else True
+    if active and not trigger_on_same_day_loss:
+        print("[INTRADAY_RESIDUAL_GUARD_CONTRACT] trigger_on_same_day_loss=False - "
+              "구현된 트리거는 당일 손실 하나뿐이다. 가드를 끈 것과 같으므로 "
+              "설정을 바로잡을 것 (fail-closed: 가드는 계속 동작한다)")
 
     def _position_entry_timing(pos: Dict[str, Any]) -> str:
         entry_timing = str(pos.get("entry_timing", "") or "").strip().lower()
@@ -2605,6 +2688,13 @@ def _write_intraday_residual_overnight_guard_shadow(
             if not open_matches:
                 continue
             for open_pos in open_matches:
+                _row_is_surge = bool(_truthy(open_pos.get("_surge_immediate"))
+                                     or str(open_pos.get("surge_type", "") or "").strip())
+                # [2026-09-12] C14 - 선언한 대로 거른다
+                if _row_is_surge and not apply_to_surge:
+                    continue
+                if (not _row_is_surge) and not apply_to_non_surge:
+                    continue
                 rows.append(
                     {
                         "runtime_ymd": str(runtime_ymd or ""),
@@ -2636,6 +2726,9 @@ def _write_intraday_residual_overnight_guard_shadow(
         "enabled": enabled,
         "shadow_only": shadow_only,
         "scope": scope,
+        "apply_to_surge": apply_to_surge,
+        "apply_to_non_surge": apply_to_non_surge,
+        "trigger_on_same_day_loss": trigger_on_same_day_loss,
         "runtime_ymd": str(runtime_ymd or ""),
         "candidates": int(len(rows)),
         "artifact_csv": str(INTRADAY_RESIDUAL_OVERNIGHT_GUARD_SHADOW_CSV_PATH),
@@ -2774,6 +2867,9 @@ def _apply_intraday_residual_overnight_guard_exits(
             f"replay_chain_id={pos.get('replay_chain_id', '')};"
             f"replay_depth={pos.get('replay_depth', 0)};"
             f"entry_timing={pos.get('entry_timing', '')};"
+            # [2026-08-31 O5-11] 경로와 무관한 진입 점수. 급등 필드와 별개로 항상 남긴다
+            f"entry_final_score={pos.get('entry_final_score', '')};"
+            f"entry_rank_score={pos.get('entry_rank_score', '')};"
             f"surge_type={pos.get('surge_type', '')};"
             f"surge_score={pos.get('surge_score', '')};"
             f"surge_score_final={pos.get('surge_score_final', '')};"
@@ -2810,6 +2906,11 @@ def _apply_intraday_residual_overnight_guard_exits(
                 trade_id = f"T{next_seq:06d}"
                 pnl_krw = round(float(pnl_pct) * float(entry_price) * float(sell_qty), 2)
                 trades_new.append([trade_id, code, entry_date, entry_price, runtime_ymd_norm, exit_price, round(pnl_pct, 8), pnl_krw, reason, exit_note, int(_truthy(pos.get("_surge_immediate", 0)))])
+                _append_trade_cost(trade_id, code, entry_date, runtime_ymd_norm, reason,
+                                   "exit_flat_slip", sell_qty, entry_price, exit_price,
+                                   float(pos.get("market_cap") or 0), 0.0,
+                                   float(_to_float(pos.get("entry_slippage_pct"), 0.0) or 0.0),
+                                   slip_pct, fee_pct, sell_tax_pct)
                 existing_trade_sigs.add(sig)
                 next_seq += 1
         else:

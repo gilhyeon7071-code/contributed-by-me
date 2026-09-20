@@ -1,0 +1,38 @@
+{
+  "generated_at": "2026-09-09 09:48:09",
+  "account_mode": "mock",
+  "sources": {
+    "broker": {
+      "ok": true,
+      "reason": null,
+      "codes": 5,
+      "shares": 5922,
+      "cash": 100000000.0
+    },
+    "fills_net": {
+      "ok": true,
+      "reason": null,
+      "codes": 0
+    },
+    "paper_state": {
+      "ok": true,
+      "reason": null,
+      "codes": 0,
+      "settled_cash": 100000000.0
+    },
+    "topn_positions": {
+      "ok": true,
+      "reason": null,
+      "codes": 5
+    }
+  },
+  "gaps": [],
+  "summary": {
+    "gap_codes": 0,
+    "only_in_broker": 0,
+    "only_in_ledger": 0,
+    "qty_mismatch": 0,
+    "broker_shares_unbacked": 0
+  },
+  "status": "MATCH"
+}

@@ -54,6 +54,7 @@ import os
 import re
 import shutil
 from datetime import datetime, timedelta
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, cast
 
@@ -115,6 +116,46 @@ from paper_engine.exit import (
 )
 from paper_engine.drawdown import _ddm_pos_key
 from paper_engine.surge import _normalize_surge_position_policy_fields
+
+# [2026-08-22] 복구 경로용 시가총액 조회 (PLANS 53).
+#
+# 체결에서 포지션을 복구할 때 후보행이 없어 market_cap 을 0.0 으로 박아 넣었다.
+# 그런데 exit.py:752 가 청산 슬리피지 티어를 그 값으로 정한다 - 0 이면 항상
+# small_slip_pct(1.0%) 다. 그리고 common.py 의 "테마주" 분류도 0 < 시총 < 3000억
+# 조건이라 영원히 안 걸렸다.
+#
+# 실측(2026-08-22): 보유 중이던 005690 이 market_cap=0.0 이었고, 이 도구가
+# 매 사이클 포지션을 재구성하므로 상태 파일을 손으로 고쳐도 60초 안에 되돌아갔다.
+# 즉 여기가 진짜 수리 지점이다.
+#
+# 같은 헬퍼가 paper_engine/positions.py 와 tools/reconcile_paper_state_from_fills.py
+# 두 곳에 있다. 독립 실행 도구에 paper_engine 을 import 시키지 않으려고 복제했다.
+# 순수 함수이고 파일 하나만 읽는다. 한쪽을 고치면 다른 쪽도 같이 고칠 것.
+@lru_cache(maxsize=1)
+def _market_cap_table() -> Dict[str, float]:
+    table: Dict[str, float] = {}
+    try:
+        path = Path(__file__).resolve().parent.parent / "_cache" / "pykrx_fundamental_latest.csv"
+        if not path.exists():
+            return table
+        df = pd.read_csv(path, dtype={"code": str})
+        if "code" not in df.columns or "market_cap" not in df.columns:
+            return table
+        caps = pd.to_numeric(df["market_cap"], errors="coerce")
+        codes = df["code"].astype(str).str.strip().str.zfill(6)
+        for code, cap in zip(codes, caps):
+            if pd.notna(cap) and float(cap) > 0:
+                table[str(code)] = float(cap)
+    except Exception:
+        return {}
+    return table
+
+
+def _lookup_market_cap(code: Any) -> float:
+    """모르면 0.0 을 돌려준다 - 기존 동작과 같다. 알면 실제 값을 준다."""
+    key = str(code or "").strip().zfill(6)
+    return float(_market_cap_table().get(key, 0.0))
+
 
 def _write_empty_pending_signals_file() -> None:
     empty_df = pd.DataFrame(columns=PENDING_SIGNALS_SCHEMA)
@@ -402,7 +443,7 @@ def _reconcile_open_positions_with_fills(
                 "source_trace_id": "",
                 "replay_chain_id": _stable_digest("RECOVER_CHAIN", code, entry_order_id),
                 "replay_depth": 0,
-                "market_cap": 0.0,
+                "market_cap": _lookup_market_cap(code),
                 "_surge_immediate": int(_to_int(buy.get("_surge_immediate"), 0) or 0),
             }
             for key in [
@@ -1346,6 +1387,9 @@ def _write_pending_status(
                     "strategy_type": str(row.get("strategy_type") or ("SURGE" if row.get("is_surge") else ("CARRYOVER" if row.get("is_carryover") else "NORMAL"))),
                     "final_score": row.get("final_score", ""),
                     "alloc_weight": row.get("alloc_weight", ""),
+                    # [2026-08-21] 수량 축소 사슬. 여기 없으면 결정 행에는 최종 qty 만 남는다.
+                    "qty_initial": row.get("qty_initial", ""),
+                    "qty_trail": row.get("qty_trail", ""),
                 }
             )
         if pending_queue_len > 0 and filled > 0:
@@ -1436,6 +1480,43 @@ def _write_pending_status(
             "carryover_revalidate_summary": carryover_revalidate_summary or {},
         }
         PENDING_STATUS_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        # [2026-08-20 한정 캡처] pending_entry_status 는 _latest 하나뿐이라 매 실행 덮어쓴다.
+        # 하루 약 41회 실행되므로, 오전에 후보가 나와 entry_decision_reason_counts 가 찍혀도
+        # 오후 실행에 지워진다.
+        #
+        # 목적: 2026-08-20 에 적용한 아래 변경들의 효과를 후보 발생일에 확인하기 위함이다.
+        #   - block_v_accel_min 1 -> 0            (NORMAL_INTRADAY_MOMENTUM_BLOCK 소멸 여부)
+        #   - require_macd_golden 1.0 -> 0.0      (후보 수 증가 여부)
+        # 확인 후 이 블록은 제거한다. 범용 계측이 아니라 한정 캡처다.
+        # 상세: .agent/PLANS.md 2026-08-20 (56)(69)(73)
+        #
+        # 후보가 0이면 남기지 않는다. 같은 내용이 반복되면 파일명 해시로 걸러 중복을 막는다.
+        try:
+            _cap_n = int(payload.get("candidates_after_caps", 0) or 0)
+            if _cap_n > 0:
+                import hashlib as _hashlib
+                _sig_src = json.dumps(
+                    {
+                        "candidates_after_caps": _cap_n,
+                        "entry_ready": payload.get("entry_ready"),
+                        "filled": payload.get("filled"),
+                        "reasons": payload.get("entry_decision_reason_counts"),
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+                _sig = _hashlib.sha256(_sig_src.encode("utf-8")).hexdigest()[:10]
+                _ymd = str(payload.get("generated_at", ""))[:10].replace("-", "") or "unknown"
+                _cap_path = PENDING_STATUS_PATH.parent / f"pending_entry_status_capture_{_ymd}_{_sig}.json"
+                if not _cap_path.exists():
+                    _cap_path.write_text(
+                        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+                    )
+                    print(f"[CAPTURE] pending_entry_status -> {_cap_path.name} cands={_cap_n}")
+        except Exception as _cap_exc:
+            # 캡처 실패가 본 경로를 막아서는 안 된다.
+            print(f"[WARN] pending status capture failed: {type(_cap_exc).__name__}: {_cap_exc}")
     except Exception as e:
         print(f"[WARN] pending status write failed: {type(e).__name__}: {e}")
 

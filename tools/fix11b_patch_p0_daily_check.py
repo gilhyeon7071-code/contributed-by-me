@@ -1,11 +1,12 @@
-# fix11b_patch_p0_daily_check.py
+﻿# fix11b_patch_p0_daily_check.py
 # - Ensures crash_risk_off variable is always defined before being serialized.
 import io
 import os
 import re
 from pathlib import Path
+import logging
 
-ROOT = Path(r"E:\1_Data")
+ROOT = Path(__file__).resolve().parents[1]
 P = ROOT / "p0_daily_check.py"
 
 if not P.exists():
@@ -25,7 +26,7 @@ insert_block = [
 
 # If already patched, do nothing
 if any("fix11b: ensure crash_risk_off" in line for line in src):
-    print("OK: already patched (fix11b marker found)")
+    _log_print("OK: already patched (fix11b marker found)")
     raise SystemExit(0)
 
 # Find the line index to insert BEFORE the dict entry that references crash_risk_off
@@ -59,4 +60,18 @@ for line in insert_block:
 
 out_lines = src[:idx] + patched_block + src[idx:]
 P.write_text("".join(out_lines), encoding="utf-8")
-print("OK: patched p0_daily_check.py (fix11b)")
+_log_print("OK: patched p0_daily_check.py (fix11b)")
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
+

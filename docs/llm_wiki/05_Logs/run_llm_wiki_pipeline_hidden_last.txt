@@ -1,0 +1,194 @@
+[LLM_WIKI_COLLECT] mode=APPLY outputs=1
+E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-31.md
+[LLM_WIKI_CONTRACT] status=PASS files=89
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-05-18.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-05-19.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-05-20.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-05-21.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-05-25.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-05-26.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-05-27.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-05-28.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-05-29.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-05-30.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-05-31.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-01.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-02.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-03.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-04.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-05.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-06.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-07.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-08.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-09.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-10.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-11.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-12.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-13.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-14.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-15.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-16.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-17.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-18.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-19.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-20.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-21.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-22.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-23.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-24.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-25.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-26.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-27.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-29.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-30.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-01.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-02.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-03.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-05.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-06.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-07.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-08.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-09.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-10.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-11.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-13.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-14.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-15.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-16.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-20.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-21.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-22.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-23.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-24.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-25.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-26.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-27.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-28.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-29.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-30.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-06.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-07.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-08.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-09.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-10.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-11.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-12.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-13.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-14.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-15.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-18.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-19.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-20.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-21.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-22.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-23.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-24.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-25.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-26.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-27.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-28.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-29.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-30.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+PASS E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-31.md source_type=docs warnings=['POLICY_TERMS_PRESENT_REVIEW_REQUIRED'] errors=[]
+[LLM_WIKI_INBOX] mode=APPLY markdown_files=89
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-05-18.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-05-18.00ef0812e061.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-05-19.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-05-19.83d5c2f6f189.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-05-20.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-05-20.42bb2fa2e4ab.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-05-21.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-05-21.6a6c41a07cb9.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-05-25.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-05-25.b12a7bcf4c06.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-05-26.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-05-26.a1b69d196435.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-05-27.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-05-27.e0c2b40e1518.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-05-28.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-05-28.076bb08f280b.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-05-29.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-05-29.48f467dc45fe.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-05-30.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-05-30.f0dc5f5883a6.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-05-31.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-05-31.d4003d9823cc.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-01.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-06-01.a30bd06deff4.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-02.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-06-02.5ae42f0a276c.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-03.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-06-03.c4f875760ee6.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-04.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-06-04.9aa7b458d890.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-05.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-06-05.5b731d2dc7ad.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-06.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-06-06.e36974529490.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-07.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-06-07.200a7ecbe85c.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-08.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-06-08.a164b0313cb6.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-09.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-06-09.85043a05dd4a.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-10.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-06-10.c414049a88d2.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-11.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-06-11.dc9e41703215.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-12.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-06-12.d477cc2f1110.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-13.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-06-13.1d73c23001a6.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-14.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-06-14.a70a61bb6a07.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-15.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-06-15.2890646f6f4a.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-16.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-06-16.9a6ec801d2f1.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-17.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-06-17.a5c9cd6c86b8.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-18.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-06-18.ad81ad7bd7e3.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-19.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-06-19.2eadab455129.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-20.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-06-20.91b84adb0dd3.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-21.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-06-21.f58c84737217.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-22.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-06-22.01299c0fa7e3.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-23.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-06-23.a981d1499c7d.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-24.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-06-24.ef7c1279bd66.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-25.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-06-25.e61c3fdd2a7d.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-26.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-06-26.f8edb07063f9.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-27.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-06-27.e5082e841f30.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-29.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-06-29.bc631eac3c65.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-06-30.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-06-30.a9f2ba798477.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-01.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-07-01.d67dff24be95.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-02.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-07-02.13f0834debb6.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-03.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-07-03.71ce5ac54ad2.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-05.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-07-05.c598c09774f1.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-06.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-07-06.9e0371a817ea.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-07.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-07-07.4f9428a18754.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-08.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-07-08.8f19e671cb14.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-09.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-07-09.fcdef2bc9ff8.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-10.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-07-10.8c1e3cfe5626.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-11.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-07-11.eb73afc0dceb.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-13.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-07-13.61cfad8d9a48.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-14.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-07-14.6a90c20cf0e0.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-15.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-07-15.e3a2d9442955.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-16.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-07-16.fc64a23ec4ba.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-20.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-07-20.d6fe2ca445fb.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-21.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-07-21.40f803e3c5b0.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-22.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-07-22.6d4959d4f5c9.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-23.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-07-23.e6175361981d.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-24.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-07-24.4eb0e03e997c.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-25.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-07-25.2907dd60f14b.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-26.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-07-26.c4e90f2e95f8.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-27.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-07-27.b7ec4acb6ecc.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-28.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-07-28.24759094d19f.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-29.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-07-29.d4ef0a184753.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-07-30.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-07-30.d4e0e457bf91.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-06.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-08-06.1db2c3926222.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-07.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-08-07.6e8029637fcb.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-08.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-08-08.376d86f26659.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-09.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-08-09.b0b7fe4bec9f.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-10.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-08-10.7603c8f84440.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-11.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-08-11.3c6582776a65.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-12.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-08-12.85c59b326c3c.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-13.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-08-13.430c681a3586.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-14.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-08-14.4c9f1c8504b2.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-15.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-08-15.5bfbc33653e3.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-18.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-08-18.67c502beee34.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-19.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-08-19.f6e7c4c6f01a.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-20.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-08-20.c26a01989cae.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-21.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-08-21.64619cfa5013.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-22.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-08-22.e3341fd67b80.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-23.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-08-23.5c3c784083b7.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-24.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-08-24.1c147585868c.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-25.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-08-25.cfd1f13edd53.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-26.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-08-26.8fdcac7f314d.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-27.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-08-27.7c5ab03a0535.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-28.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-08-28.a1b72fb79fe3.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-29.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-08-29.6b18d4637e65.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-30.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-08-30.11d3ba477b53.md
+docs E:\1_Data\docs\llm_wiki\00_Inbox\raw_docs\roota_current_state_2026-05-18.2026-08-31.md -> E:\1_Data\docs\llm_wiki\02_Sources\docs\2026-08-31\roota_current_state_2026-05-18.2026-08-31.f19390b0a092.md
+E:\1_Data\docs\llm_wiki\wiki_index_latest.md
+E:\1_Data\docs\llm_wiki\00_Current_State\system_state_latest.md
+E:\1_Data\docs\llm_wiki\05_Logs\latest_artifact_index.md
+E:\vibe\buffett\docs\llm_wiki\wiki_index_latest.md
+E:\vibe\buffett\docs\llm_wiki\00_Current_State\dashboard_state_latest.md
+E:\vibe\buffett\docs\llm_wiki\05_Logs\latest_artifact_index.md
+E:\1_Data\docs\llm_wiki\05_Logs\current_operational_classification_latest.md
+E:\1_Data\docs\llm_wiki\05_Logs\current_operational_classification_latest.json
+summary_status=REVIEW
+E:\1_Data\docs\llm_wiki\wiki_index_latest.md
+E:\1_Data\docs\llm_wiki\00_Current_State\system_state_latest.md
+E:\1_Data\docs\llm_wiki\05_Logs\latest_artifact_index.md

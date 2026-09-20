@@ -1,6 +1,6 @@
 ﻿# 1_Data Documentation SSOT
 
-Last updated: 2026-03-05
+Last updated: 2026-03-17
 Owner: RootA (`E:\1_Data`)
 
 ## Purpose
@@ -11,13 +11,24 @@ Use this as the first entry point before changing code, config, or schedules.
 1. `02-design/system-architecture.md`
 2. `02-design/pipeline-contracts.md`
 3. `03-operations/daily-runbook.md`
-4. `03-operations/root-cleanup-policy.md`
+4. `03-operations/dashboard_safe_change_protocol.md`
+5. `03-operations/dashboard_ui_operating_rules_ssot_latest.md`
+6. `03-operations/dashboard_ui_preflight_checklist_latest.md`
+7. `03-operations/root-cleanup-policy.md`
 
 ## Folder Map
 - `01-plan/`: planned work and feature plans.
 - `02-design/`: architecture and technical design.
 - `03-operations/`: runbook, incident response, operational policy.
 - hidden (`.pdca-*`, `.bkit-*`): tool metadata. Do not edit manually.
+
+## Dashboard UI Rules
+- UI/운영 규칙 SSOT:
+  - `03-operations/dashboard_ui_operating_rules_ssot_latest.md`
+- 수정 전 체크리스트:
+  - `03-operations/dashboard_ui_preflight_checklist_latest.md`
+- 안전 수정 절차:
+  - `03-operations/dashboard_safe_change_protocol.md`
 
 ## Current Pipeline Snapshot (2026-03-05)
 - Candidate chain outputs aligned to `2026-03-05`:

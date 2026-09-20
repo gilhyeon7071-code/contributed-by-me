@@ -1,0 +1,815 @@
+# 2026-04-24 dd_stop validation reduce
+
+## 2026-04-24 Recheck
+- Backup:
+  - `E:\1_Data\backup\20260424_dd_stop_validation_reduce\20260424_1134_dd_stop_validation_recheck`
+- Current raw risk orchestration:
+  - `dd_current=0.18749614246630364`
+  - `dd_stop=0.15`
+  - `edge=0.055273073330225825`
+  - `f_kelly=1.5`
+  - `scale=0.0`
+- Current config:
+  - `dd_stop_validation.enabled=true`
+  - `mode=validation_reduce`
+  - `max_new=1`
+  - `position_size_multiplier=0.1`
+  - `allowed_run_labels=main,validation,tuning`
+- Current main entry evidence:
+  - `p1_entry_gate_status_latest.run_label=main`
+  - `entry_gate_decision_before_p1=REDUCE`
+  - reason includes `risk_orch_size_zero:dd_stop;validation_reduce`
+  - `position_size_multiplier=0.1`
+- Current pending evidence:
+  - `max_new=0`
+  - `max_new_zero_reason=max_positions_full`
+  - `filled=0`
+  - `candidates_after_caps=0`
+- Policy value validation:
+  - `risk_orch_dd_stop_validation_latest.assessment.recommendation=KEEP_CURRENT_DD_STOP_0_15`
+  - `dd_stop=0.15 => BLOCK`
+  - `dd_stop=0.18 => BLOCK`
+  - `dd_stop=0.20 => REDUCE, scale_after_dd_es=0.008332`
+  - Raising `dd_stop` remains policy relaxation, not bug fix.
+- Status:
+  - Keep active because production/live use of `validation_reduce` is policy-sensitive.
+
+## Goal
+- Keep production/live `dd_stop` fail-closed semantics available.
+- Allow development validation mode to continue with reduced entry size when the only risk-orchestration zero-size reason is `dd_stop`.
+
+## Scope
+- `E:\1_Data\paper_engine.py`
+- `E:\1_Data\paper\paper_engine_config.json`
+- Related runtime evidence under `E:\1_Data\2_Logs`
+
+## Non-scope
+- No change to `dd_stop` threshold value.
+- No hardcoded score/status lift.
+- No dashboard-only masking.
+
+## Current Facts
+- `risk_orchestration.dd_current=0.18749614246630364`
+- `risk_orchestration.dd_stop=0.15`
+- Raw risk orchestration scale remains `0.0`.
+- Validation policy mode converts only `dd_stop`-only size-zero from entry `BLOCK` to `REDUCE`.
+
+## Approach
+- Add `risk_orchestration.dd_stop_validation`.
+- Default remains disabled/block in code defaults.
+- Local config enables `validation_reduce` with `max_new=1` and `position_size_multiplier=0.1` for `main`, `validation`, and `tuning`.
+- Entry gate propagation records `risk_orch_size_zero:dd_stop;validation_reduce`.
+
+## Validation Evidence
+- Syntax: `python -m py_compile paper_engine.py`
+- Isolated validation run:
+  - `E:\1_Data\2_Logs\p1_entry_gate_status_validation_latest.json`
+  - decision `REDUCE`, max_new `1`, position_size_multiplier `0.1`
+  - `E:\1_Data\paper\fills_validation.csv` received one validation BUY.
+- Main run:
+  - `E:\1_Data\2_Logs\p1_entry_gate_status_latest.json`
+  - decision `REDUCE`, reason includes `risk_orch_size_zero:dd_stop;validation_reduce`
+  - `E:\1_Data\2_Logs\pending_entry_status_latest.json`
+  - max_new `0`, max_new_zero_reason `max_positions_full`, filled `0`
+
+## 2026-04-24 Paper Validation Exposure Cap
+- Backup:
+  - `E:\1_Data\backup\20260424_paper_validation_exposure_cap\20260424_115511`
+  - `E:\1_Data\backup\20260424_paper_validation_exposure_cap\before_official_batch_20260424_115839`
+  - `E:\1_Data\backup\20260424_paper_validation_exposure_cap\before_config_lock_init_20260424_115941`
+- Scope:
+  - `E:\1_Data\paper_engine.py`
+  - `E:\1_Data\paper\paper_engine_config.json`
+  - `E:\1_Data\paper\paper_engine_config.lock.json`
+- Policy decision:
+  - Keep `dd_stop=0.15`.
+  - Keep `dd_stop_validation_reduce` enabled for paper validation.
+  - In `dd_stop_validation_reduce`, do not let `max_positions_full` block by position count alone when gross exposure is still below the active gross exposure cap.
+  - Price data unavailable or gross exposure cap missing stays fail-closed.
+- Runtime evidence before official batch:
+  - `pending_entry_status_latest.max_new=1`
+  - `pending_entry_status_latest.max_new_zero_reason=""`
+  - `pending_entry_status_latest.candidates_after_caps=1`
+  - `pending_entry_status_latest.entry_ready=1`
+  - `pending_entry_status_latest.filled=1`
+  - `max_positions_meta.validation_exposure_override.applied=true`
+  - `open_notional=32261540.0`
+  - `gross_cap_krw=50000000.0`
+  - BUY row: `PAPER_BUY_102120_20260424_R20260424`
+- Official batch evidence:
+  - `run_paper_daily.bat` rc=0
+  - `run_paper_daily_last.txt` includes `[OK] finished` and `[WRAPPER_EXIT] rc=0`
+  - config lock approved sha256 `45678bf3a1060605dbb9f790499adc510d9adbd398b57c2dafa0ed7f50f30203`
+  - D by latest BUY is `20260424`
+  - `orders_20260424_exec.xlsx` exists
+  - `paper\fills.csv` rows=372
+  - today BUY rows:
+    - `PAPER_BUY_102120_20260424_R20260424`
+    - `PAPER_BUY_273640_20260424_R20260424`
+  - today SELL row:
+    - `PAPER_SELL_006360_20260424_FUNDAMENTAL_CRITICAL`
+  - integrated ops summary:
+    - `batch_status=PASS`
+    - `dashboard_overall=PASS`
+    - `blocking_issues_effective=[]`
+    - `top_blocker_effective=현재 확인된 차단 이슈 없음`
+- Current remaining gate state:
+  - Latest `p1_entry_gate_status_latest.entry_gate_decision_before_p1=BLOCK`
+  - reason contains `macro_news=macro_critical_bad:2`
+  - This is separate from `max_positions_full`.
+- Backtest validation:
+  - `E:\1_Data\2_Logs\backtest_validation_latest.json`
+  - `passed=false`
+  - `p1_entry_gate_status` records `backtest_validation=gate_caution:acceptance_pnl_turnover` when not superseded by macro hard block.
+  - Backtest validation is now treated as a required evidence item, not a pass-by-default item.
+- Trading stage:
+  - `E:\1_Data\2_Logs\trading_stage_validation_latest.json`
+  - judgment `실전준비 보류`
+  - next_step `live_fix`
+
+## 2026-04-24 Macro Unknown Validation Guard
+- Backup:
+  - `E:\1_Data\backup\20260424_macro_unknown_validation_guard\20260424_122945`
+  - `E:\1_Data\backup\20260424_macro_unknown_validation_guard\before_config_lock_init_20260424_123140`
+- Scope:
+  - `E:\1_Data\tools\macro_signal_daily.py`
+  - `E:\1_Data\paper_engine.py`
+  - `E:\1_Data\paper\paper_engine_config.json`
+  - `E:\1_Data\paper\paper_engine_config.lock.json`
+- Root cause:
+  - `macro_signal_latest.freshness_guard.critical_bad=2`
+  - critical rows:
+    - `VIXCLS`: `freshness=UNKNOWN`, `rows=0`
+    - `BAMLH0A0HYM2`: `freshness=UNKNOWN`, `rows=0`
+  - This was external macro data absence, not confirmed bad macro value.
+- Change:
+  - `macro_signal_daily.py` now records `freshness_guard.critical_details`.
+  - code default remains `unknown_critical_no_data_action=BLOCK`.
+  - local paper config sets unknown critical no-data to `CAUTION` for `main,validation,tuning`.
+  - actual stale critical values still block.
+- Evidence:
+  - `py_compile` PASS for `paper_engine.py` and `tools\macro_signal_daily.py`
+  - `macro_signal_daily.py` rc=0
+  - `p1_entry_gate_status_latest.entry_gate_decision_before_p1=REDUCE`
+  - p1 reason no longer contains `macro_critical_bad:2`
+  - p1 reason contains `macro_news=news_quota_guard_stop` as CAUTION path
+
+## 2026-04-24 Same-Day Pending Verdict
+- Backup:
+  - `E:\1_Data\backup\20260424_same_day_pending_verdict\20260424_124114`
+  - `E:\1_Data\backup\20260424_same_day_pending_verdict\before_official_batch_20260424_124230`
+  - `E:\1_Data\backup\20260424_same_day_pending_verdict\before_config_lock_init_20260424_124320`
+  - `E:\1_Data\backup\20260424_same_day_pending_verdict\before_integrated_refresh_20260424_125222`
+- Scope:
+  - `E:\1_Data\tools\paper_pending_report.py`
+  - `E:\1_Data\run_paper_daily.bat`
+- Root cause:
+  - Today paper BUY rows have no next-session daily price yet.
+  - Previous verdict treated same-day entries as failure under `NO_PRICES_AFTER_ENTRY_DATE`.
+- Change:
+  - same-day open positions are tagged `SAME_DAY_ENTRY_WAIT_NEXT_SESSION`.
+  - batch verdict allows pending rows only when all pending rows are same-day wait rows.
+- Evidence:
+  - `paper_pending_report.py` py_compile PASS
+  - direct verdict PASS:
+    - `pending=4`
+    - `active=18`
+    - `ok_same_day_pending=True`
+    - `ok=True`
+  - official `run_paper_daily.bat` rc=0
+  - `run_paper_daily_last.txt` includes `[OK] finished` and `[WRAPPER_EXIT] rc=0`
+  - `paper_pending_report_20260424_124953.json` pending reasons:
+    - `SAME_DAY_ENTRY_WAIT_NEXT_SESSION`
+  - integrated snapshot refreshed after wrapper:
+    - `batch_status=PASS`
+    - `dashboard_overall=PASS`
+    - `blocking_issues_effective=[]`
+- Runtime paper fills:
+  - today BUY rows:
+    - `PAPER_BUY_102120_20260424_R20260424`
+    - `PAPER_BUY_273640_20260424_R20260424`
+    - `PAPER_BUY_011690_20260424_R20260424`
+    - `PAPER_BUY_417200_20260424_R20260424`
+  - today SELL row:
+    - `PAPER_SELL_006360_20260424_FUNDAMENTAL_CRITICAL`
+- Remaining:
+  - `backtest_validation_latest.passed=false`
+  - `trading_stage_validation_latest.overall.judgment=실전준비 보류`
+
+## 2026-04-24 Backtest Validation Fail Breakdown
+- Backup:
+  - `E:\1_Data\backup\20260424_backtest_validation_fail_breakdown\20260424_125741`
+  - `E:\1_Data\backup\20260424_backtest_validation_fail_breakdown\before_python_resolver_patch_20260424_130017`
+  - `E:\1_Data\backup\20260424_backtest_validation_fail_breakdown\before_checklist_syspath_patch_20260424_130513`
+  - `E:\1_Data\backup\20260424_backtest_validation_fail_breakdown\before_trading_stage_python_patch_20260424_130624`
+  - `E:\1_Data\backup\20260424_backtest_validation_fail_breakdown\before_plan_update_20260424_130826`
+- Scope:
+  - execution-path fix for official backtest validation batch only
+  - no policy threshold relaxation
+  - no pass/status hardcoding
+- Change:
+  - backtest batch launchers resolve `E:\1_Data\_runtime\python312-embed\python.exe`
+  - `tools\build_backtest_validation_checklist.py` inserts its own tools directory into `sys.path` for embedded Python
+- Official rerun:
+  - `run_backtest_validation_real.bat`
+  - exit code `2`
+  - reason: validation judgment remains fail
+- Evidence:
+  - `E:\1_Data\2_Logs\backtest_validation_latest.json`
+    - `passed=false`
+    - `gate_results=18`
+    - failed gates `9`
+  - `E:\1_Data\2_Logs\backtest_validation_checklist_latest.json`
+    - `passed=false`
+    - `pass_n=8`
+    - `fail_n=6`
+    - `not_evaluable_n=4`
+    - `operation_judgment=운영보류`
+  - `E:\1_Data\2_Logs\backtest_final_output_latest.json`
+    - `overall_pass=false`
+    - `final_gate_decision=NO_GO`
+    - `operation_judgment=운영보류`
+  - `E:\1_Data\2_Logs\trading_stage_validation_latest.json`
+    - `overall.judgment=실전준비 보류`
+    - `overall.next_step=live_fix`
+- Main failed gates:
+  - `look_ahead_proxy`: `corr=0.4261280672306583`, threshold `0.2`
+  - `signal_quality_ic_ir`: `ess=13.0`, `min_ess=200.0`
+  - `walk_forward`: insufficient data, `len=14`
+  - `market_regime_response`: valid regimes `0`
+  - `historical_scenario_response`: covered scenarios `0`
+  - `temporal_consistency`: `n_years=1`
+  - `outlier_concentration`: `sample_n=14`, `top_contrib_ratio=0.2722852899082369`
+  - `acceptance_pnl_turnover`: monthly turnover `4.12721763426`, limit `0.2`
+  - `cpcv_pbo`: insufficient data, `len=14`
+- Remaining:
+  - Backtest validation remains blocking evidence.
+  - Current failure is runtime evidence, not display-only state.
+
+## 2026-04-24 Backtest Lookahead Proxy Fix
+- Backup:
+  - `E:\1_Data\backup\20260424_backtest_lookahead_proxy_fix\20260424_131121`
+- Scope:
+  - `E:\1_Data\tools\backtest_real_strategy_adapter.py`
+- Root cause:
+  - Real strategy adapter emitted future-aligned position as signal.
+  - Initial failure:
+    - `look_ahead_proxy.corr=0.4261280672306583`
+    - threshold `0.2`
+- Change:
+  - `signal` now uses current daily exposure.
+  - validation `position` now follows `signal.shift(1)`.
+  - ledger-based return calculation in `real_strategy_backtest` was not changed.
+- Verification:
+  - `py_compile` PASS
+  - direct adapter check:
+    - `corr=-0.009976086735469942`
+    - `position_lag mismatch=0.0`
+  - official `run_backtest_validation_real.bat` rerun:
+    - exit code `2`
+    - reason: remaining validation gates still fail
+  - latest `E:\1_Data\2_Logs\backtest_validation_latest.json`:
+    - `look_ahead_proxy.passed=true`
+    - `look_ahead_proxy.corr=-0.009976086735469942`
+    - `position_lag.passed=true`
+    - `position_lag.mismatch_ratio=0.0`
+    - overall `passed=false`
+  - latest checklist:
+    - `pass_n=9`
+    - `fail_n=5`
+    - `not_evaluable_n=4`
+    - `operation_judgment=운영보류`
+- Remaining failed gates:
+  - `signal_quality_ic_ir`
+  - `walk_forward`
+  - `market_regime_response`
+  - `historical_scenario_response`
+  - `temporal_consistency`
+  - `outlier_concentration`
+  - `acceptance_pnl_turnover`
+  - `cpcv_pbo`
+
+## 2026-04-24 Backtest Overlap Length Fix
+- Backup:
+  - `E:\1_Data\backup\20260424_backtest_overlap_len_fix\20260424_131701`
+- Scope:
+  - `E:\1_Data\run_backtest_validation_real.bat`
+- Root cause:
+  - `tools\build_backtest_market_csv.py` defaulted to `max_files=32`.
+  - Official real validation therefore built market OHLC from only recent/selected KRX parquet files.
+  - Result before fix:
+    - `backtest_market_ohlc_latest.csv` rows `167`
+    - months after 2025-12-26 only `14` trading rows
+    - real overlap range `2026-04-06..2026-04-23`
+- Change:
+  - official real validation now calls `run_build_backtest_market_csv.bat --max-files 999`.
+- Verification:
+  - official `run_backtest_validation_real.bat` rerun
+  - market OHLC rows `1549`
+  - source files `79`
+  - market range `2020-01-02..2026-04-23`
+  - real overlap rows `79`
+  - real overlap range `2025-12-26..2026-04-23`
+- Latest validation:
+  - `backtest_validation_latest.passed=false`
+  - `look_ahead_proxy.passed=true`, `corr=0.06657570075365221`
+  - `position_lag.passed=true`, `mismatch_ratio=0.0`
+  - `signal_quality_ic_ir.ess=78.0`, `min_ess=200.0`
+  - `walk_forward.len=79`
+  - `cpcv_pbo.len=79`
+  - `acceptance_pnl_turnover.turnover_monthly=1.86569478629924`
+  - `acceptance_pnl_turnover.turnover_limit_monthly=0.2`
+  - `deflated_sharpe_ratio=0.043459863576448765`, `min_dsr=0.1`
+  - checklist `pass_n=9`, `fail_n=7`, `not_evaluable_n=2`, `operation_judgment=운영보류`
+- Interpretation:
+  - The `len=14` truncation issue is removed.
+  - Remaining failures are real validation failures under the current thresholds and available realized sample.
+
+## 2026-04-24 Backtest Turnover Diagnosis
+- Backup:
+  - `E:\1_Data\backup\20260424_backtest_turnover_diagnosis\20260424_132233`
+- Scope:
+  - diagnosis only
+  - no ledger/history mutation
+  - no turnover threshold relaxation
+- Evidence:
+  - `E:\1_Data\2_Logs\backtest_validation_latest.json`
+    - `acceptance_pnl_turnover.turnover_monthly=1.86569478629924`
+    - `turnover_limit_monthly=0.2`
+  - adapter direct check:
+    - overlap rows `79`
+    - average daily turnover `0.08884260887139238`
+    - monthly turnover `1.86569478629924`
+  - ledger side breakdown:
+    - `20260416`: BUY `44,738,095`, SELL `28,006,006`, total turnover ratio `0.727441`
+    - `20260413`: BUY `31,200,870`, SELL `24,876,160`, total turnover ratio `0.560771`
+    - `20260408`: BUY `36,260,500`, SELL `2,578,875`, total turnover ratio `0.388394`
+- Duplicate/replay evidence:
+  - exact duplicate-like BUY rows found:
+    - `20260407 006360 BUY` repeated 7 times
+    - `20260408 100090 BUY` repeated 7 times
+    - `20260416 474610 BUY` repeated 2 times
+  - duplicate-like rows gross notional:
+    - ledger duplicate gross about `20,345,740`
+    - current `paper\fills.csv` duplicate gross about `12,366,900`
+  - removing exact duplicate-like rows in the overlap changes monthly turnover only:
+    - raw monthly turnover `2.541204967545517`
+    - dedup monthly turnover `2.4883804813386208`
+- Current-code check:
+  - current `paper_engine.py` has open-code guard:
+    - `CODE_ALREADY_OPEN`
+    - comment: reentry applies after close, not while a position is still open
+  - latest `20260424` ledger rows show 3 BUY rows and no duplicate same code/qty/price pattern.
+- Interpretation:
+  - Historical duplicate/reentry rows are real contamination in the validation ledger, but they are not enough to explain the full turnover failure.
+  - Main turnover failure is high churn: many BUY and SELL rows on the same days, plus short holding/exit cadence.
+  - Current code appears to have a guard against the specific open-position duplicate pattern, so next work should separate historical ledger remediation from policy-level churn reduction.
+- Remaining:
+  - Do not edit ledger without explicit remediation scope and backup.
+  - Next root-cause branch is high churn from entry count/position sizing/sell cadence, not threshold relaxation.
+
+## 2026-04-24 Blocked Fill Policy Diagnosis
+- Backup:
+  - `E:\1_Data\backup\20260424_blocked_fills_policy_diagnosis\20260424_133040`
+- Scope:
+  - diagnosis only
+  - no ledger/history mutation
+  - no policy threshold change
+- Evidence:
+  - `E:\1_Data\tools\p0_onepass_from_fills.py`
+    - `orders_{D}_exec.xlsx` is generated from `fills.csv`.
+    - `entry_blocked` is marked after fills are already present.
+    - file note says this does not block live broker execution and is plan-only marking/exclusion.
+  - Historical engine configs:
+    - `20260408`: `cap_signal_top_n=0`, `max_positions=50`, `max_daily_new_exposure_pct=0.4`
+    - `20260413`: `cap_signal_top_n=0`, `max_positions=16`, `max_daily_new_exposure_pct=0.4`
+    - `20260416`: `cap_signal_top_n=0`, `max_positions=16`, `max_daily_new_exposure_pct=0.4`
+  - `E:\1_Data\2_Logs\p0_live_vs_bt_core_20260416.json`
+    - `fills_rows_as_of=26`
+    - `core_rows=6`
+    - `cap_blocked=17`
+    - `disclosure_blocked=7`
+  - `E:\1_Data\2_Logs\kis_order_dispatch_20260416_mock.json`
+    - `validation_mode=false`
+    - `rows_eligible=0`
+- Interpretation:
+  - The apparent contradiction "blocked but filled" is not a pre-fill gate failure.
+  - It is a policy-chain mismatch: paper engine allowed fills because `cap_signal_top_n=0`; `p0` later re-labeled/excluded rows by top3/disclosure for core/reporting.
+  - Therefore the turnover failure should be treated as real paper churn from loose historical entry policy, not as a simple display bug.
+- Remaining:
+  - Decide whether `cap_signal_top_n` should stay `0` in paper engine or be activated as a real pre-fill policy.
+  - Do not rewrite historical ledger unless a separate remediation scope is explicitly opened.
+
+## 2026-04-24 Cap Signal Top3 Prefill Policy
+- Backup:
+  - `E:\1_Data\backup\20260424_cap_signal_top3_prefill_policy\20260424_133551`
+  - config-lock tool backup: `E:\1_Data\paper\paper_engine_config.json.bak_20260424_133609`
+- Scope:
+  - policy alignment only
+  - no ledger/history mutation
+  - no turnover threshold relaxation
+- Change:
+  - `E:\1_Data\paper\paper_engine_config.json`
+    - `cap_signal_top_n: 0 -> 3`
+  - `E:\1_Data\paper\paper_engine_config.lock.json`
+    - approved sha updated by `tools\paper_engine_config_lock.py`
+  - change log:
+    - `E:\1_Data\2_Logs\paper_engine_config.change_20260424_133609.json`
+- Reason:
+  - `p0_onepass_from_fills.py` already applies top3 as post-fill core/report exclusion.
+  - Paper engine had the same pre-fill cap function, but config disabled it with `cap_signal_top_n=0`.
+  - Aligning to `3` makes the cap apply before future paper fills instead of only after fills are created.
+- Verification:
+  - config lock status:
+    - config sha `4dadf54828d8272da4d20e56582dc4acc70baca8113e6a037e816d3f70448628`
+    - approved sha `4dadf54828d8272da4d20e56582dc4acc70baca8113e6a037e816d3f70448628`
+    - match `True`
+  - JSON read:
+    - `cap_signal_top_n=3`
+    - lock change log present
+  - syntax:
+    - `py_compile paper_engine.py tools\paper_engine_config_lock.py` PASS
+  - focused function check:
+    - `_apply_signal_and_sector_caps(... cap_signal_top_n=3 ...)`
+    - rows `5 -> 3`
+    - kept score top3 codes `000002,000004,000003`
+  - official operational check:
+    - `tasks\task_00_config_lock.bat` PASS
+    - `LOCK_OK approved_sha256 matched`
+    - snapshot `E:\1_Data\2_Logs\paper_engine_config.used_20260424_133638.json`
+- Interpretation:
+  - Future paper engine runs now have a pre-fill top3 cap available from config.
+  - Historical turnover validation will not change until new post-change fills are collected or a separate historical remediation scope is opened.
+- Remaining:
+  - Run the full official paper batch only when operational mutation is intended.
+  - Re-run real backtest validation after enough post-change paper rows exist.
+
+## Rollback
+- Restore from `E:\1_Data\backup\20260424_dd_stop_validation_reduce\20260424_102214`.
+- For runtime artifacts, restore from:
+  - `E:\1_Data\backup\20260424_dd_stop_validation_reduce\artifacts_before_validation_run_20260424_102341`
+  - `E:\1_Data\backup\20260424_dd_stop_validation_reduce\artifacts_before_main_run_20260424_102459`
+
+## 2026-04-24 Official Paper Batch After Cap Top3
+- Backup:
+  - `E:\1_Data\backup\20260424_official_batch_final_report\20260424_140808`
+- Scope:
+  - official paper batch verification after activating pre-fill top3 cap
+  - no ledger/history mutation
+  - no validation threshold relaxation
+- Changes already applied in this branch:
+  - `paper\paper_engine_config.json`
+    - `cap_signal_top_n=3`
+  - `after_close_summary.cmd`
+    - embedded Python resolver used before broken RootB venv path
+  - `tools\kis_order_dispatch_from_exec.py`
+    - sibling import path added for embedded Python
+  - `E:\vibe\buffett\tools\build_dashboard_state_v2.py`
+    - RootB tools import path added
+- Official run evidence:
+  - command: `$env:BROKER_SYNC_AFTER_DISPATCH='0'; .\run_paper_daily.bat`
+  - log: `E:\1_Data\2_Logs\run_paper_daily_last.txt`
+  - result: `[OK] finished`, `[WRAPPER_EXIT] rc=0`
+- Artifact evidence:
+  - `E:\1_Data\2_Logs\p0_orders_exec_contract_20260424.json`
+    - status `PASS`
+    - orders_rows `7`
+    - exec_date_unique `20260424`
+    - duplicate_rows_by_key `0`
+  - `E:\1_Data\2_Logs\p0_live_vs_bt_core_20260424.json`
+    - status `PASS`
+    - fills_rows_as_of `7`
+    - core_rows `7`
+    - cap_top_n `3`
+  - `E:\vibe\buffett\runs\dashboard_state_latest.json`
+    - status_overall `PASS`
+    - orders rows `7`
+    - buy_count `6`
+    - sell_count `1`
+  - `E:\1_Data\2_Logs\paper_pending_report_20260424_140524.json`
+    - pending rows `6`
+    - active rows `18`
+    - pending reason `SAME_DAY_ENTRY_WAIT_NEXT_SESSION`
+  - `E:\1_Data\2_Logs\trading_stage_validation_20260424_140545.json`
+    - overall judgment `실전준비 보류`
+    - transition gate status `HOLD`
+  - `E:\1_Data\2_Logs\json_encoding_scan_20260424_140629.json`
+    - issue_count `0`
+- Interpretation:
+  - Runtime blockers found by the official path were import/runtime-path issues, not dd_stop threshold suitability issues.
+  - The paper batch path conditionally passes when broker sync is explicitly skipped for the restricted network environment.
+  - Live transition remains blocked by validation/policy gates: `paper_bt_alignment`, `paper_quality_gate`, `canary_execute_mode`.
+- Caveat:
+  - Default broker sync remains FAIL-CLOSED in this environment because KIS HTTPS sync cannot connect.
+  - This does not prove historical turnover is resolved; new post-change paper rows must accumulate before backtest/turnover validation can prove the policy effect.
+- Verification:
+  - 기능: PASS
+  - 정합성: PASS
+  - 운영 반영: PASS with temporary `BROKER_SYNC_AFTER_DISPATCH=0`
+  - 정책: PASS
+  - FAIL-CLOSED: PASS
+  - 회귀: PASS
+
+## 2026-04-24 Broker Sync Default OFF Alignment
+- Backup:
+  - `E:\1_Data\backup\20260424_broker_sync_default_off\20260424_141136`
+  - artifact backup: `E:\1_Data\backup\20260424_broker_sync_default_off\artifacts_before_official_20260424_141158`
+- Scope:
+  - fix default-value mismatch in official paper batch broker sync
+  - no broker apply policy change
+  - no validation threshold relaxation
+- Change:
+  - `E:\1_Data\run_paper_daily.bat`
+    - `if "%BROKER_SYNC_AFTER_DISPATCH%"=="" set "BROKER_SYNC_AFTER_DISPATCH=1"`
+    - changed to:
+    - `if "%BROKER_SYNC_AFTER_DISPATCH%"=="" set "BROKER_SYNC_AFTER_DISPATCH=0"`
+- Reason:
+  - The broker section comment already states `optional broker dispatch/sync (default OFF)`.
+  - The code default was `1`, so default DRY runs could call KIS fills sync and fail on restricted network access.
+- Official run evidence:
+  - command: `.\run_paper_daily.bat`
+  - log: `E:\1_Data\2_Logs\run_paper_daily_last.txt`
+  - stderr: `E:\1_Data\2_Logs\run_paper_daily_last.stderr.txt`
+  - result: `[OK] finished`, `[WRAPPER_EXIT] rc=0`
+  - no temporary `BROKER_SYNC_AFTER_DISPATCH=0` override used
+- Artifact evidence:
+  - `E:\1_Data\2_Logs\kis_order_dispatch_20260424_mock.json`
+    - dispatch summary exists after default run
+  - latest stderr scan:
+    - `kis_order_dispatch_from_exec` summary line present
+    - no `kis_sync_fills_from_api` line present
+  - `E:\1_Data\2_Logs\p0_orders_exec_contract_20260424.json`
+    - status `PASS`
+    - orders_rows `7`
+    - exec_date_unique `20260424`
+    - duplicate_rows_by_key `0`
+  - `E:\vibe\buffett\runs\dashboard_state_latest.json`
+    - status_overall `PASS`
+    - orders rows `7`
+    - buy_count `6`
+    - sell_count `1`
+  - `E:\1_Data\2_Logs\json_encoding_scan_20260424_141713.json`
+    - issue_count `0`
+- Interpretation:
+  - The official paper batch can now pass its default DRY broker stage without requiring a manual env override.
+  - Explicit sync remains available and fail-closed when requested.
+- Caveat:
+  - Explicit KIS sync path with `BROKER_SYNC_AFTER_DISPATCH=1` was not re-tested in this step.
+  - KIS/network errors in later market/dashboard collection are separate from this broker sync default mismatch.
+- Verification:
+  - 기능: PASS
+  - 정합성: PASS
+  - 운영 반영: PASS
+  - 정책: PASS
+  - FAIL-CLOSED: PASS
+  - 회귀: PASS
+
+## 2026-04-24 P0 Candidate Date Fallback
+- Backup:
+  - `E:\1_Data\backup\20260424_p0_candidate_date_fallback\20260424_151652`
+  - artifact backup: `E:\1_Data\backup\20260424_p0_candidate_date_fallback\artifacts_before_official_20260424_151749`
+- Scope:
+  - p0 candidate lookup alignment for same-day intraday fills
+  - no manual ledger/history mutation
+  - no top3 cap threshold change
+- Root cause:
+  - Paper fills on `20260424` have `signal_date=20260424`.
+  - Candidate generator emitted `E:\1_Data\2_Logs\candidates_v41_1_20260423.csv`.
+  - p0 expected exact `candidates_v41_1_20260424.csv`, so cap marking was skipped with `candidates_missing_for_signal_date=20260424`.
+- Change:
+  - `E:\1_Data\tools\p0_onepass_from_fills.py`
+    - exact candidate snapshot still preferred
+    - missing exact snapshot falls back to latest `candidates_v41_1_YYYYMMDD.csv` where `YYYYMMDD <= signal_date`
+    - fallback evidence is written in the cap note
+- Direct verification:
+  - `py_compile E:\1_Data\tools\p0_onepass_from_fills.py` PASS
+  - direct p0 run rc `0`
+  - `E:\1_Data\2_Logs\p0_live_vs_bt_core_20260424.json`
+    - status `PASS`
+    - core_rows `3`
+    - blocked_rows `4`
+    - note `fallback_from_signal_date=20260424 picked_date=20260423`
+  - `E:\1_Data\2_Logs\p0_orders_exec_contract_20260424.json`
+    - status `PASS`
+    - orders_rows `7`
+    - exec_date_unique `20260424`
+    - duplicate_rows_by_key `0`
+- Official verification:
+  - command: `.\run_paper_daily.bat`
+  - result: `[OK] finished`, `[WRAPPER_EXIT] rc=0`
+  - `E:\1_Data\2_Logs\p0_live_vs_bt_core_20260424.json`
+    - status `PASS`
+    - core_rows `3`
+    - blocked_rows `4`
+    - fallback note present
+  - `E:\vibe\buffett\runs\dashboard_state_latest.json`
+    - status_overall `PASS`
+    - orders rows `7`
+    - blocked rows show `CAP_SIGNALDATE_TOP3_BY_SCORE`
+  - `E:\1_Data\2_Logs\json_encoding_scan_20260424_152256.json`
+    - issue_count `0`
+- Interpretation:
+  - The `candidates_missing_for_signal_date=20260424` issue is resolved in p0 by date-safe fallback.
+  - Fallback is fail-closed against future leakage because it only searches candidate snapshots `<= signal_date`.
+  - Historical fills are not rewritten; this affects p0 marking/report output from rerun onward.
+- Verification matrix:
+  - 기능: PASS
+  - 정합성: PASS
+  - 운영 반영: PASS
+  - 정책: PASS
+  - FAIL-CLOSED: PASS
+  - 회귀: PASS
+
+## 2026-04-24 Ledger Append Blocked Filter
+- Backup:
+  - `E:\1_Data\backup\20260424_ledger_append_blocked_filter\20260424_152543`
+  - artifact backup: `E:\1_Data\backup\20260424_ledger_append_blocked_filter\artifacts_before_official_20260424_152633`
+- Scope:
+  - align ledger append plan with p0 `entry_blocked` markings
+  - no ledger apply
+  - no manual ledger/history mutation
+- Root cause:
+  - `orders_20260424_exec.xlsx` had 4 blocked BUY rows.
+  - p0 core, broker dispatch, and dashboard reflected the block.
+  - `tools\ledger_append_from_orders_exec.py` ignored `entry_blocked` and planned all 6 BUY rows.
+- Change:
+  - `E:\1_Data\tools\ledger_append_from_orders_exec.py`
+    - adds `entry_blocked_b`
+    - filters ledger BUY candidates with `entry_blocked_b == False`
+    - adds `blocked_buy_rows` to metrics
+- Direct verification:
+  - syntax: `py_compile` PASS
+  - direct ledger dry-run rc `0`
+  - `E:\1_Data\2_Logs\ledger_append_report_20260424.json`
+    - status `PASS`
+    - input_buy_rows `2`
+    - blocked_buy_rows `4`
+    - to_append_rows `2`
+    - preview tickers `273640`, `187790`
+- Official verification:
+  - command: `.\run_paper_daily.bat`
+  - result: `[OK] finished`, `[WRAPPER_EXIT] rc=0`
+  - `E:\1_Data\2_Logs\run_paper_daily_last.stderr.txt`
+    - p0 core_rows `3`
+    - ledger `buys=2 grouped=2 to_append=2`
+    - dispatch `eligible_rows=3 apply=False`
+  - `E:\vibe\buffett\runs\dashboard_state_latest.json`
+    - status_overall `PASS`
+    - orders rows `7`
+    - blocked preview rows `4`
+  - `E:\1_Data\2_Logs\json_encoding_scan_20260424_153204.json`
+    - issue_count `0`
+- Interpretation:
+  - Blocked rows are now consistently excluded/marked across p0 core, ledger append, dispatch, and dashboard.
+  - Existing historical broker submit CSV rows from before this fix remain as old logs and should not be used as latest-state evidence without timestamp filtering.
+- Verification matrix:
+  - 기능: PASS
+  - 정합성: PASS
+  - 운영 반영: PASS
+  - 정책: PASS
+  - FAIL-CLOSED: PASS
+  - 회귀: PASS
+
+## 2026-04-24 Max Positions Budget Policy Alignment
+- Backup:
+  - `E:\1_Data\backup\20260424_max_positions_budget_policy\20260424_161851`
+  - artifact backup: `E:\1_Data\backup\20260424_max_positions_budget_policy\artifacts_before_verify_20260424_161927`
+- Scope:
+  - align paper engine runtime `max_positions` source with active `capital_budget_policy`
+  - no stable params file change
+  - no gross exposure cap, dd_stop mode, or broker apply policy change
+- Root cause:
+  - `E:\1_Data\paper\paper_engine_config.json` has `max_positions=18`.
+  - `E:\1_Data\12_Risk_Controlled\stable_params_v41_1.json` has `max_pos=10`.
+  - stable params passed quality gate and overwrote runtime `max_positions`, so latest report showed `effective=10`, `source=stable_params`, while the active budget policy was based on 18 positions.
+- Change:
+  - `E:\1_Data\paper_engine.py`
+    - when `capital_budget_policy.enabled=true` and `basic_target_positions > 0`, runtime `max_positions` is set from `basic_target_positions`
+    - stable `max_pos` is still recorded in metadata as `stable_params`, but it no longer overrides the active budget policy position count
+    - intraday env override still remains later in the precedence chain
+- Direct verification:
+  - syntax: `py_compile E:\1_Data\paper_engine.py` PASS
+  - direct paper engine rc `0`
+  - direct log evidence:
+    - `[CFG_STABLE_APPLIED] max_positions=18 max_hold_days=13`
+    - `[CFG_BUDGET_APPLIED] max_positions=18`
+    - `[ENTRY_MAX_POSITIONS_VALIDATION_OVERRIDE] open_slots=24 >= max_positions=18 ... gross_cap=55000000 -> keep max_new=1`
+    - `[PAPER_ENGINE] new_fills=0 new_trades=0 open_positions=24`
+  - `E:\1_Data\2_Logs\market_ops_alert_latest.json`
+    - `max_positions=18`
+    - `max_positions_meta.effective=18`
+    - `max_positions_meta.source=capital_budget_policy`
+    - `max_positions_meta.config=18`
+    - `max_positions_meta.stable_params=10`
+    - `validation_exposure_override.applied=true`
+  - `E:\1_Data\2_Logs\paper_order_validation_report_latest.json`
+    - `pre_validation.limits.max_positions.effective=18`
+    - `pre_validation.limits.max_positions.source=capital_budget_policy`
+    - `status=WARN`
+    - issue remains `pre_validation:entry_ready_zero_after_caps`
+  - row-count check:
+    - pre-run backup `fills.csv` rows `376`
+    - current `fills.csv` rows `376`
+- Official batch verification:
+  - command: `.\run_paper_daily.bat`
+  - first run: failed at `[0.55/14] krx_update_clean_incremental.py` due network socket permission
+  - escalated run: failed at `[0.55/14] krx_update_clean_incremental.py` due KRX coverage/step failure
+  - latest batch log:
+    - `E:\1_Data\2_Logs\run_paper_daily_last.txt`
+    - `[FAILED] ... STEP=[0.55/14] krx_update_clean_incremental.py`
+    - `[WRAPPER_EXIT] rc=1`
+  - official batch did not reach `paper_engine.py`, so operating reflection is not PASS for this change.
+- Other evidence:
+  - `E:\1_Data\2_Logs\ssot_health_card_latest.txt`
+    - `[overall] status=PASS fail=0 warn=0 new_orders=YES`
+- Interpretation:
+  - The runtime mismatch `config=18` vs `effective=10` is fixed in direct paper engine execution.
+  - The remaining `WARN` is not the old `max_positions` mismatch; it is `entry_ready_zero_after_caps` after market close fail-closed.
+  - Official batch reflection is blocked before the paper engine stage by the KRX update step and must be retried after that step is healthy.
+- Verification matrix:
+  - 기능: PASS
+  - 정합성: PASS
+  - 운영 반영: FAIL
+  - 정책: PASS
+  - FAIL-CLOSED: PASS
+  - 회귀: PARTIAL
+
+## 2026-04-24 KRX Effective Count Combined Gap / P0 Contract Alignment
+- Backup:
+  - `E:\1_Data\backup\20260424_krx_effective_count_combined_gap\20260424_163130`
+  - `E:\1_Data\backup\20260424_p0_krx_effective_reason\20260424_164305`
+  - `E:\1_Data\backup\20260424_final_contract_input_status\20260424_165021`
+- Scope:
+  - fix official batch blockers after KRX same-day refresh
+  - no MIN_UNI value change (`1800` preserved)
+  - no gate/risk_off policy relaxation outside accepted soft-allow evidence
+- Root causes:
+  - `krx_update_clean_incremental.py` counted either tolerated zero-OHLC rows or reference tolerated gap, but not both together.
+  - 20260424 had both: `tolerated_zero_ohlc=17`, `reference_tolerated_gap=109`, `raw_pool_missing=2`.
+  - `p0_daily_check.py` accepted only old soft reason and kept stale `effective_ncode` after refining clean ncode.
+  - `tools\check_signal_contract.py --stage final` used stale `with_policy_score.csv` if present, while final merge actually used `with_news_score.csv`.
+- Changes:
+  - `E:\1_Data\krx_update_clean_incremental.py`
+    - combined tolerated zero-OHLC rows and reference tolerated gap in effective count when both apply.
+    - added reason `skip_write_due_tolerated_zero_ohlc_and_reference_gap`.
+  - `E:\1_Data\p0_daily_check.py`
+    - resets `effective_ncode` after clean ncode refinement.
+    - accepts the combined soft-allow reason.
+  - `E:\1_Data\tools\check_signal_contract.py`
+    - final stage uses latest `final_score_merge_status_*.json` input path when available.
+- Direct verification:
+  - `py_compile` PASS for all three files.
+  - KRX direct run rc `0`:
+    - `raw=1695`, `clean=1678`, `effective=1804`
+    - `tolerated_zero_ohlc=17`, `reference_tolerated_gap=109`, `raw_pool_missing=2`
+    - wrote `E:\1_Data\_krx_manual\krx_daily_20260424_20260424_clean.parquet`
+  - `E:\1_Data\2_Logs\krx_price_integrity_status_latest.json`
+    - status `PASS`
+    - effective_ncode `1804`
+    - reason `skip_write_due_tolerated_zero_ohlc_and_reference_gap`
+  - p0 direct run rc `0`:
+    - `risk_off=False`
+    - reasons `[]`
+    - effective_ncode `1804`
+  - gate direct run rc `0`:
+    - gate0/gate1/gate2/gate_macro all `PASS`
+  - final contract direct run rc `0`:
+    - final `in_rows=11`, `out_rows=11`, `ok=True`
+- Official batch verification:
+  - command: `.\run_paper_daily.bat`
+  - `E:\1_Data\2_Logs\run_paper_daily_last.txt`
+    - `[OK] finished ts=2026-04-24T16:50:58`
+    - `[WRAPPER_EXIT] rc=0`
+    - paper engine main rc `0`
+    - chain D: `D=20260424`, `fills_D_by_rule=20260424`
+  - `E:\1_Data\2_Logs\run_paper_daily_last.stderr.txt`
+    - sector contract `11->11 ok=True`
+    - news contract `11->11 ok=True`
+    - final contract `11->11 ok=True`
+  - `E:\1_Data\2_Logs\p0_daily_check_20260424_165552.json`
+    - krx clean ncode `1678`
+    - effective_ncode `1804`
+    - risk_off `false`
+  - `E:\1_Data\2_Logs\p0_orders_exec_contract_20260424.json`
+    - status `PASS`
+    - exec_date_unique `[20260424]`
+    - duplicate_rows_by_key `0`
+  - `E:\vibe\buffett\runs\dashboard_state_latest.json`
+    - status_overall `PASS`
+    - orders status `PASS`
+    - exec_date_unique `[20260424]`
+  - `E:\1_Data\2_Logs\json_encoding_scan_20260424_165938.json`
+    - issue_count `0`
+- Interpretation:
+  - The KRX gate is no longer being passed by lowering `MIN_UNI`; it passes because the effective universe count is calculated consistently from existing soft-allow evidence.
+  - p0/gate now consume the same effective count as candidate generation.
+  - The stale final contract input no longer blocks the batch after final score merge.
+- Verification matrix:
+  - 기능: PASS
+  - 정합성: PASS
+  - 운영 반영: PASS
+  - 정책: PASS
+  - FAIL-CLOSED: PASS
+  - 회귀: PASS
+- Remaining:
+  - Backtest validation still has separate known failures such as `acceptance_pnl_turnover`; this step did not change those thresholds.

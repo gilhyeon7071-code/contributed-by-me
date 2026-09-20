@@ -1,0 +1,273 @@
+# -*- coding: utf-8 -*-
+"""내가 반복해서 내는 **기계로 잡히는 실수**를 매일 훑는다.
+
+[2026-09-13] 사용자: *"왜 그런보고를 하는지. 지시의 잘못인지, 너의습성인지,
+재발방지 방법은있는지"* / *"또 다른 문제들도 체크해 같이넣을수있는것이 있는지"*
+
+**스킬로는 안 막힌다.** 2026-09-13 에 `before-you-touch` 를 만들고 10분 뒤에 어겼다.
+내가 불러야 뜨는 것은 안 된다. 작동한 것은 전부 탐지였다.
+그래서 **기계로 잡히는 것만** 여기 모은다.
+
+무엇을 잡나 — 전부 이 세션에서 실제로 낸 것이다
+
+  1. 제어문자 손상    `E:\\1_Data` 의 `\\1` 이 0x01 로 먹힌다. 2026-09-13 하루에 5회.
+                     주석에 있으면 무해해 보이지만 경로 문자열이면 파일이 안 열린다
+  2. `or` 낙장 트랩   `_to_int(x, 5) or 5` - 0(끄기)이 falsy 라 5로 덮인다.
+                     **기본값이 0 이 아닐 때만** 트랩이다(0.0 이면 무해).
+                     2026-07-24 에 10건 고쳤는데 2026-09-13 에 내가 또 썼다
+  4. 죽은 패키지 참조   `pe.<이름>` 이 paper_engine 에 실제로 없다.
+                     2026-08-07 패키지 분리 때 __init__ 이 재수출을 멈췄고,
+                     도구 6개가 그대로 끊겼다. 배치는 rc=1 을 'advisory' 로
+                     흘려서 **37일간 조용히** 죽어 있었다 (2026-09-13 발견)
+  5. bat 화살표 리다이렉션  `echo ... -> X` 의 `>` 는 **리다이렉션**이다. 문장이 거기서
+                     잘리고 나머지는 X 라는 쓰레기 파일로 들어간다. 로그가 조용히
+                     사라진다. run_paper_daily.bat 7줄이 몇 달째 그랬다(2026-09-13)
+  6. bat 의 BOM         cmd 는 BOM 을 첫 명령의 일부로 읽어 매 기동마다 오류를 낸다.
+                     run_intraday_paper.bat 이 그랬다 - 돌긴 도는데 오류 한 줄이
+                     늘 섞여 진짜 오류를 가린다 (2026-09-13)
+  3. 시험이 진짜 산출물에  tests/ 가 monkeypatch 없이 2_Logs 실제 경로에 쓰면
+                     시험 한 번이 공유 SSOT 를 덮는다. 2026-09-11 에 실제로 냈다
+
+무엇을 안 잡나 — 여기 넣지 않는다
+  "행동을 목표 달성으로 보고" 같은 것은 기계로 못 잡는다. 그건 보고 형식으로 다룬다
+  (한 일 / 잰 것 / 안 잰 것 - 숫자 없는 문장은 '잰 것' 에 못 들어간다)
+
+    python tools/craft_scan.py
+    python tools/craft_scan.py --json
+"""
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import io
+import json
+import os
+import re
+import sys
+from pathlib import Path
+from typing import Any, Dict, List
+
+ROOT = Path(__file__).resolve().parents[1]
+LOG_DIR = ROOT / "2_Logs"
+OUT_NAME = "craft_scan_latest.json"
+
+SCAN_DIRS = [ROOT, ROOT / "tools", ROOT / "paper_engine", ROOT / "tests",
+             ROOT / "docs" / "references"]
+SCAN_EXT = (".py", ".bat", ".ps1", ".md")
+# 문서도 넣는다. 원장·등록부는 **판단 근거**라, 거기 심긴 깨진 경로는
+#   코드의 깨진 경로보다 오래 살아남는다 (2026-09-13 에 실제로 한 줄 냈다)
+
+# 기본값이 0 이 아닌 경우만 진짜 트랩이다
+_OR_TRAP = re.compile(r"_to_(?:int|float)\([^()]*,\s*([0-9]*\.?[0-9]+)\s*\)\s*or\s*\1")
+# 시험이 실제 로그 경로 문자열을 직접 쓰는가
+_REAL_PATH_IN_TEST = re.compile(r"""["'][^"']*2_Logs[/\\][A-Za-z0-9_]+\.(?:json|csv)["']""")
+
+
+def _files() -> List[Path]:
+    out: List[Path] = []
+    for base in SCAN_DIRS:
+        if not base.is_dir():
+            continue
+        try:
+            with os.scandir(base) as it:
+                for e in it:
+                    if (e.is_file() and e.name.endswith(SCAN_EXT)
+                            and ".bak" not in e.name and "backup" not in e.name):
+                        out.append(Path(e.path))
+        except Exception:
+            continue
+    return out
+
+
+def _dead_pkg_refs(files: List[Path]) -> List[Dict[str, Any]]:
+    """`pe.<name>` / `from paper_engine import <name>` 가 실제로 있는지 확인한다.
+
+    **패키지를 못 불러오면 통과로 접지 않는다.** 확인 못 한 것을 '없음' 으로
+    적으면 이 검사가 있는 것이 없는 것보다 나쁘다.
+    """
+    try:
+        import paper_engine as _pe
+    except Exception as exc:
+        return [{"file": "-", "line": 0,
+                 "text": "paper_engine import 실패 - 확인불가 (%s)" % type(exc).__name__}]
+    out: List[Dict[str, Any]] = []
+    for p in files:
+        if p.suffix != ".py" or p.name == "craft_scan.py":
+            continue
+        try:
+            s = io.open(str(p), encoding="utf-8", errors="strict").read()
+        except Exception:
+            continue
+        rel = str(p.relative_to(ROOT))
+        alias = re.search(r"import\s+paper_engine\s+as\s+(\w+)", s)
+        names = set()
+        if alias:
+            names |= set(re.findall(r"\b%s\.(\w+)" % alias.group(1), s))
+        for grp in re.findall(r"from\s+paper_engine\s+import\s+\(?([^)]+)\)?", s):
+            for tok in grp.split(","):
+                b = tok.strip().split(" as ")[0].strip()
+                if b.isidentifier():
+                    names.add(b)
+        for n in sorted(names):
+            if not hasattr(_pe, n):
+                out.append({"file": rel, "line": 0, "text": "paper_engine.%s 가 없다" % n})
+    return out
+
+
+_BAT_ECHO = re.compile(r"^\s*(?:@?echo\s|call\s+:LOG)", re.I)
+_BAT_TAIL = re.compile(r"\s*>>?\s*\"[^\"]*\"\s*(?:2>&1)?\s*$")
+
+
+def _bat_arrow_redirects(files: List[Path]) -> List[Dict[str, Any]]:
+    """echo/LOG 줄의 메시지 안에 남은 `->` 나 `&` 를 찾는다.
+
+    끝의 `>> "%LOG%"` 는 **의도한** 리다이렉션이라 떼고 본다. 남은 것만 사고다.
+    """
+    out: List[Dict[str, Any]] = []
+    for p in files:
+        if p.suffix != ".bat":
+            continue
+        try:
+            s = io.open(str(p), encoding="utf-8", errors="replace").read()
+        except Exception:
+            continue
+        rel = str(p.relative_to(ROOT))
+        for i, line in enumerate(s.splitlines(), 1):
+            if not _BAT_ECHO.match(line):
+                continue
+            msg = _BAT_TAIL.sub("", line)
+            if "|" in msg:
+                continue          # 파이프라인 줄은 메시지가 아니다
+            # `^&` 는 이스케이프, `&&` 는 의도한 연결, `2>&1` 은 표준 관용구다.
+            #   사고가 되는 것은 **맨 &** 하나와 화살표 `->` 뿐이다.
+            _m = msg.replace("^&", "").replace("&&", "").replace("2>&1", "")
+            if "->" in _m or "&" in _m:
+                out.append({"file": rel, "line": i, "text": line.strip()[:90]})
+    return out
+
+
+def _bat_bom(files: List[Path]) -> List[Dict[str, Any]]:
+    """.bat/.ps1 맨 앞의 UTF-8 BOM. cmd 가 첫 명령에 붙여 읽는다."""
+    out: List[Dict[str, Any]] = []
+    for p in files:
+        if p.suffix not in (".bat", ".cmd"):
+            continue
+        try:
+            head = io.open(str(p), "rb").read(3)
+        except Exception:
+            continue
+        if head == bytes((0xEF, 0xBB, 0xBF)):
+            out.append({"file": str(p.relative_to(ROOT)), "line": 1,
+                        "text": "맨 앞에 UTF-8 BOM 이 있다"})
+    return out
+
+
+def scan() -> Dict[str, Any]:
+    ctrl: List[Dict[str, Any]] = []
+    ortrap: List[Dict[str, Any]] = []
+    testwrite: List[Dict[str, Any]] = []
+    files = _files()
+
+    for p in files:
+        try:
+            s = io.open(str(p), encoding="utf-8", errors="strict").read()
+        except Exception:
+            continue
+        rel = str(p.relative_to(ROOT))
+        is_test = rel.replace("\\", "/").startswith("tests/")
+        # **독스트링 구간을 건너뛴다.** 이 파일 자신의 설명이 잡혀 오탐 1건을 냈다.
+        #   오탐이 남으면 스캔 전체가 무시된다 - 그게 감시를 죽이는 길이다.
+        _in_doc = False
+        for i, line in enumerate(s.splitlines(), 1):
+            _q3 = line.count('"""') + line.count("'''")
+            _was_doc = _in_doc
+            if _q3 % 2 == 1:
+                _in_doc = not _in_doc
+            _skip_code = _was_doc or _in_doc
+            # 1) 제어문자
+            if any(ord(c) < 32 and c != "\t" for c in line):
+                ctrl.append({"file": rel, "line": i, "text": repr(line[:70])})
+            # 2) or 낙장 (기본값 != 0)
+            #    **주석·문서 줄은 뺀다.** 이 파일 자신의 설명 예시를 잡아
+            #    첫 실행에서 오탐 1건을 냈다. 오탐이 남으면 스캔이 무시된다
+            _code = line.split("#", 1)[0]
+            _stripped = line.strip()
+            _is_doc = _stripped.startswith(("#", "\"\"\"", "'''", "*", "-"))
+            if p.suffix == ".py" and not _is_doc and not _skip_code:
+                m = _OR_TRAP.search(_code)
+                if m:
+                    try:
+                        if float(m.group(1)) != 0.0:
+                            ortrap.append({"file": rel, "line": i, "text": line.strip()[:90]})
+                    except Exception:
+                        pass
+            # 3) 시험이 실제 산출물 경로를 직접
+            if is_test and _REAL_PATH_IN_TEST.search(line):
+                if "monkeypatch" not in s[max(0, s.find(line) - 400):s.find(line) + 400]:
+                    testwrite.append({"file": rel, "line": i, "text": line.strip()[:90]})
+
+    return {
+        "generated_at": dt.datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+        "files_scanned": len(files),
+        "control_chars": ctrl,
+        "falsy_or_traps": ortrap,
+        "tests_touching_real_artifacts": testwrite,
+        "dead_package_refs": _dead_pkg_refs(files),
+        "bat_arrow_redirects": _bat_arrow_redirects(files),
+        "bat_bom": _bat_bom(files),
+    }
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--json", action="store_true")
+    ap.add_argument("--out-dir", default=str(LOG_DIR))
+    args = ap.parse_args()
+
+    rep = scan()
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / OUT_NAME).write_text(json.dumps(rep, ensure_ascii=False, indent=2),
+                                    encoding="utf-8")
+    if args.json:
+        print(json.dumps(rep, ensure_ascii=False, indent=2))
+        return 0
+
+    n1 = len(rep["control_chars"])
+    n2 = len(rep["falsy_or_traps"])
+    n3 = len(rep["tests_touching_real_artifacts"])
+    print("=" * 74)
+    print(" 반복 실수 스캔   파일 %d개   %s" % (rep["files_scanned"], rep["generated_at"]))
+    print("=" * 74)
+    print("  [1] 제어문자 손상 (백슬래시 먹힘)   %d건" % n1)
+    for x in rep["control_chars"][:5]:
+        print("        %s:%s  %s" % (x["file"], x["line"], x["text"]))
+    print("  [2] or 낙장 트랩 (기본값 != 0)      %d건" % n2)
+    for x in rep["falsy_or_traps"][:5]:
+        print("        %s:%s  %s" % (x["file"], x["line"], x["text"]))
+    print("  [3] 시험이 진짜 산출물 경로         %d건" % n3)
+    for x in rep["tests_touching_real_artifacts"][:5]:
+        print("        %s:%s  %s" % (x["file"], x["line"], x["text"]))
+    n4 = len(rep["dead_package_refs"])
+    print("  [4] 죽은 패키지 참조 (pe.<없는 이름>)  %d건" % n4)
+    for x in rep["dead_package_refs"][:5]:
+        print("        %s  %s" % (x["file"], x["text"]))
+    n5 = len(rep["bat_arrow_redirects"])
+    print("  [5] bat echo 안의 -> / & (리다이렉션)  %d건" % n5)
+    for x in rep["bat_arrow_redirects"][:5]:
+        print("        %s:%s  %s" % (x["file"], x["line"], x["text"]))
+    n6 = len(rep["bat_bom"])
+    print("  [6] bat 맨 앞 BOM                     %d건" % n6)
+    for x in rep["bat_bom"][:5]:
+        print("        %s  %s" % (x["file"], x["text"]))
+    total = n1 + n2 + n3 + n4 + n5 + n6
+    print("-" * 74)
+    if total == 0:
+        print("  없음")
+    else:
+        print("  합계 %d건 - **내가 낸 것이다.** 고치고 왜 또 났는지 본다" % total)
+    return 1 if total else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

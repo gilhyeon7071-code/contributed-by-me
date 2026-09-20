@@ -2,8 +2,22 @@
 import json
 import os
 import pandas as pd
+import logging
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
 def P(*parts: str) -> str:
     return os.path.join(BASE, *parts)
 
@@ -66,28 +80,28 @@ def main():
     px_path, px_codes = read_prices_codes()
     fills_path, df_fills = read_fills()
 
-    print("STATE_FILE=", os.path.relpath(st_path, BASE))
-    print("open_pos_codes=", op_codes)
-    print("open_pos_count=", len(op_codes))
+    _log_print("STATE_FILE=", os.path.relpath(st_path, BASE))
+    _log_print("open_pos_codes=", op_codes)
+    _log_print("open_pos_count=", len(op_codes))
 
-    print("CANDS_FILE=", os.path.relpath(cand_path, BASE), "EXISTS=", os.path.exists(cand_path))
-    print("cand_codes=", cand_codes)
-    print("cand_count=", len(cand_codes))
+    _log_print("CANDS_FILE=", os.path.relpath(cand_path, BASE), "EXISTS=", os.path.exists(cand_path))
+    _log_print("cand_codes=", cand_codes)
+    _log_print("cand_count=", len(cand_codes))
 
-    print("PRICES_FILE=", os.path.relpath(px_path, BASE), "EXISTS=", os.path.exists(px_path))
-    print("prices_codes_count=", len(px_codes))
+    _log_print("PRICES_FILE=", os.path.relpath(px_path, BASE), "EXISTS=", os.path.exists(px_path))
+    _log_print("prices_codes_count=", len(px_codes))
 
-    print("open_minus_cand=", sorted(set(op_codes) - set(cand_codes)))
-    print("cand_minus_open=", sorted(set(cand_codes) - set(op_codes)))
-    print("open_minus_prices=", sorted(set(op_codes) - set(px_codes)))
+    _log_print("open_minus_cand=", sorted(set(op_codes) - set(cand_codes)))
+    _log_print("cand_minus_open=", sorted(set(cand_codes) - set(op_codes)))
+    _log_print("open_minus_prices=", sorted(set(op_codes) - set(px_codes)))
 
-    print("FILLS_FILE=", os.path.relpath(fills_path, BASE), "EXISTS=", os.path.exists(fills_path))
+    _log_print("FILLS_FILE=", os.path.relpath(fills_path, BASE), "EXISTS=", os.path.exists(fills_path))
     if df_fills.empty:
-        print("fills_empty_or_unreadable=True")
+        _log_print("fills_empty_or_unreadable=True")
         return
 
     cols = df_fills.columns.tolist()
-    print("fills_cols=", cols)
+    _log_print("fills_cols=", cols)
 
     # legacy/v411 모두 대응: code/side/date 컬럼 위치를 최대한 추정
     if "code" in df_fills.columns:
@@ -116,13 +130,13 @@ def main():
         df_fills["_date"] = ""
 
     df_sel = df_fills[df_fills["_code"].isin(op_codes)].copy()
-    print("fills_rows_for_open_codes=", len(df_sel))
+    _log_print("fills_rows_for_open_codes=", len(df_sel))
     if len(df_sel):
         show_cols = [c for c in ["datetime", "ts", "date", "code", "side", "qty", "price", "order_id", "note"] if c in df_sel.columns]
         if not show_cols:
             show_cols = df_sel.columns.tolist()[:10]
-        print("fills_tail10_for_open_codes=")
-        print(df_sel[show_cols].tail(10).to_string(index=False))
+        _log_print("fills_tail10_for_open_codes=")
+        _log_print(df_sel[show_cols].tail(10).to_string(index=False))
 
 if __name__ == "__main__":
     main()

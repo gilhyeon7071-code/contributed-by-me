@@ -3,6 +3,7 @@ from datetime import datetime
 from pathlib import Path
 import shutil
 import pandas as pd
+import logging
 
 KRX_DIR = Path(r"/app/1_Data/_krx_manual")              # bind mount
 OUT     = Path(r"/app/1_Data/paper/prices/ohlcv_paper.parquet")  # named volume
@@ -10,6 +11,19 @@ OUT.parent.mkdir(parents=True, exist_ok=True)
 
 NEEDED = ["date","code","open","high","low","close","volume","value"]
 
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
 def _norm_date8(x) -> str:
     s = str(x).replace("-", "").strip()
     return s[:8]
@@ -57,7 +71,7 @@ def main() -> int:
     merged.to_parquet(tmp, index=False)
     tmp.replace(OUT)
 
-    print(f"[PRICES_FROM_KRX_CONTAINER] wrote: {OUT} rows={len(merged)} date_max={dm}")
+    _log_print(f"[PRICES_FROM_KRX_CONTAINER] wrote: {OUT} rows={len(merged)} date_max={dm}")
     return 0
 
 if __name__ == "__main__":

@@ -5,12 +5,26 @@ import datetime as dt
 import json
 from pathlib import Path
 from typing import Any, Dict, List
+import logging
 
 
 ROOT = Path(__file__).resolve().parents[1]
 LOG_DIR = ROOT / "2_Logs"
 
 
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
 def _read_json(path: Path) -> Dict[str, Any]:
     if not path.exists():
         return {}
@@ -78,7 +92,7 @@ def main() -> int:
     src = LOG_DIR / "trading_stage_validation_latest.json"
     ts = _read_json(src)
     if not ts:
-        print(f"[STOP] missing_or_empty: {src}")
+        _log_print(f"[STOP] missing_or_empty: {src}")
         return 2
 
     paper = ts.get("paper", {}) if isinstance(ts.get("paper"), dict) else {}
@@ -112,10 +126,10 @@ def main() -> int:
     out_md.write_text(md, encoding="utf-8-sig")
     latest_md.write_text(md, encoding="utf-8-sig")
 
-    print(f"[PAPER_FIX] cycle={rep['cycle_index']} overall={rep['overall_judgment']} next={rep['next_step']}")
-    print(f"[PAPER_FIX] blockers={len(blockers)} paper={rep['paper_judgment']} live={rep['live_judgment']}")
-    print(f"[PAPER_FIX] latest_json={latest_json}")
-    print(f"[PAPER_FIX] latest_md={latest_md}")
+    _log_print(f"[PAPER_FIX] cycle={rep['cycle_index']} overall={rep['overall_judgment']} next={rep['next_step']}")
+    _log_print(f"[PAPER_FIX] blockers={len(blockers)} paper={rep['paper_judgment']} live={rep['live_judgment']}")
+    _log_print(f"[PAPER_FIX] latest_json={latest_json}")
+    _log_print(f"[PAPER_FIX] latest_md={latest_md}")
 
     # 0: paper_fix cleared, 10: still paper_fix, 11: paper_recheck/conditional
     nxt = rep["next_step"]

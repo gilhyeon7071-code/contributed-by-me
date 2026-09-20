@@ -1,0 +1,225 @@
+{
+  "version": "2026-07-29",
+  "description": "RootA paper 일일 배치 단계별 파일 흐름과 주문 상태 전환 정의",
+  "pipeline_stages": [
+    {
+      "stage": "candidate_generation",
+      "batch_label": "[6.25/9]",
+      "script": "generate_candidates_v41_1.py",
+      "inputs": [
+        "krx daily clean parquet",
+        "DART/KRX 관리종목 플래그",
+        "12_Risk_Controlled/stable_params_v41_1.json"
+      ],
+      "outputs": [
+        "2_Logs/candidates_latest_data.csv",
+        "2_Logs/candidates_latest_meta.json",
+        "gate_audit.jsonl candidate 이벤트"
+      ]
+    },
+    {
+      "stage": "state_reconcile",
+      "batch_label": "[6.95b/9]",
+      "script": "reconcile_paper_state_from_fills.py",
+      "inputs": [
+        "paper/fills.csv",
+        "paper/trades.csv"
+      ],
+      "outputs": [
+        "paper/paper_state.json",
+        "2_Logs/reconcile_paper_state_from_fills_latest.json"
+      ]
+    },
+    {
+      "stage": "paper_engine_main",
+      "batch_label": "[7/9]",
+      "script": "paper_engine.py",
+      "inputs": [
+        "paper/paper_state.json",
+        "2_Logs/candidates_latest_data.csv",
+        "2_Logs/p0_daily_check_*.json",
+        "2_Logs/production_risk_playbook_latest.json"
+      ],
+      "outputs": [
+        "paper/fills.csv (append)",
+        "paper/trades.csv (append)",
+        "paper/paper_state.json",
+        "2_Logs/pending_entry_signals_latest.csv",
+        "2_Logs/entry_signal_snapshot_latest.csv",
+        "2_Logs/entry_decision_layers_runtime_latest.csv"
+      ]
+    },
+    {
+      "stage": "paper_engine_shadow",
+      "batch_label": "[7.1/9]",
+      "script": "paper_engine.py (PAPER_RUN_LABEL=shadow)",
+      "inputs": [
+        "paper/paper_state.json",
+        "candidates"
+      ],
+      "outputs": [
+        "paper/fills_shadow.csv",
+        "paper/trades_shadow.csv",
+        "paper/paper_state_shadow.json"
+      ]
+    },
+    {
+      "stage": "derive_D",
+      "batch_label": "[10/14]",
+      "script": "tools/derive_d_from_fills.ps1",
+      "inputs": [
+        "paper/fills.csv"
+      ],
+      "outputs": [
+        "D (YYYYMMDD)"
+      ]
+    },
+    {
+      "stage": "orders_exec",
+      "batch_label": "[11/14]",
+      "script": "tools/p0_onepass_from_fills.py",
+      "inputs": [
+        "paper/fills.csv",
+        "2_Logs/candidates_v41_1_*.csv"
+      ],
+      "outputs": [
+        "paper/orders_{D}_exec.xlsx",
+        "2_Logs/p0_orders_exec_contract_{D}.json",
+        "2_Logs/p0_live_vs_bt_core_{D}.json"
+      ]
+    },
+    {
+      "stage": "ledger_append",
+      "batch_label": "[11/14]",
+      "script": "tools/ledger_append_from_orders_exec.py",
+      "inputs": [
+        "paper/orders_{D}_exec.xlsx",
+        "virtual_ledger.csv",
+        "paper/paper_state.json"
+      ],
+      "outputs": [
+        "virtual_ledger.csv (append/status sync)",
+        "2_Logs/ledger_append_report_{D}.json"
+      ]
+    },
+    {
+      "stage": "broker_dispatch",
+      "batch_label": "[12.5/14]",
+      "script": "tools/kis_order_dispatch_from_exec.py",
+      "inputs": [
+        "paper/orders_{D}_exec.xlsx",
+        "paper/fills.csv"
+      ],
+      "outputs": [
+        "paper/orders_{D}_broker_submit_{mode}.csv",
+        "2_Logs/kis_order_dispatch_{D}_{mode}.json",
+        "gate_audit.jsonl dispatch 이벤트"
+      ]
+    },
+    {
+      "stage": "paper_sync",
+      "batch_label": "[13/14]",
+      "script": "paper_sync.py",
+      "inputs": [
+        "paper/fills.csv",
+        "paper/trades.csv"
+      ],
+      "outputs": [
+        "paper/fills_norm.csv",
+        "paper/trades_calc.csv",
+        "paper/pnl.csv"
+      ]
+    },
+    {
+      "stage": "broker_sync",
+      "batch_label": "[13.5/16]",
+      "script": "tools/kis_sync_fills_from_api.py",
+      "inputs": [
+        "KIS API 체결",
+        "paper/orders_*_broker_submit_*.csv"
+      ],
+      "outputs": [
+        "E:/vibe/buffett/data/live/live_fills.csv",
+        "ledger append",
+        "2_Logs/kis_fills_sync_{D}.json"
+      ]
+    }
+  ],
+  "state_transitions": [
+    {
+      "state": "CANDIDATE",
+      "display_name": "후보",
+      "next_states": [
+        {"event": "filter_pass", "to": "CANDIDATE_SELECTED", "to_display": "후보선정", "gate_layer": "candidate"},
+        {"event": "filter_fail", "to": "FILTERED_OUT", "to_display": "필터탈락", "gate_layer": "candidate"}
+      ]
+    },
+    {
+      "state": "CANDIDATE_SELECTED",
+      "display_name": "후보선정",
+      "next_states": [
+        {"event": "surge_allow", "to": "ENTRY_ALLOWED", "to_display": "진입허용", "gate_layer": "active_response"},
+        {"event": "surge_block", "to": "ENTRY_BLOCKED", "to_display": "진입차단", "gate_layer": "active_response"},
+        {"event": "no_surge", "to": "NOT_DETECTED", "to_display": "신호미감지", "gate_layer": "active_response"}
+      ]
+    },
+    {
+      "state": "ENTRY_ALLOWED",
+      "display_name": "진입허용",
+      "next_states": [
+        {"event": "room_ok", "to": "PAPER_FILL_APPENDED", "to_display": "페이퍼체결기록", "gate_layer": "paper_engine"},
+        {"event": "room_block", "to": "ENTRY_ROOM_BLOCKED", "to_display": "진입여력차단", "gate_layer": "paper_engine"}
+      ]
+    },
+    {
+      "state": "PAPER_FILL_APPENDED",
+      "display_name": "페이퍼체결기록",
+      "next_states": [
+        {"event": "orders_exec_created", "to": "ORDERS_EXEC_ROW", "to_display": "주문서행", "gate_layer": "p0_onepass"},
+        {"event": "cap_block", "to": "ORDERS_EXEC_BLOCKED", "to_display": "주문서차단", "gate_layer": "p0_onepass"}
+      ]
+    },
+    {
+      "state": "ORDERS_EXEC_ROW",
+      "display_name": "주문서행",
+      "next_states": [
+        {"event": "dispatch_accept", "to": "BROKER_ACCEPTED", "to_display": "브로커접수", "gate_layer": "dispatch"},
+        {"event": "dispatch_dry_run", "to": "DRY_RUN", "to_display": "모의전송", "gate_layer": "dispatch"},
+        {"event": "dispatch_skip_paper_filled", "to": "SKIP_ALREADY_PAPER_FILLED", "to_display": "이미체결스킵", "gate_layer": "dispatch"},
+        {"event": "dispatch_precheck_fail", "to": "DISPATCH_PRECHECK_FAIL", "to_display": "전송사전차단", "gate_layer": "dispatch"}
+      ]
+    },
+    {
+      "state": "BROKER_ACCEPTED",
+      "display_name": "브로커접수",
+      "next_states": [
+        {"event": "broker_fill", "to": "LIVE_FILL", "to_display": "실체결", "gate_layer": "broker"},
+        {"event": "broker_error", "to": "BROKER_REJECTED", "to_display": "브로커거부", "gate_layer": "broker"}
+      ]
+    },
+    {
+      "state": "LIVE_FILL",
+      "display_name": "실체결",
+      "next_states": [
+        {"event": "sync_bridge", "to": "LEDGER_REFLECTED", "to_display": "원장반영", "gate_layer": "broker_sync"}
+      ]
+    }
+  ],
+  "known_issues": [
+    {
+      "issue": "fills.csv_is_both_output_and_input",
+      "description": "paper_engine이 fills.csv에 먼저 기록한 뒤 dispatch가 같은 날짜 fills.csv를 읽어 SKIP_ALREADY_PAPER_FILLED 처리함.",
+      "impact": "배치 내 자기 참조로 인해 --force-resend 없이는 main-run BUY가 모두 스킵됨. 의도된 멱등성이지만 혼란을 줌."
+    },
+    {
+      "issue": "ledger_append_before_dispatch",
+      "description": "ledger_append_from_orders_exec이 브로커 dispatch보다 먼저 virtual_ledger를 갱신함. APPLY 모드에서는 실제 브로커 체결과 차이가 생길 수 있음.",
+      "impact": "kis_sync가 ledger를 업데이트하기 전까지 paper ledger와 live ledger가 불일치할 수 있음."
+    },
+    {
+      "issue": "D_derived_from_fills",
+      "description": "D(실행일자)는 fills.csv 최신 BUY ymd에서 유도됨. fills.csv 기록 시점을 바꾸면 D와 downstream orders_exec가 모두 바뀜.",
+      "impact": "fills.csv가 날짜 기준점 SSOT이므로 기록 시점을 쉽게 옮길 수 없음."
+    }
+  ]
+}

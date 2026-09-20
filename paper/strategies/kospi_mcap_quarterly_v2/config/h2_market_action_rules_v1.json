@@ -1,0 +1,117 @@
+{
+  "version": "1.1.0",
+  "written_at": "2026-09-18",
+  "note": "H2 시장조치 가설. 거래소 조치는 '그 종목을 사고파는 방식'을 제도로 바꿔요 — 신용 금지, 증거금 100%, 단일가매매, 거래정지. 그러면 팔 수밖에 없는 쪽과 못 사는 쪽이 생겨요. 그 제약이 풀릴 때 되돌아오는지가 가설이에요. 원본은 kind_disclosures.jsonl 에 남아 있어 규칙을 바꿔도 다시 분류할 수 있어요. [1.0.1] 해제 규칙에서 '지정' 제외어를 뺐다 — 제목이 '지정해제' 라 지정까지 걸러져 0건이 나왔다. [1.1.0] 불성실공시·관리종목 지정·상장폐지·조회공시 요구 추가.",
+  "rules": [
+    {
+      "event_type": "CAUTION_DESIGNATED",
+      "direction": "SELL_PRESSURE",
+      "any": [
+        "투자주의"
+      ],
+      "none": [
+        "해제",
+        "연장"
+      ],
+      "why": "가장 약한 조치. 신용·증거금 제한 없음 — 효과가 없어야 정상인 쪽(대조 역할)"
+    },
+    {
+      "event_type": "WARNING_DESIGNATED",
+      "direction": "SELL_PRESSURE",
+      "any": [
+        "투자경고"
+      ],
+      "none": [
+        "해제",
+        "연장"
+      ],
+      "why": "신용거래 금지 + 위탁증거금 100%. 신용으로 산 사람은 팔아야 하고 새로 살 사람은 제약받는다"
+    },
+    {
+      "event_type": "WARNING_RELEASED",
+      "direction": "BUY_PRESSURE",
+      "any": [
+        "투자경고"
+      ],
+      "none": [
+        "연장"
+      ],
+      "require": [
+        "해제"
+      ],
+      "why": "제약이 풀리면 눌렸던 매수가 돌아오는가"
+    },
+    {
+      "event_type": "OVERHEAT_DESIGNATED",
+      "direction": "SELL_PRESSURE",
+      "any": [
+        "단기과열"
+      ],
+      "none": [
+        "해제",
+        "연장"
+      ],
+      "why": "3거래일 단일가매매. 연속 체결이 막혀 유동성이 급감한다"
+    },
+    {
+      "event_type": "HALT_RELEASED",
+      "direction": "BUY_PRESSURE",
+      "any": [
+        "매매거래정지"
+      ],
+      "none": [
+        "예고"
+      ],
+      "require": [
+        "해제"
+      ],
+      "why": "정지 동안 쌓인 주문이 해제일에 한꺼번에 나온다"
+    },
+    {
+      "event_type": "UNFAITHFUL_DISCLOSURE",
+      "direction": "SELL_PRESSURE",
+      "any": [
+        "불성실공시"
+      ],
+      "none": [
+        "해제",
+        "예고"
+      ],
+      "why": "벌점·매매거래정지가 따라붙고 기관 보유 제약이 생긴다"
+    },
+    {
+      "event_type": "ADMIN_DESIGNATED",
+      "direction": "SELL_PRESSURE",
+      "any": [
+        "관리종목"
+      ],
+      "none": [
+        "해제",
+        "예고"
+      ],
+      "why": "신용거래 금지·대용증권 제외. 규정상 보유할 수 없는 자금이 나온다"
+    },
+    {
+      "event_type": "DELISTING_RISK",
+      "direction": "SELL_PRESSURE",
+      "any": [
+        "상장폐지"
+      ],
+      "none": [
+        "해제"
+      ],
+      "why": "지수·펀드에서 규정상 제외된다 — 가격과 무관한 매도"
+    },
+    {
+      "event_type": "ANSWER_REQUEST",
+      "direction": "NONE",
+      "any": [
+        "조회공시"
+      ],
+      "none": [
+        "답변"
+      ],
+      "why": "주가 급변으로 거래소가 묻는 것. 조치가 아니라 신호 — 제도 제약이 없어 효과가 없어야 정상인 쪽"
+    }
+  ]
+}

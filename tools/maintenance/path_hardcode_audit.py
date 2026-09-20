@@ -4,6 +4,7 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
+import logging
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 TOOLS = ROOT / "tools"
@@ -19,6 +20,19 @@ ABS_PATTERNS = [
 ]
 
 
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
 def scan_file(path: Path) -> dict[str, object]:
     try:
         text = path.read_text(encoding="utf-8")
@@ -64,8 +78,8 @@ def main() -> int:
         encoding="utf-8",
     )
 
-    print(f"[PATH_AUDIT] scanned={len(files)} files_with_hits={len(files_with_hits)} hit_lines={total_hits}")
-    print(f"[PATH_AUDIT] out={out_path}")
+    _log_print(f"[PATH_AUDIT] scanned={len(files)} files_with_hits={len(files_with_hits)} hit_lines={total_hits}")
+    _log_print(f"[PATH_AUDIT] out={out_path}")
     return 0
 
 

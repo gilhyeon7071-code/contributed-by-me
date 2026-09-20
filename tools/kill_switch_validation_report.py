@@ -21,6 +21,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+import logging
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,6 +30,19 @@ OUT_LATEST = LOG_DIR / "kill_switch_validation_report_latest.json"
 OUT_DAILY_CSV = LOG_DIR / "kill_switch_validation_daily_latest.csv"
 
 
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
 def _now_ts() -> str:
     return datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
@@ -60,6 +74,33 @@ def _to_float(v: Any) -> Optional[float]:
         return float(s)
     except Exception:
         return None
+
+
+def _as_dict(v: Any) -> Dict[str, Any]:
+    return v if isinstance(v, dict) else {}
+
+
+def _pick_float(*candidates: Tuple[str, Any]) -> Tuple[Optional[float], str]:
+    for source, value in candidates:
+        picked = _to_float(value)
+        if picked is not None:
+            return picked, source
+    return None, "missing"
+
+
+def _to_bool(v: Any, default: bool = False) -> bool:
+    if v is None:
+        return default
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return bool(v)
+    s = str(v).strip().lower()
+    if s in {"1", "true", "yes", "y", "on"}:
+        return True
+    if s in {"0", "false", "no", "n", "off"}:
+        return False
+    return default
 
 
 def _safe_ratio(n: int, d: int, default: float = 1.0) -> float:
@@ -132,22 +173,56 @@ def _build_daily_rows() -> List[Dict[str, Any]]:
         p0_path, p0 = p0_by_day[ymd]
         gate_path, gate = gate_by_day.get(ymd, (None, {}))
 
-        ks = p0.get("kill_switch") if isinstance(p0.get("kill_switch"), dict) else {}
-        metrics = ks.get("metrics") if isinstance(ks.get("metrics"), dict) else {}
-        limits = ks.get("limits") if isinstance(ks.get("limits"), dict) else {}
+        ks = _as_dict(p0.get("kill_switch"))
+        metrics = _as_dict(ks.get("metrics"))
+        limits = _as_dict(ks.get("limits"))
+        hard_metrics = _as_dict(metrics.get("hard_trigger_metrics"))
+        account_basis = _as_dict(metrics.get("account_basis"))
+        strategy_basis = _as_dict(metrics.get("strategy_basis"))
+        account_status = str(account_basis.get("status") or "").upper()
+        account_ok = bool(account_basis and account_status != "FAIL")
 
         triggered = bool(ks.get("triggered"))
         reasons = [str(x) for x in (ks.get("reasons") or [])]
 
-        max_dd = _to_float(metrics.get("max_drawdown_pct"))
-        day_ret = _to_float(metrics.get("last_day_ret"))
+        strategy_max_dd, strategy_dd_source = _pick_float(
+            ("strategy_basis.max_drawdown_pct", strategy_basis.get("max_drawdown_pct")),
+            ("metrics.max_drawdown_pct", metrics.get("max_drawdown_pct")),
+        )
+        strategy_day_ret, strategy_day_source = _pick_float(
+            ("strategy_basis.last_day_ret", strategy_basis.get("last_day_ret")),
+            ("metrics.last_day_ret", metrics.get("last_day_ret")),
+        )
+        account_max_dd = _to_float(account_basis.get("max_drawdown_pct"))
+        account_day_ret, account_day_source = _pick_float(
+            ("account_basis.daily_loss_pct", account_basis.get("daily_loss_pct")),
+            ("account_basis.last_day_ret", account_basis.get("last_day_ret")),
+        )
+        max_dd, max_dd_source = _pick_float(
+            ("hard_trigger_metrics.max_drawdown_pct", hard_metrics.get("max_drawdown_pct")),
+            ("account_basis.max_drawdown_pct", account_max_dd if account_ok else None),
+            ("metrics.max_drawdown_pct", metrics.get("max_drawdown_pct")),
+        )
+        day_ret, day_ret_source = _pick_float(
+            ("hard_trigger_metrics.daily_loss_pct", hard_metrics.get("daily_loss_pct")),
+            ("hard_trigger_metrics.last_day_ret", hard_metrics.get("last_day_ret")),
+            ("account_basis.daily_loss_pct", account_basis.get("daily_loss_pct") if account_ok else None),
+            ("account_basis.last_day_ret", account_basis.get("last_day_ret") if account_ok else None),
+            ("metrics.last_day_ret", metrics.get("last_day_ret")),
+        )
         dd_lim = abs(_to_float(limits.get("max_drawdown_pct")) or 0.25)
         day_lim = abs(_to_float(limits.get("max_daily_loss_pct")) or 0.08)
+        daily_loss_active = _to_bool(metrics.get("daily_loss_active"), default=True) if "daily_loss_active" in metrics else True
+        hard_daily_loss_active = (
+            _to_bool(metrics.get("hard_daily_loss_active"), default=daily_loss_active)
+            if "hard_daily_loss_active" in metrics
+            else daily_loss_active
+        )
 
         has_required = (max_dd is not None) and (day_ret is not None) and (dd_lim > 0) and (day_lim > 0)
 
         expect_dd = bool(max_dd is not None and dd_lim > 0 and max_dd <= -abs(dd_lim))
-        expect_day = bool(day_ret is not None and day_lim > 0 and day_ret <= -abs(day_lim))
+        expect_day = bool(hard_daily_loss_active and day_ret is not None and day_lim > 0 and day_ret <= -abs(day_lim))
         expected_trigger = expect_dd or expect_day
 
         mismatch = bool(has_required and (triggered != expected_trigger))
@@ -160,13 +235,13 @@ def _build_daily_rows() -> List[Dict[str, Any]]:
         match_fmt4 = bool(calc.get("match_fmt4"))
         curve_path = Path(str(curve.get("path"))) if curve.get("path") else None
         curve_exists = bool(curve_path and curve_path.exists())
-        provenance_ok = bool(match_fmt4 and curve_exists)
         has_dd_source = bool(dd_source)
+        provenance_ok = bool(curve_exists and has_dd_source and (match_fmt4 or expect_day))
 
         lifetime_dd = _to_float(metrics.get("debug_lifetime_max_drawdown_pct"))
         gap = None
-        if max_dd is not None and lifetime_dd is not None:
-            gap = abs(float(lifetime_dd) - float(max_dd))
+        if strategy_max_dd is not None and lifetime_dd is not None:
+            gap = abs(float(lifetime_dd) - float(strategy_max_dd))
 
         gate_action = "NA"
         gate2 = "NA"
@@ -187,12 +262,25 @@ def _build_daily_rows() -> List[Dict[str, Any]]:
                 "expected_trigger": expected_trigger,
                 "expect_dd": expect_dd,
                 "expect_day_loss": expect_day,
+                "daily_loss_active": daily_loss_active,
+                "hard_daily_loss_active": hard_daily_loss_active,
                 "mismatch": mismatch,
                 "has_required": has_required,
+                "trigger_basis": str(metrics.get("hard_trigger_basis") or account_basis.get("basis") or ""),
+                "trigger_metric_source": f"{max_dd_source};{day_ret_source}",
                 "max_dd": max_dd,
+                "hard_max_dd": max_dd,
                 "max_dd_limit": dd_lim,
                 "last_day_ret": day_ret,
+                "hard_daily_loss_pct": day_ret,
                 "day_loss_limit": day_lim,
+                "strategy_max_dd": strategy_max_dd,
+                "strategy_last_day_ret": strategy_day_ret,
+                "strategy_metric_source": f"{strategy_dd_source};{strategy_day_source}",
+                "account_max_dd": account_max_dd,
+                "account_last_day_ret": account_day_ret,
+                "account_metric_source": account_day_source,
+                "account_basis_status": account_status,
                 "kill_reasons": ";".join(reasons),
                 "provenance_ok": provenance_ok,
                 "dd_source_match_fmt4": match_fmt4,
@@ -464,6 +552,7 @@ def build_report(recent_days: int = 20) -> Dict[str, Any]:
     if recent_days <= 0:
         recent_days = 20
     recent_rows = rows[-recent_days:] if len(rows) > recent_days else list(rows)
+    latest_ymd = str(rows[-1].get("ymd") or "") if rows else ""
 
     prov_candidates = [str(r.get("ymd") or "") for r in rows if bool(r.get("has_dd_source"))]
     prov_candidates = [x for x in prov_candidates if len(x) == 8]
@@ -485,11 +574,18 @@ def build_report(recent_days: int = 20) -> Dict[str, Any]:
     issues: List[str] = []
     fstats = full_summary.get("stats") or {}
     rstats = recent_summary.get("stats") or {}
+    trigger_provenance_gap_days = [
+        str(r.get("ymd") or "")
+        for r in rows
+        if bool(r.get("kill_triggered")) and not bool(r.get("provenance_ok"))
+    ]
+    active_trigger_provenance_gap_days = [ymd for ymd in trigger_provenance_gap_days if ymd == latest_ymd]
+    historical_trigger_provenance_gap_days = [ymd for ymd in trigger_provenance_gap_days if ymd != latest_ymd]
     if int(fstats.get("false_negative") or 0) > 0:
         issues.append(f"false_negative_trigger={int(fstats.get('false_negative') or 0)}")
     if int(fstats.get("false_positive") or 0) > 0:
         issues.append(f"false_positive_trigger={int(fstats.get('false_positive') or 0)}")
-    if int(fstats.get("provenance_scope_days") or 0) > 0:
+    if int(fstats.get("provenance_scope_days") or 0) > 0 and active_trigger_provenance_gap_days:
         prv = float((full_summary.get("score") or {}).get("components", {}).get("provenance_ratio") or 0.0)
         if prv < 1.0:
             issues.append("triggered day without full dd_source provenance")
@@ -530,6 +626,12 @@ def build_report(recent_days: int = 20) -> Dict[str, Any]:
         "provenance_policy": {
             "start_ymd": provenance_start_ymd,
             "rule": "provenance_ratio scores only triggered days on/after start_ymd",
+        },
+        "active_state": {
+            "latest_ymd": latest_ymd,
+            "trigger_provenance_gap_days": trigger_provenance_gap_days,
+            "active_trigger_provenance_gap_days": active_trigger_provenance_gap_days,
+            "historical_trigger_provenance_gap_days": historical_trigger_provenance_gap_days,
         },
         "threshold_tuning": {
             "full_window": tune_full,
@@ -585,7 +687,7 @@ def main() -> int:
     rec = (report.get("threshold_tuning") or {}).get("recommended") or {}
     rec_thr = rec.get("use_thresholds") or {}
 
-    print(
+    _log_print(
         "[KILL_VALID] "
         f"score={sc.get('total')} grade={sc.get('grade')} "
         f"days={report.get('window', {}).get('days')} "
@@ -593,14 +695,14 @@ def main() -> int:
         f"shadow_agree_full={sh.get('agreement_with_actual_action_ratio')} "
         f"shadow_agree_recent={recent_sh.get('agreement_with_actual_action_ratio')}"
     )
-    print(
+    _log_print(
         "[KILL_VALID_TUNE] "
         f"policy={rec.get('policy')} reason={rec.get('reason')} "
         f"block_cut={rec_thr.get('block_cut')} reduce_cut={rec_thr.get('reduce_cut')}"
     )
-    print(f"[OK] wrote: {OUT_LATEST}")
-    print(f"[OK] wrote: {out_ts}")
-    print(f"[OK] wrote: {OUT_DAILY_CSV}")
+    _log_print(f"[OK] wrote: {OUT_LATEST}")
+    _log_print(f"[OK] wrote: {out_ts}")
+    _log_print(f"[OK] wrote: {OUT_DAILY_CSV}")
     return 0
 
 

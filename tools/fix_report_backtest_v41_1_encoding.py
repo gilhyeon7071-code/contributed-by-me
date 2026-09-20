@@ -22,10 +22,24 @@ import datetime as dt
 import re
 import shutil
 from pathlib import Path
+import logging
 
 CODING_RE = re.compile(r"coding[:=]\s*([-\w.]+)", re.IGNORECASE)
 
 
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
 def _decode_bytes(raw: bytes) -> tuple[str, str]:
     for enc in ("utf-8", "cp949", "euc-kr"):
         try:
@@ -55,7 +69,7 @@ def main() -> int:
 
     p = Path(args.path)
     if not p.is_file():
-        print(f"[FATAL] not found: {p}")
+        _log_print(f"[FATAL] not found: {p}")
         return 2
 
     raw = p.read_bytes()
@@ -95,9 +109,9 @@ def main() -> int:
 
     p.write_text(fixed, encoding="utf-8", newline="\n")
 
-    print(f"[OK] decoded_as={used_enc}")
-    print(f"[OK] backup={bak}")
-    print(f"[OK] rewritten_utf8={p}")
+    _log_print(f"[OK] decoded_as={used_enc}")
+    _log_print(f"[OK] backup={bak}")
+    _log_print(f"[OK] rewritten_utf8={p}")
     return 0
 
 

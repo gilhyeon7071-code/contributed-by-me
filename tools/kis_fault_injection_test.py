@@ -3,6 +3,7 @@
 import argparse
 import datetime as dt
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -13,6 +14,7 @@ from typing import Any, Dict, List
 
 ROOT = Path(__file__).resolve().parents[1]
 LOG_DIR = ROOT / "2_Logs"
+logger = logging.getLogger("kis_fault_injection_test")
 
 
 def _now_ts() -> str:
@@ -178,6 +180,9 @@ def _case_ws_bad_endpoint(py: str) -> Dict[str, Any]:
 
 
 def main() -> int:
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+
     ap = argparse.ArgumentParser(description="Fault-injection automation (fail-closed / guard / alert degradation)")
     ap.add_argument("--summary-json", default="")
     ap.add_argument("--stop-on-fail", action="store_true")
@@ -223,8 +228,8 @@ def main() -> int:
     out_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     out_latest.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print(f"[OK] summary={out_json}")
-    print(f"[OK] pass={pass_n} fail={fail_n}")
+    logger.info("[OK] summary=%s", out_json)
+    logger.info("[OK] pass=%s fail=%s", pass_n, fail_n)
     return 0 if fail_n == 0 else 2
 
 

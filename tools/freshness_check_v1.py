@@ -1,6 +1,9 @@
 ﻿from __future__ import annotations
 
+import logging
+import os
 import re, json
+import sys
 from pathlib import Path
 from datetime import datetime, date, timedelta
 from dataclasses import dataclass, asdict
@@ -13,6 +16,10 @@ except Exception:
 
 
 ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from holiday_manager import HolidayManager
+
 LOGS_DIR = ROOT / "2_Logs"
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -21,10 +28,58 @@ CAND_CSV  = LOGS_DIR / "candidates_latest_data.csv"
 
 PRICES_PARQUET = ROOT / "paper" / "prices" / "ohlcv_paper.parquet"
 
-KRX_DIR = ROOT / "_krx_manual"  # pick latest krx_daily_*_clean.parquet here
+KRX_DIR = ROOT / "_krx_manual"  # legacy/manual clean parquet directory
+KRX_ARCHIVE_DIR = ROOT / "krx_daily_archive"  # official clean archive from daily refresh
 
 
-def prev_weekday_lag1(d: date) -> date:
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
+
+
+def expected_trading_date(today_d: date) -> date:
+    hm = HolidayManager()
+    today_ymd = today_d.strftime("%Y%m%d")
+    status = hm.explain(today_ymd)
+    now_local = datetime.now()
+    after_close = (now_local.hour > 15) or (now_local.hour == 15 and now_local.minute >= 40)
+    if status.is_open:
+        if after_close:
+            return today_d
+        prev = hm.previous_trading_day(today_ymd)
+    else:
+        prev = hm.previous_trading_day(today_ymd, include_target=True)
+    if prev:
+        return datetime.strptime(prev, "%Y%m%d").date()
+    try:
+        import exchange_calendars as xc
+        import pandas as _pd
+
+        cal = xc.get_calendar("XKRX")
+        today_ts = _pd.Timestamp(today_d)
+        if cal.is_session(today_ts):
+            if after_close:
+                return today_d
+            return cal.previous_session(today_ts).date()
+        return cal.date_to_session(today_ts, direction="previous").date()
+    except Exception:
+        return previous_trading_date(today_d)
+
+
+def previous_trading_date(d: date) -> date:
+    ymd = HolidayManager().previous_trading_day(d.strftime("%Y%m%d"))
+    if ymd:
+        return datetime.strptime(ymd, "%Y%m%d").date()
     x = d - timedelta(days=1)
     while x.weekday() >= 5:
         x -= timedelta(days=1)
@@ -55,22 +110,59 @@ def lag_days(expected_ymd: str, got_ymd: str) -> Optional[int]:
         return None
 
 
-# Allow exactly same-day source (+1 day ahead vs expected) for intraday pre-close runs.
-ALLOWED_NEGATIVE_LAG_DAYS = {-1}
+def build_allowed_negative_lag_days(today_d: date, expected_d: date) -> set[int]:
+    delta = (today_d - expected_d).days
+    if delta <= 0:
+        return set()
+    return set(range(-delta, 0))
 
 
-def is_fresh_lag_ok(lag: Optional[int]) -> bool:
+def is_fresh_lag_ok(lag: Optional[int], allowed_negative_lags: set[int]) -> bool:
     if lag is None:
         return False
     if lag == 0:
         return True
-    return lag in ALLOWED_NEGATIVE_LAG_DAYS
+    return lag in allowed_negative_lags
 
 
 def lag_fail_note(source: str, lag: int) -> str:
     if lag > 0:
         return f"{source} behind by {lag} day(s)"
     return f"{source} ahead by {-lag} day(s) (future beyond allowed window)"
+
+
+def _hhmm_now() -> int:
+    now = datetime.now()
+    return now.hour * 100 + now.minute
+
+
+def _eod_enforce_hhmm() -> int:
+    try:
+        raw = re.sub(r"\D", "", str(os.environ.get("FRESHNESS_EOD_ENFORCE_HHMM", "1800")))
+        return int(raw[:4]) if raw else 1800
+    except Exception:
+        return 1800
+
+
+def choose_expected_date(today_d: date, raw_expected_d: date, observed_dates: List[Optional[str]]) -> Tuple[date, str]:
+    """Keep freshness checks on the prior trading date until EOD artifacts start rolling.
+
+    After market close, the trading date changes before daily candidates/prices/KRX
+    artifacts are necessarily rebuilt. If no observed source has today's date yet,
+    keep the expected date on the previous trading session until the enforce cutoff.
+    """
+    raw_expected = raw_expected_d.strftime("%Y%m%d")
+    today_ymd = today_d.strftime("%Y%m%d")
+    if raw_expected != today_ymd:
+        return raw_expected_d, "session_previous"
+    if _hhmm_now() >= _eod_enforce_hhmm():
+        return raw_expected_d, "eod_enforced"
+    observed = [d for d in observed_dates if d]
+    if observed and all(str(d) >= today_ymd for d in observed):
+        return raw_expected_d, "today_artifacts_all_seen"
+    if any(str(d) >= today_ymd for d in observed):
+        return previous_trading_date(today_d), "partial_today_artifacts_previous_session"
+    return previous_trading_date(today_d), "pre_eod_artifacts_previous_session"
 
 def max_date_from_meta_json(p: Path) -> Optional[str]:
     try:
@@ -181,13 +273,15 @@ def max_date_from_prices_parquet(p: Path) -> Optional[str]:
         pass
     return norm8(p.name)
 
-def pick_latest_krx_clean(dirp: Path) -> Optional[Path]:
-    if not dirp.exists():
-        return None
-    files = [p for p in dirp.rglob("krx_daily_*_clean.parquet") if "_bad" not in str(p).lower()]
+def pick_latest_krx_clean(*dirs: Path) -> Optional[Path]:
+    files = []
+    for dirp in dirs:
+        if not dirp.exists():
+            continue
+        files.extend([p for p in dirp.rglob("krx_daily_*_clean.parquet") if "_bad" not in str(p).lower()])
     if not files:
         return None
-    files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    files.sort(key=lambda p: (max_date_from_krx_filename(p) or "", p.stat().st_mtime), reverse=True)
     return files[0]
 
 def max_date_from_krx_filename(p: Path) -> Optional[str]:
@@ -233,13 +327,16 @@ def print_summary_10(out: Dict[str, Any], evidence_path: Path) -> None:
         f"[SUMMARY] evidence={str(evidence_path)}",
     ]
     for ln in lines:
-        print(ln)
+        _log_print(ln)
 
 def main():
-    expected = prev_weekday_lag1(date.today()).strftime("%Y%m%d")
+    today_d = date.today()
+    raw_expected_d = expected_trading_date(today_d)
+    calendar_prev_d = today_d - timedelta(days=1)
+    expected_prev_trading_d = previous_trading_date(today_d)
 
     # ---- cand ----
-    cand = SourceResult(expected_date=expected)
+    cand = SourceResult()
     cand.path = str(CAND_META if CAND_META.exists() else CAND_CSV)
     cand.file_mtime = file_mtime(CAND_META if CAND_META.exists() else CAND_CSV) if (CAND_META.exists() or CAND_CSV.exists()) else None
 
@@ -250,6 +347,37 @@ def main():
         cand_max = max_date_from_candidates_csv(CAND_CSV)
 
     cand.max_date = cand_max
+
+    # ---- prices ----
+    prices = SourceResult()
+    prices.path = str(PRICES_PARQUET)
+    prices.file_mtime = file_mtime(PRICES_PARQUET) if PRICES_PARQUET.exists() else None
+    if not PRICES_PARQUET.exists():
+        prices.status = "HARD_FAIL"
+        prices.note = f"missing prices parquet: {PRICES_PARQUET}"
+    else:
+        prices.max_date = max_date_from_prices_parquet(PRICES_PARQUET)
+
+    # ---- krx_clean ----
+    krx = SourceResult()
+    krx_parq = pick_latest_krx_clean(KRX_DIR, KRX_ARCHIVE_DIR)
+    if not krx_parq:
+        krx.status = "HARD_FAIL"
+        krx.note = f"no krx_daily_*_clean.parquet under {KRX_DIR} or {KRX_ARCHIVE_DIR}"
+    else:
+        krx.path = str(krx_parq)
+        krx.file_mtime = file_mtime(krx_parq)
+        krx.max_date = max_date_from_krx_filename(krx_parq)
+
+    expected_d, expected_mode = choose_expected_date(
+        today_d,
+        raw_expected_d,
+        [cand.max_date, prices.max_date, krx.max_date],
+    )
+    expected = expected_d.strftime("%Y%m%d")
+    allowed_negative_lags = build_allowed_negative_lag_days(today_d, expected_d)
+
+    cand.expected_date = expected
     if cand.max_date is None:
         cand.status = "HARD_FAIL"
         cand.note = f"candidates meta/csv exists? meta={CAND_META.exists()} csv={CAND_CSV.exists()} (could not infer max_date)"
@@ -258,46 +386,31 @@ def main():
         if cand.lag_days is None:
             cand.status = "HARD_FAIL"
             cand.note = f"could not compute lag expected={expected} max_date={cand.max_date}"
-        elif is_fresh_lag_ok(cand.lag_days):
+        elif is_fresh_lag_ok(cand.lag_days, allowed_negative_lags):
             cand.status = "PASS"
         else:
             cand.status = "HARD_FAIL"
             cand.note = lag_fail_note("cand", int(cand.lag_days))
 
-    # ---- prices ----
-    prices = SourceResult(expected_date=expected)
-    prices.path = str(PRICES_PARQUET)
-    prices.file_mtime = file_mtime(PRICES_PARQUET) if PRICES_PARQUET.exists() else None
-    if not PRICES_PARQUET.exists():
-        prices.status = "HARD_FAIL"
-        prices.note = f"missing prices parquet: {PRICES_PARQUET}"
-    else:
-        prices.max_date = max_date_from_prices_parquet(PRICES_PARQUET)
+    prices.expected_date = expected
+    if prices.status != "HARD_FAIL":
         prices.lag_days = lag_days(expected, prices.max_date) if prices.max_date else None
         if prices.max_date is None or prices.lag_days is None:
             prices.status = "HARD_FAIL"
             prices.note = f"could not infer/lag for prices: max_date={prices.max_date}"
-        elif is_fresh_lag_ok(prices.lag_days):
+        elif is_fresh_lag_ok(prices.lag_days, allowed_negative_lags):
             prices.status = "PASS"
         else:
             prices.status = "HARD_FAIL"
             prices.note = lag_fail_note("prices", int(prices.lag_days))
 
-    # ---- krx_clean ----
-    krx = SourceResult(expected_date=expected)
-    krx_parq = pick_latest_krx_clean(KRX_DIR)
-    if not krx_parq:
-        krx.status = "HARD_FAIL"
-        krx.note = f"no krx_daily_*_clean.parquet under {KRX_DIR}"
-    else:
-        krx.path = str(krx_parq)
-        krx.file_mtime = file_mtime(krx_parq)
-        krx.max_date = max_date_from_krx_filename(krx_parq)
+    krx.expected_date = expected
+    if krx.status != "HARD_FAIL":
         krx.lag_days = lag_days(expected, krx.max_date) if krx.max_date else None
         if krx.max_date is None or krx.lag_days is None:
             krx.status = "HARD_FAIL"
             krx.note = f"could not infer/lag for krx_clean: max_date={krx.max_date}"
-        elif is_fresh_lag_ok(krx.lag_days):
+        elif is_fresh_lag_ok(krx.lag_days, allowed_negative_lags):
             krx.status = "PASS"
         else:
             krx.status = "HARD_FAIL"
@@ -313,6 +426,12 @@ def main():
     out = {
         "run_ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "expected_date": expected,
+        "expected_date_mode": expected_mode,
+        "raw_expected_date": raw_expected_d.strftime("%Y%m%d"),
+        "calendar_prev_day": calendar_prev_d.strftime("%Y%m%d"),
+        "expected_prev_trading_day": expected_prev_trading_d.strftime("%Y%m%d"),
+        "source_calendar": "holiday_manager",
+        "eod_enforce_hhmm": _eod_enforce_hhmm(),
         "verdict": verdict,
         "reasons": reasons,
         "cand": asdict(cand),
@@ -323,6 +442,7 @@ def main():
             "cand_csv": str(CAND_CSV),
             "prices_parquet": str(PRICES_PARQUET),
             "krx_dir": str(KRX_DIR),
+            "krx_archive_dir": str(KRX_ARCHIVE_DIR),
         }
     }
 
@@ -339,17 +459,15 @@ def main():
     print_summary_10(out, out_path)
 
 
-    print(f"[FRESHNESS] wrote: {out_path}")
-    print(f"[FRESHNESS] verdict={verdict} reasons={len(reasons)}")
+    _log_print(f"[FRESHNESS] wrote: {out_path}")
+    _log_print(f"[FRESHNESS] verdict={verdict} reasons={len(reasons)}")
     if verdict != "PASS":
         for r in reasons[:10]:
-            print(f"[FRESHNESS] HARD_FAIL: {r}")
+            _log_print(f"[FRESHNESS] HARD_FAIL: {r}")
 
     return 0 if verdict == "PASS" else 2
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-
 

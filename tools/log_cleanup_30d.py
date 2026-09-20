@@ -7,6 +7,7 @@ import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
+import logging
 
 # Date-stamped artifacts, e.g. *_YYYYMMDD.json or *_YYYYMMDD_HHMMSS.log
 DATED_ARTIFACT_RE = re.compile(r".+_(\d{8})(?:_\d{6})?\.(json|csv|log|txt)$", re.IGNORECASE)
@@ -18,12 +19,27 @@ PRESERVE_EXACT = {
     "design_evidence_latest.json",
     "pending_entry_status_latest.json",
 }
+ROOTA = Path(__file__).resolve().parents[1]
+ROOTB = ROOTA.parent / "vibe" / "buffett"
 ALLOWED_ROOTS = (
-    Path(r"E:\1_Data").resolve(),
-    Path(r"E:\vibe\buffett").resolve(),
+    ROOTA.resolve(),
+    ROOTB.resolve(),
 )
 
 
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
 def _now_local() -> datetime:
     return datetime.now()
 
@@ -67,6 +83,24 @@ def _is_under_allowed_root(target: Path) -> bool:
     return False
 
 
+def _iter_files_fast(target: Path):
+    stack = [str(target)]
+    while stack:
+        cur = stack.pop()
+        try:
+            with os.scandir(cur) as it:
+                for entry in it:
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            stack.append(entry.path)
+                        elif entry.is_file(follow_symlinks=False):
+                            yield Path(entry.path), entry
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+
+
 def _collect_candidates(
     target: Path,
     cutoff: datetime,
@@ -83,10 +117,7 @@ def _collect_candidates(
     samples: List[Dict[str, object]] = []
     delete_entries: List[Dict[str, object]] = []
 
-    for p in target.rglob("*"):
-        if not p.is_file():
-            continue
-
+    for p, entry_obj in _iter_files_fast(target):
         scanned += 1
         ext = p.suffix.lower()
         if include_ext and ext not in include_ext:
@@ -103,7 +134,7 @@ def _collect_candidates(
             continue
 
         try:
-            st = p.stat()
+            st = entry_obj.stat(follow_symlinks=False)
             size = _safe_int(st.st_size, 0)
         except Exception as e:
             errors.append(f"stat_fail:{p}:{type(e).__name__}")
@@ -159,7 +190,7 @@ def _delete_candidates(entries: List[Dict[str, object]]) -> Tuple[int, int, List
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--target", default=r"E:\1_Data\2_Logs", help="cleanup target dir")
+    ap.add_argument("--target", default=str(ROOTA / "2_Logs"), help="cleanup target dir")
     ap.add_argument("--retention-days", type=int, default=30, help="keep recent N days")
     ap.add_argument("--enabled", action="store_true", help="when set, actually delete candidates")
     ap.add_argument("--bak-only", action="store_true", help="consider backup-like files only (.bak*)")
@@ -174,7 +205,7 @@ def main() -> int:
 
     target = Path(args.target)
     if not target.exists() or not target.is_dir():
-        print(f"[CLEANUP] FAIL target_not_found: {target}")
+        _log_print(f"[CLEANUP] FAIL target_not_found: {target}")
         return 2
 
     try:
@@ -182,7 +213,7 @@ def main() -> int:
     except Exception:
         tgt = target.absolute()
     if not _is_under_allowed_root(tgt):
-        print(f"[CLEANUP] FAIL target_outside_allowed_roots: {tgt}")
+        _log_print(f"[CLEANUP] FAIL target_outside_allowed_roots: {tgt}")
         return 3
 
     now = _now_local()
@@ -235,9 +266,9 @@ def main() -> int:
     report_path = target / f"log_cleanup_report_{stamp}.json"
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print(f"[CLEANUP] WROTE_REPORT {report_path}")
-    print(f"[CLEANUP] target={target} retention_days={retention_days} cutoff={report['cutoff_local']}")
-    print(
+    _log_print(f"[CLEANUP] WROTE_REPORT {report_path}")
+    _log_print(f"[CLEANUP] target={target} retention_days={retention_days} cutoff={report['cutoff_local']}")
+    _log_print(
         "[CLEANUP] scanned={scanned} eligible={eligible} would_delete={would} bytes={bytes}".format(
             scanned=collect["scanned_files"],
             eligible=collect["eligible_files"],
@@ -245,10 +276,10 @@ def main() -> int:
             bytes=collect["would_delete_bytes"],
         )
     )
-    print(f"[CLEANUP] enabled_delete={bool(args.enabled)} bak_only={bool(args.bak_only)} all_ext={bool(args.all_ext)}")
+    _log_print(f"[CLEANUP] enabled_delete={bool(args.enabled)} bak_only={bool(args.bak_only)} all_ext={bool(args.all_ext)}")
     if args.enabled and isinstance(report.get("delete_result"), dict):
         d = report["delete_result"]
-        print(
+        _log_print(
             "[CLEANUP] deleted={deleted} deleted_bytes={deleted_bytes} delete_errors={errors}".format(
                 deleted=d.get("deleted_count", 0),
                 deleted_bytes=d.get("deleted_bytes", 0),

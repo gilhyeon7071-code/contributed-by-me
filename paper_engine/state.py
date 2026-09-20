@@ -2575,46 +2575,31 @@ def read_latest_stable_params() -> Dict[str, Any]:
         return {}
 
 def _stable_params_usable(stable: Dict[str, Any], cfg: Optional[Dict[str, Any]] = None) -> tuple[bool, str]:
+    """정식 게이트(utils.stable_params_gate)에 위임한다.
+
+    [2026-08-20] 이 함수는 원래 `utils/stable_params_gate.py`의 판정 로직을 복제하고
+    있었다. 같은 설정 키(`stable_params_quality_gate`)를 읽었으나 **조건 집합이 달랐다** —
+    사본에는 `min_mean_pf`(2026-07-27 추가된 수익성 조건)와
+    `min_oos_worst_fold_pf`(2026-08-15 추가된 fold별 꼬리위험 하한)가 없어
+    **정식 게이트보다 관대했다.** 즉 여기서는 통과하고 저기서는 막히는 파라미터가
+    존재할 수 있었다.
+
+    사본을 동기화하는 대신 위임한다. 조건이 앞으로 또 추가돼도 갈라지지 않는다.
+    """
     if not isinstance(stable, dict) or not stable:
         return False, "missing"
 
     gate = _get_dict(cfg or {}, "stable_params_quality_gate")
-    require_promoted = bool(gate.get("require_promoted", True))
-    min_oos_trades = _to_int(gate.get("min_oos_trades"), 20)
-    min_stable_score = _to_float(gate.get("min_stable_score"), 0.0)
-    min_oos_pf = _to_float(gate.get("min_oos_pf"), 0.75)
+    try:
+        from utils.stable_params_gate import evaluate_stable_params
+        result = evaluate_stable_params(stable, dict(gate))
+    except Exception as exc:
+        # FAIL-CLOSED: 판정 불가를 통과로 바꾸지 않는다.
+        return False, f"gate_eval_failed:{type(exc).__name__}"
 
-    promoted = bool(stable.get("promoted", False))
-    if require_promoted and not promoted:
-        return False, "not_promoted"
-
-    stable_score = _to_float(stable.get("best_score"), -1e18)
-    if stable_score < float(min_stable_score):
-        return False, f"stable_score_low({stable_score:.4f}<{float(min_stable_score):.4f})"
-
-    windows = _get_list(stable, "windows")
-    oos_n_total = 0
-    oos_pf_weighted_num = 0.0
-    oos_pf_weighted_den = 0
-    for row in windows:
-        if not isinstance(row, dict):
-            continue
-        split = str(row.get("split", "")).upper()
-        n_trades = _to_int(row.get("n_trades"), 0)
-        if split == "OOS" and n_trades > 0:
-            oos_n_total += int(n_trades)
-            pf = _to_float(row.get("pf"), 0.0)
-            oos_pf_weighted_num += float(pf) * int(n_trades)
-            oos_pf_weighted_den += int(n_trades)
-
-    if oos_n_total < int(min_oos_trades):
-        return False, f"oos_trades_low({oos_n_total}<{int(min_oos_trades)})"
-    if oos_pf_weighted_den <= 0:
-        return False, "oos_trades_missing"
-    oos_pf_weighted = float(oos_pf_weighted_num) / float(oos_pf_weighted_den)
-    if oos_pf_weighted < float(min_oos_pf):
-        return False, f"oos_pf_low({oos_pf_weighted:.4f}<{float(min_oos_pf):.4f})"
-    return True, "ok"
+    ok = bool(result.get("ok", False))
+    reason = str(result.get("reason", "") or ("ok" if ok else "unknown"))
+    return ok, reason
 
 def _max_date8_from_candidates(x: pd.DataFrame) -> str:
     if "date_yyyymmdd" in x.columns:

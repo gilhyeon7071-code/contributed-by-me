@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+import logging
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,6 +22,19 @@ FAIL = "FAIL"
 NE = "NOT_EVALUABLE"
 
 
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
 def _load_json(path: Path) -> Dict[str, Any]:
     if not path.exists():
         return {}
@@ -484,7 +498,7 @@ def main() -> int:
             panel = _load_market(panel_path, date_col=args.date_col)
         except Exception as ex:
             panel = None
-            print(f"[BTSTRUCT][WARN] panel load failed: {type(ex).__name__}: {ex}")
+            _log_print(f"[BTSTRUCT][WARN] panel load failed: {type(ex).__name__}: {ex}")
 
     sig = None
     bt = None
@@ -494,21 +508,42 @@ def main() -> int:
         integ = ((report.get("artifacts") or {}).get("integration") or {})
         strategy_source = str(integ.get("strategy_source", ""))
         backtest_source = str(integ.get("backtest_source", ""))
+        params = integ.get("params") or {"fast": 10, "slow": 100, "allow_short": True, "position_scale": 0.7}
+        cm_raw = integ.get("cost_model") or {}
+        cm = fw.CostModel(
+            commission_bps=_safe_float(cm_raw.get("commission_bps", 2.0), 2.0),
+            slippage_bps=_safe_float(cm_raw.get("slippage_bps", 3.0), 3.0),
+            spread_bps=_safe_float(cm_raw.get("spread_bps", 2.0), 2.0),
+        )
         if strategy_source == "builtin" and backtest_source == "builtin":
-            params = integ.get("params") or {"fast": 10, "slow": 100, "allow_short": True, "position_scale": 0.7}
-            cm_raw = integ.get("cost_model") or {}
-            cm = fw.CostModel(
-                commission_bps=_safe_float(cm_raw.get("commission_bps", 2.0), 2.0),
-                slippage_bps=_safe_float(cm_raw.get("slippage_bps", 3.0), 3.0),
-                spread_bps=_safe_float(cm_raw.get("spread_bps", 2.0), 2.0),
-            )
             sig = fw.sma_cross_strategy(market, params)
             bt = fw.reference_backtest(market, sig, params, cm)
+        elif "real_strategy_signal" in strategy_source and "real_strategy_backtest" in backtest_source:
+            # [2026-08-29] 실제 어댑터 경로를 지원한다.
+            #   종전에는 "builtin" 일 때만 bt 를 만들었고, 운영 설정은
+            #   backtest_real_strategy_adapter 이므로 조건이 항상 거짓이었다.
+            #   그 결과 bt=None -> "에쿼티 곡선 없음"/"전략 수익률 시계열 부족" 으로
+            #   **필수 8개 중 6개가 매일 NOT_EVALUABLE** 로 찍혔다(2026-08-28 리포트 확인).
+            #   선례: tools/build_backtest_lookahead_proxy_diagnostic.py:55 가 같은 어댑터를 직접 부른다.
+            import types as _types
+            _tools = str(ROOT / "tools")
+            if _tools not in sys.path:
+                sys.path.insert(0, _tools)
+            from backtest_real_strategy_adapter import (  # noqa: E402
+                real_strategy_signal as _rss,
+                real_strategy_backtest as _rsb,
+            )
+            sig = fw.ensure_signal_schema(_rss(market, params), market.index)
+            _bt = _rsb(market, sig, params, cm)
+            # 어댑터는 dict 를 돌려주는데 이 검사기는 속성 접근(bt.returns/bt.equity)을 쓴다.
+            bt = _types.SimpleNamespace(**_bt) if isinstance(_bt, dict) else _bt
+        else:
+            _log_print(f"[BTSTRUCT][WARN] 미지원 strategy_source={strategy_source!r} -> bt 없음")
     except Exception as ex:
         sig = None
         bt = None
         bt_context_error = str(ex)
-        print(f"[BTSTRUCT][WARN] bt context disabled: {bt_context_error}")
+        _log_print(f"[BTSTRUCT][WARN] bt context disabled: {bt_context_error}")
 
     criteria, data_summary, requests = _eval_criteria(checklist, report, market, sig, bt, panel=panel)
 
@@ -535,16 +570,16 @@ def main() -> int:
     latest_md.write_text(md, encoding="utf-8-sig")
 
     p = payload["priority_counts"]
-    print(
+    _log_print(
         "[BTSTRUCT] "
         + f"필수(pass={p.get('필수',{}).get('pass_n',0)},fail={p.get('필수',{}).get('fail_n',0)},ne={p.get('필수',{}).get('not_evaluable_n',0)}) "
         + f"권장(pass={p.get('권장',{}).get('pass_n',0)},fail={p.get('권장',{}).get('fail_n',0)},ne={p.get('권장',{}).get('not_evaluable_n',0)}) "
         + f"선택(pass={p.get('선택',{}).get('pass_n',0)},fail={p.get('선택',{}).get('fail_n',0)},ne={p.get('선택',{}).get('not_evaluable_n',0)})"
     )
-    print(f"[BTSTRUCT] json={out_json}")
-    print(f"[BTSTRUCT] md={out_md}")
-    print(f"[BTSTRUCT] latest_json={latest_json}")
-    print(f"[BTSTRUCT] latest_md={latest_md}")
+    _log_print(f"[BTSTRUCT] json={out_json}")
+    _log_print(f"[BTSTRUCT] md={out_md}")
+    _log_print(f"[BTSTRUCT] latest_json={latest_json}")
+    _log_print(f"[BTSTRUCT] latest_md={latest_md}")
 
     has_fail = any(x.get("status") == FAIL for x in criteria)
     return 2 if has_fail else 0

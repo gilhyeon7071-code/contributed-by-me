@@ -1,0 +1,22 @@
+{
+  "changed": [],
+  "missing": [],
+  "added": [
+    "krx_daily_archive/krx_daily_20260907_20260907_clean.parquet",
+    "krx_daily_archive/krx_daily_20260908_20260908_clean.parquet",
+    "krx_daily_archive/krx_daily_20260909_20260909_clean.parquet",
+    "krx_daily_archive/krx_daily_20260910_20260910_clean.parquet",
+    "krx_daily_archive/krx_daily_20260911_20260911_clean.parquet",
+    "krx_daily_archive/krx_daily_20260914_20260914_clean.parquet",
+    "krx_daily_archive/krx_daily_20260915_20260915_clean.parquet",
+    "krx_daily_archive/krx_daily_20260916_20260916_clean.parquet",
+    "krx_daily_archive/krx_daily_20260917_20260917_clean.parquet",
+    "krx_daily_archive/krx_daily_20260918_20260918_clean.parquet"
+  ],
+  "baseline_count": 115,
+  "current_count": 125,
+  "name": "panel_baseline",
+  "checked_at": "2026-09-20 09:08:23",
+  "frozen_at": "2026-09-07 16:15:17",
+  "status": "PASS"
+}

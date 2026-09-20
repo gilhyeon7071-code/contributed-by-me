@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
 """
 plan_10_5_grep.py
-- Purpose: Find where candidate count / trade slots / capital are controlled in E:\1_Data project.
-- Output: _diag\plan_10_5_grep.txt (file:line:text)
+- Purpose: Find where candidate count / trade slots / capital are controlled in project root.
+- Output: _diag\\plan_10_5_grep.txt (file:line:text)
 """
 import os, re
 from collections import OrderedDict
+import logging
 
-ROOTS = [r"E:\1_Data"]
-OUT_DIR = os.path.join(r"E:\1_Data", "_diag")
+ROOTA = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
+ROOTS = [ROOTA]
+OUT_DIR = os.path.join(ROOTA, "_diag")
 OUT_PATH = os.path.join(OUT_DIR, "plan_10_5_grep.txt")
 
 PATTERNS = [
@@ -49,6 +51,19 @@ RX = re.compile("|".join(PATTERNS + [re.escape(x) for x in LITERAL_HINTS]), re.I
 
 INCLUDE_EXT = {".py", ".cmd", ".bat", ".json"}
 
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
 def iter_files():
     for root in ROOTS:
         for dirpath, dirnames, filenames in os.walk(root):
@@ -84,8 +99,8 @@ def main():
         out_lines.append("")
     with open(OUT_PATH, "w", encoding="utf-8") as w:
         w.write("\n".join(out_lines))
-    print(f"[OK] wrote: {OUT_PATH}")
-    print(f"[OK] files_with_hits={len(hits)}")
+    _log_print(f"[OK] wrote: {OUT_PATH}")
+    _log_print(f"[OK] files_with_hits={len(hits)}")
 
 if __name__ == "__main__":
     raise SystemExit(main())

@@ -3,6 +3,8 @@
 import argparse
 import datetime as dt
 import json
+import logging
+import os
 import subprocess
 import sys
 import time
@@ -12,6 +14,8 @@ from typing import Any, Dict, List, Optional
 
 ROOT = Path(__file__).resolve().parents[1]
 LOG_DIR = ROOT / "2_Logs"
+TOOLS_DIR = ROOT / "tools"
+logger = logging.getLogger("kis_live_canary_first_test")
 
 
 try:
@@ -95,10 +99,18 @@ def _check_virtual_gate(max_age_days: int = 7) -> Dict[str, Any]:
 
 def _run(cmd: List[str], timeout_sec: float = 180.0) -> Dict[str, Any]:
     started = time.time()
+    env = os.environ.copy()
+    existing_pythonpath = str(env.get("PYTHONPATH") or "").strip()
+    env["PYTHONPATH"] = (
+        str(TOOLS_DIR)
+        if not existing_pythonpath
+        else str(TOOLS_DIR) + os.pathsep + existing_pythonpath
+    )
     try:
         cp = subprocess.run(
             cmd,
             cwd=str(ROOT),
+            env=env,
             text=True,
             encoding="utf-8",
             errors="replace",
@@ -126,6 +138,17 @@ def _run(cmd: List[str], timeout_sec: float = 180.0) -> Dict[str, Any]:
         }
 
 
+def _script_cmd(py: str, script: Path, args: List[str]) -> List[str]:
+    code = (
+        "import runpy, sys; "
+        "script = sys.argv[1]; "
+        "sys.argv = sys.argv[1:]; "
+        f"sys.path.insert(0, {str(TOOLS_DIR)!r}); "
+        "runpy.run_path(script, run_name='__main__')"
+    )
+    return [py, "-c", code, str(script), *args]
+
+
 def _step(name: str, cmd: List[str], timeout_sec: float) -> Dict[str, Any]:
     r = _run(cmd, timeout_sec=timeout_sec)
     return {
@@ -141,6 +164,9 @@ def _step(name: str, cmd: List[str], timeout_sec: float) -> Dict[str, Any]:
 
 
 def main() -> int:
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+
     ap = argparse.ArgumentParser(description="First small live canary workflow (guarded)")
     ap.add_argument("--mock", default="false", choices=["auto", "true", "false"])
     ap.add_argument("--orders-path", default="")
@@ -157,7 +183,7 @@ def main() -> int:
     args = ap.parse_args()
 
     if args.execute and str(args.confirm).strip().upper() != "LIVE_CANARY":
-        print("[STOP] --execute requires --confirm LIVE_CANARY")
+        logger.error("[STOP] --execute requires --confirm LIVE_CANARY")
         return 2
 
     LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -211,9 +237,9 @@ def main() -> int:
         }
         out_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         out_latest.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        print("[STOP] execute blocked: virtual trading evidence not satisfied")
-        print(f"[STOP] reason={gate.get('reason')} path={gate.get('path')}")
-        print(f"[OK] summary={out_json}")
+        logger.error("[STOP] execute blocked: virtual trading evidence not satisfied")
+        logger.error("[STOP] reason=%s path=%s", gate.get("reason"), gate.get("path"))
+        logger.info("[OK] summary=%s", out_json)
         if args.notify and callable(send_alert):
             try:
                 send_alert(
@@ -225,23 +251,34 @@ def main() -> int:
                 pass
         return 2
 
-    pre = [
-        py,
-        str(ROOT / "tools" / "kis_healthcheck.py"),
+    pre_args_prod = [
         "--mock",
-        str(args.mock),
+        "false",
         "--code",
         "005930",
         "--check-balance",
         "--check-open-orders",
     ]
     if args.notify:
-        pre.append("--notify-on-fail")
-    steps.append(_step("preflight_healthcheck", pre, timeout_sec=args.timeout_sec))
+        pre_args_prod.append("--notify-on-fail")
+    pre_prod = _script_cmd(py, ROOT / "tools" / "kis_healthcheck.py", pre_args_prod)
+    steps.append(_step("preflight_healthcheck_prod", pre_prod, timeout_sec=args.timeout_sec))
 
-    canary_cmd = [
-        py,
-        str(ROOT / "tools" / "kis_canary_run.py"),
+    if str(args.mock).lower() == "true":
+        pre_args_mock = [
+            "--mock",
+            "true",
+            "--code",
+            "005930",
+            "--check-balance",
+            "--check-open-orders",
+        ]
+        if args.notify:
+            pre_args_mock.append("--notify-on-fail")
+        pre_mock = _script_cmd(py, ROOT / "tools" / "kis_healthcheck.py", pre_args_mock)
+        steps.append(_step("preflight_healthcheck_mock", pre_mock, timeout_sec=args.timeout_sec))
+
+    canary_args = [
         "--mock",
         str(args.mock),
         "--max-orders",
@@ -250,15 +287,14 @@ def main() -> int:
         str(max(1, int(args.max_total_qty))),
     ]
     if str(args.orders_path).strip():
-        canary_cmd.extend(["--orders-path", str(args.orders_path).strip()])
+        canary_args.extend(["--orders-path", str(args.orders_path).strip()])
     if args.execute:
-        canary_cmd.extend(["--apply", "--confirm", "CANARY"])
+        canary_args.extend(["--apply", "--confirm", "CANARY"])
+    canary_cmd = _script_cmd(py, ROOT / "tools" / "kis_canary_run.py", canary_args)
     steps.append(_step("canary_dispatch", canary_cmd, timeout_sec=args.timeout_sec))
 
     if not args.skip_cancel_open:
-        cancel_cmd = [
-            py,
-            str(ROOT / "tools" / "kis_cancel_open_orders.py"),
+        cancel_args = [
             "--mock",
             str(args.mock),
             "--min-age-minutes",
@@ -267,13 +303,14 @@ def main() -> int:
             str(max(1, int(args.max_orders))),
         ]
         if args.execute:
-            cancel_cmd.append("--apply")
+            cancel_args.append("--apply")
+        cancel_cmd = _script_cmd(py, ROOT / "tools" / "kis_cancel_open_orders.py", cancel_args)
         steps.append(_step("cancel_open_orders", cancel_cmd, timeout_sec=args.timeout_sec))
 
     steps.append(
         _step(
             "mode_compare_report",
-            [py, str(ROOT / "tools" / "kis_mode_compare_report.py")],
+            _script_cmd(py, ROOT / "tools" / "kis_mode_compare_report.py", []),
             timeout_sec=args.timeout_sec,
         )
     )
@@ -281,26 +318,45 @@ def main() -> int:
     steps.append(
         _step(
             "account_snapshot",
-            [py, str(ROOT / "tools" / "kis_account_snapshot.py"), "--mock", str(args.mock), "--with-quotes"],
+            _script_cmd(
+                py,
+                ROOT / "tools" / "kis_account_snapshot.py",
+                ["--mock", str(args.mock), "--with-quotes"],
+            ),
             timeout_sec=args.timeout_sec,
         )
     )
 
-    ok = all(bool(s.get("ok", False)) for s in steps)
+    if args.execute:
+        required_steps = {str(s.get("name")) for s in steps}
+    else:
+        required_steps = {"virtual_trading_gate", "preflight_healthcheck_prod", "canary_dispatch"}
+        if str(args.mock).lower() == "true":
+            required_steps.add("preflight_healthcheck_mock")
+        # DRY 모드에서는 진입 체인 검증(게이트/헬스/디스패치)을 필수로 유지하고,
+        # 조회/정리 단계(cancellation/snapshot)는 관측용(optional)으로 분리한다.
+    ok = all(bool(s.get("ok", False)) for s in steps if str(s.get("name")) in required_steps)
+    optional_failures = [
+        str(s.get("name"))
+        for s in steps
+        if str(s.get("name")) not in required_steps and not bool(s.get("ok", False))
+    ]
     payload = {
         "generated_at": _now_ts(),
         "mode": mode,
         "mock": str(args.mock),
         "execute": bool(args.execute),
         "ok": bool(ok),
+        "required_steps": sorted(required_steps),
+        "optional_failures": optional_failures,
         "steps": steps,
     }
 
     out_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     out_latest.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print(f"[OK] summary={out_json}")
-    print(f"[OK] mode={mode} ok={ok}")
+    logger.info("[OK] summary=%s", out_json)
+    logger.info("[OK] mode=%s ok=%s", mode, ok)
 
     if args.notify and callable(send_alert):
         try:

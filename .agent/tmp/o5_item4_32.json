@@ -1,0 +1,226 @@
+[
+ {
+  "분류": "가동",
+  "섹션": "drawdown_manager",
+  "키": "consecutive_loss_days_threshold",
+  "값": "4",
+  "경로": "/drawdown_manager/consecutive_loss_days_threshold"
+ },
+ {
+  "분류": "가동",
+  "섹션": "drawdown_manager",
+  "키": "max_exposure",
+  "값": "0.8",
+  "경로": "/drawdown_manager/stages[0]/max_exposure"
+ },
+ {
+  "분류": "가동",
+  "섹션": "drawdown_manager",
+  "키": "max_exposure",
+  "값": "0.6",
+  "경로": "/drawdown_manager/stages[1]/max_exposure"
+ },
+ {
+  "분류": "가동",
+  "섹션": "drawdown_manager",
+  "키": "max_exposure",
+  "값": "0",
+  "경로": "/drawdown_manager/stages[3]/max_exposure"
+ },
+ {
+  "분류": "가동",
+  "섹션": "drawdown_manager",
+  "키": "new_entry_allowed_pct",
+  "값": "0.75",
+  "경로": "/drawdown_manager/stages[0]/new_entry_allowed_pct"
+ },
+ {
+  "분류": "가동",
+  "섹션": "drawdown_manager",
+  "키": "new_entry_allowed_pct",
+  "값": "0.35",
+  "경로": "/drawdown_manager/stages[1]/new_entry_allowed_pct"
+ },
+ {
+  "분류": "가동",
+  "섹션": "drawdown_manager",
+  "키": "new_entry_allowed_pct",
+  "값": "0.1",
+  "경로": "/drawdown_manager/stages[2]/new_entry_allowed_pct"
+ },
+ {
+  "분류": "가동",
+  "섹션": "drawdown_manager",
+  "키": "sector_concentration_limit",
+  "값": "1",
+  "경로": "/drawdown_manager/sector_concentration_limit"
+ },
+ {
+  "분류": "가동",
+  "섹션": "entry_gap_risk_guard",
+  "키": "max_down_gap_count",
+  "값": "1",
+  "경로": "/entry_gap_risk_guard/max_down_gap_count"
+ },
+ {
+  "분류": "가동",
+  "섹션": "market_ops_policy",
+  "키": "max_stage",
+  "값": "0",
+  "경로": "/market_ops_policy/entry_fallback_policy/max_stage"
+ },
+ {
+  "분류": "가동",
+  "섹션": "max_daily_new_exposure_pct",
+  "키": "max_daily_new_exposure_pct",
+  "값": "0.4",
+  "경로": "/max_daily_new_exposure_pct"
+ },
+ {
+  "분류": "가동",
+  "섹션": "regime_entry_policy",
+  "키": "rally_gap_up_max_pct",
+  "값": "0.08",
+  "경로": "/regime_entry_policy/rally_gap_up_max_pct"
+ },
+ {
+  "분류": "가동",
+  "섹션": "regime_overrides",
+  "키": "max_daily_new_exposure_pct",
+  "값": "0.05",
+  "경로": "/regime_overrides/CRASH/max_daily_new_exposure_pct"
+ },
+ {
+  "분류": "가동",
+  "섹션": "regime_overrides",
+  "키": "max_gross_exposure_pct",
+  "값": "0.1",
+  "경로": "/regime_overrides/CRASH/max_gross_exposure_pct"
+ },
+ {
+  "분류": "가동",
+  "섹션": "risk_orchestration",
+  "키": "require_dd_stop",
+  "값": "false",
+  "경로": "/risk_orchestration/dd_stop_validation/require_dd_stop"
+ },
+ {
+  "분류": "선정/승격",
+  "섹션": "adaptive_entry_control",
+  "키": "kill_switch_override_block",
+  "값": "false",
+  "경로": "/adaptive_entry_control/kill_switch_override_block"
+ },
+ {
+  "분류": "선정/승격",
+  "섹션": "entry_selection_policy",
+  "키": "skip_same_code_day_already_buy",
+  "값": "false",
+  "경로": "/entry_selection_policy/skip_same_code_day_already_buy"
+ },
+ {
+  "분류": "선정/승격",
+  "섹션": "market_ops_policy",
+  "키": "carryover_no_next_day_enabled",
+  "값": "false",
+  "경로": "/market_ops_policy/carryover_no_next_day_enabled"
+ },
+ {
+  "분류": "선정/승격",
+  "섹션": "p1_entry_policy",
+  "키": "macd_golden_min_ratio",
+  "값": "0",
+  "경로": "/p1_entry_policy/technical_gate/macd_golden_min_ratio"
+ },
+ {
+  "분류": "선정/승격",
+  "섹션": "surge_exit_policy",
+  "키": "require_high_rejection_for_exit",
+  "값": "true",
+  "경로": "/surge_exit_policy/intraday_reversal_exit/require_high_rejection_for_exit"
+ },
+ {
+  "분류": "선정/승격",
+  "섹션": "union_entry_strength_min",
+  "키": "union_entry_strength_min",
+  "값": "0.63",
+  "경로": "/union_entry_strength_min"
+ },
+ {
+  "분류": "집행",
+  "섹션": "entry_gap_up_reduce",
+  "키": "threshold_pct",
+  "값": "0.02",
+  "경로": "/entry_gap_up_reduce/threshold_pct"
+ },
+ {
+  "분류": "집행",
+  "섹션": "fx_entry_policy",
+  "키": "daily_abs_change_block_level",
+  "값": "23",
+  "경로": "/fx_entry_policy/daily_abs_change_block_level"
+ },
+ {
+  "분류": "집행",
+  "섹션": "fx_entry_policy",
+  "키": "hard_block_requires_crisis_level",
+  "값": "true",
+  "경로": "/fx_entry_policy/hard_block_requires_crisis_level"
+ },
+ {
+  "분류": "집행",
+  "섹션": "limit_price_tolerance",
+  "키": "max_deviation_pct",
+  "값": "0.08",
+  "경로": "/limit_price_tolerance/max_deviation_pct"
+ },
+ {
+  "분류": "집행",
+  "섹션": "market_ops_policy",
+  "키": "exec_quality_max_slippage_pct",
+  "값": "0.05",
+  "경로": "/market_ops_policy/exec_quality_max_slippage_pct"
+ },
+ {
+  "분류": "집행",
+  "섹션": "market_ops_policy",
+  "키": "max_retry_per_code_per_day",
+  "값": "2",
+  "경로": "/market_ops_policy/max_retry_per_code_per_day"
+ },
+ {
+  "분류": "집행",
+  "섹션": "market_ops_policy",
+  "키": "signal_ttl_minutes",
+  "값": "60",
+  "경로": "/market_ops_policy/signal_ttl_minutes"
+ },
+ {
+  "분류": "집행",
+  "섹션": "split_entry",
+  "키": "second_entry_max_days",
+  "값": "2",
+  "경로": "/split_entry/second_entry_max_days"
+ },
+ {
+  "분류": "관측",
+  "섹션": "cross_source_integrity",
+  "키": "block_on_missing_required",
+  "값": "true",
+  "경로": "/cross_source_integrity/block_on_missing_required"
+ },
+ {
+  "분류": "관측",
+  "섹션": "global_outlier_watcher",
+  "키": "block_on_snapshot_missing",
+  "값": "true",
+  "경로": "/global_outlier_watcher/block_on_snapshot_missing"
+ },
+ {
+  "분류": "관측",
+  "섹션": "parquet_max_open_files",
+  "키": "parquet_max_open_files",
+  "값": "5",
+  "경로": "/parquet_max_open_files"
+ }
+]

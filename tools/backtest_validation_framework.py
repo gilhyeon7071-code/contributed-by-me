@@ -7,6 +7,8 @@ import importlib.util
 import itertools
 import json
 import math
+import os
+import statistics
 import urllib.parse
 import urllib.request
 from dataclasses import asdict, dataclass, field
@@ -15,16 +17,73 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
+import logging
 
 
 @dataclass
 class CostModel:
-    commission_bps: float = 2.0
-    slippage_bps: float = 3.0
-    spread_bps: float = 2.0
+    """왕복 거래비용. 단위는 bps(0.01%).
+
+    [2026-09-09] **매도 거래세 자리가 없었어요.** 구성이 수수료·슬리피지·스프레드뿐이라
+      한국 시장의 매도 제세금 0.2% 가 들어갈 곳이 없었고, 그래서 이 프레임워크는
+      실측보다 훨씬 싸게 계산하고 있었어요.
+      ```
+      기존 프로파일 backtest 2/3/2   왕복 0.120%
+      배치가 넘기던 5/5/5            왕복 0.250%
+      실측(브로커 정산 + 라이브 설정) 왕복 **0.400%**
+                                     fee 0 x2 + slip 0.1% x2 + sell_tax 0.2%
+      ```
+      셋 다 실측보다 쌌어요. 싼 비용으로 재면 전략이 실제보다 좋아 보여요.
+      `sell_tax_bps` 를 신설하고 프로파일을 실측에 맞춰요. 상세: PLANS (291).
+    """
+    commission_bps: float = 0.0
+    slippage_bps: float = 10.0
+    spread_bps: float = 0.0
+    impact_bps: float = 0.0
+    adverse_bps: float = 0.0
+    sell_tax_bps: float = 20.0   # 매도 1회분. 왕복에 한 번만 더해요
 
     def roundtrip_bps(self) -> float:
-        return 2.0 * self.commission_bps + 2.0 * self.slippage_bps + self.spread_bps
+        return (
+            2.0 * self.commission_bps
+            + 2.0 * self.slippage_bps
+            + self.spread_bps
+            + self.impact_bps
+            + self.adverse_bps
+            + self.sell_tax_bps
+        )
+
+
+# [2026-09-09] 실측 기준으로 다시 잡았어요.
+#   brokerage 실측: 매도대금 88,730 / 수수료 0 / 제세금 175 = 0.19723% -> sell_tax 20bps
+#   라이브 설정   : fee_pct 0.0 / slippage_pct 0.001 / sell_tax_pct 0.002
+#   backtest 프로파일이 real 보다 싸면 백테스트가 항상 유리해 보여요. 셋을 같은 바닥에 둡니다.
+_COST_PROFILES: Dict[str, CostModel] = {
+    # 라이브 설정과 동일한 왕복 0.400%
+    "backtest": CostModel(commission_bps=0.0, slippage_bps=10.0, spread_bps=0.0,
+                          impact_bps=0.0, adverse_bps=0.0, sell_tax_bps=20.0),
+    "paper": CostModel(commission_bps=0.0, slippage_bps=10.0, spread_bps=0.0,
+                       impact_bps=0.5, adverse_bps=0.5, sell_tax_bps=20.0),
+    # 실계좌는 체결 충격·역선택을 조금 더 봅니다
+    "real": CostModel(commission_bps=0.0, slippage_bps=10.0, spread_bps=0.0,
+                      impact_bps=1.0, adverse_bps=1.0, sell_tax_bps=20.0),
+}
+
+
+def _resolve_cost_model(cost_profile: str, overrides: Dict[str, Any]) -> Tuple[CostModel, Dict[str, Any]]:
+    key = str(cost_profile or "backtest").strip().lower()
+    if key not in _COST_PROFILES:
+        key = "backtest"
+    base = _COST_PROFILES[key]
+    cm = CostModel(
+        commission_bps=_safe_float(overrides.get("commission_bps", base.commission_bps), base.commission_bps),
+        slippage_bps=_safe_float(overrides.get("slippage_bps", base.slippage_bps), base.slippage_bps),
+        spread_bps=_safe_float(overrides.get("spread_bps", base.spread_bps), base.spread_bps),
+        impact_bps=_safe_float(overrides.get("impact_bps", base.impact_bps), base.impact_bps),
+        adverse_bps=_safe_float(overrides.get("adverse_bps", base.adverse_bps), base.adverse_bps),
+    )
+    meta = {"cost_profile": key, "cost_profile_base": asdict(base)}
+    return cm, meta
 
 
 @dataclass
@@ -51,15 +110,98 @@ class PipelineReport:
     artifacts: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
+        # [2026-09-09] **판정불가를 통과와 분리해서 셉니다. 게이트 판정은 바꾸지 않아요.**
+        #   표본이 없어 미룬 게이트가 passed=True 로 나가요 (framework:2098
+        #   `passed = bool(deferred or ...)`). 그 자체는 방어할 만해요 - 초기 운영 구간에서
+        #   표본 부족으로 전부 막으면 아무것도 못 하니까요.
+        #   문제는 **그 사실이 집계에서 사라진다**는 거예요. 위에서 "몇 개 통과" 를 세면
+        #   판정불가가 통과에 섞여요.
+        #   실측 2026-09-09: 18개 중 passed=False 는 3개인데
+        #     signal_quality_ic_ir  (ess 129 < min_ess 200)  deferred -> passed=True
+        #     inflation_real_return (겹치는 연도 0)           skipped  -> passed=True
+        #   실제로는 **13 통과 / 3 실패 / 2 판정불가** 예요.
+        #   검증 콘솔 화면은 본문에 "판정불가" 라고 정직하게 쓰는데 집계만 뭉개고 있었어요.
+        def _is_deferred(x: "ValidationResult") -> bool:
+            d = getattr(x, "details", None)
+            if not isinstance(d, dict):
+                return False
+            return bool(d.get("deferred") or d.get("skipped"))
+
+        rows = [asdict(x) for x in self.gate_results]
+        deferred_names = [x.name for x in self.gate_results if _is_deferred(x)]
+        failed_names = [x.name for x in self.gate_results if not x.passed]
+        decided_pass = [x.name for x in self.gate_results
+                        if x.passed and not _is_deferred(x)]
         return {
             "passed": self.passed,
-            "gate_results": [asdict(x) for x in self.gate_results],
+            "gate_counts": {
+                "total": len(rows),
+                "passed_decided": len(decided_pass),
+                "failed": len(failed_names),
+                "undetermined": len(deferred_names),
+                "note": ("undetermined 는 표본 부족 등으로 판정을 미룬 게이트예요. "
+                         "passed=True 로 나가지만 통과가 아니에요."),
+            },
+            "undetermined_gates": deferred_names,
+            "failed_gates": failed_names,
+            "gate_results": rows,
             "artifacts": self.artifacts,
         }
 
 
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
 def make_equity_curve(returns: pd.Series, initial_capital: float = 1.0) -> pd.Series:
     return initial_capital * (1.0 + returns.fillna(0.0)).cumprod()
+
+
+def _series_records(series: pd.Series, value_name: str, max_rows: int = 500) -> List[Dict[str, Any]]:
+    if not isinstance(series, pd.Series) or series.empty:
+        return []
+    s = pd.to_numeric(series, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+    if s.empty:
+        return []
+    idx = pd.to_datetime(s.index, errors="coerce")
+    frame = pd.DataFrame({"date": idx.strftime("%Y%m%d"), value_name: s.to_numpy(dtype=float)})
+    frame = frame.dropna(subset=["date"]).tail(max(1, int(max_rows)))
+    return [
+        {"date": str(row["date"]), value_name: float(row[value_name])}
+        for _, row in frame.iterrows()
+    ]
+
+
+def _trade_records(trades: pd.DataFrame, max_rows: int = 500) -> List[Dict[str, Any]]:
+    if not isinstance(trades, pd.DataFrame) or trades.empty:
+        return []
+    frame = trades.copy().tail(max(1, int(max_rows)))
+    out: List[Dict[str, Any]] = []
+    for _, row in frame.iterrows():
+        item: Dict[str, Any] = {}
+        for col in ("timestamp", "date", "return", "ret", "ledger_return", "turnover", "code", "symbol"):
+            if col not in frame.columns:
+                continue
+            val = row.get(col)
+            if pd.isna(val):
+                item[col] = None
+            elif col in {"timestamp", "date"}:
+                item[col] = str(pd.to_datetime(val, errors="coerce").strftime("%Y%m%d") if not pd.isna(pd.to_datetime(val, errors="coerce")) else val)
+            elif col in {"return", "ret", "ledger_return", "turnover"}:
+                item[col] = float(val)
+            else:
+                item[col] = str(val)
+        out.append(item)
+    return out
 
 
 def max_drawdown(equity: pd.Series) -> float:
@@ -100,6 +242,261 @@ def annualized_return(returns: pd.Series, periods_per_year: int = 252) -> float:
     if years <= 0:
         return np.nan
     return total ** (1.0 / years) - 1.0
+
+
+def _annual_turnover_from_series(turnover: pd.Series, periods_per_year: int = 252) -> float:
+    t = pd.to_numeric(turnover, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+    if len(t) == 0:
+        return np.nan
+    return float(t.mean() * float(periods_per_year))
+
+
+def _objective_score(sharpe: float, annual_turnover: float, lambda_turnover: float) -> float:
+    s = _safe_float(sharpe, np.nan)
+    t = _safe_float(annual_turnover, np.nan)
+    if pd.isna(s):
+        return np.nan
+    if pd.isna(t):
+        t = 0.0
+    penalty = float(lambda_turnover) * float(t)
+    return float(s - penalty)
+
+
+def _effective_sample_size(returns: pd.Series, max_lag: int = 10) -> float:
+    r = pd.to_numeric(returns, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+    n = len(r)
+    if n <= 1:
+        return float(n)
+    den = 1.0
+    for lag in range(1, min(max_lag, n - 1) + 1):
+        ac = r.autocorr(lag=lag)
+        if pd.isna(ac):
+            continue
+        den += 2.0 * float(ac)
+    if den <= 0:
+        return float(n)
+    return float(max(1.0, min(float(n), float(n) / den)))
+
+
+def _mbb_mean_effective_sample_size(
+    returns: pd.Series,
+    *,
+    block_size: int = 21,
+    n_boot: int = 500,
+    seed: int = 42,
+) -> Tuple[float, float]:
+    rr = pd.to_numeric(returns, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna().to_numpy(dtype=float)
+    n = len(rr)
+    if n < 2:
+        return float(n), np.nan
+
+    sigma = float(np.std(rr, ddof=1))
+    if not math.isfinite(sigma) or sigma <= 0.0:
+        return float(n), sigma
+
+    bs = max(1, min(int(block_size), n))
+    rng = np.random.default_rng(int(seed))
+    means: List[float] = []
+    for _ in range(max(100, int(n_boot))):
+        chunks: List[np.ndarray] = []
+        while sum(len(c) for c in chunks) < n:
+            s = int(rng.integers(0, n))
+            e = s + bs
+            if e <= n:
+                blk = rr[s:e]
+            else:
+                blk = np.concatenate([rr[s:n], rr[0 : e - n]])
+            chunks.append(blk)
+        sample = np.concatenate(chunks)[:n]
+        means.append(float(np.mean(sample)))
+
+    mean_std = float(np.std(np.asarray(means, dtype=float), ddof=1))
+    if not math.isfinite(mean_std) or mean_std <= 0.0:
+        return float(n), sigma
+    n_eff = (sigma / mean_std) ** 2
+    return float(max(1.0, min(float(n), n_eff))), sigma
+
+
+def _rolling_ic_series(signal: pd.Series, future_ret: pd.Series, window: int = 63) -> pd.Series:
+    sig = pd.to_numeric(signal, errors="coerce")
+    fr = pd.to_numeric(future_ret, errors="coerce")
+    joined = pd.DataFrame({"s": sig, "r": fr}).dropna()
+    if len(joined) < max(5, window):
+        return pd.Series(dtype=float)
+    vals: List[float] = []
+    idxs: List[Any] = []
+    for i in range(window, len(joined) + 1):
+        part = joined.iloc[i - window : i]
+        c = part["s"].corr(part["r"])
+        vals.append(float(c) if pd.notna(c) else np.nan)
+        idxs.append(joined.index[i - 1])
+    return pd.Series(vals, index=idxs, dtype=float).dropna()
+
+
+def _block_bootstrap_total_return_ci(
+    returns: pd.Series,
+    *,
+    alpha: float = 0.05,
+    n_boot: int = 1000,
+    block_size: int = 21,
+) -> Tuple[float, float, float]:
+    rr = pd.to_numeric(returns, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna().to_numpy(dtype=float)
+    n = len(rr)
+    if n == 0:
+        return np.nan, np.nan, np.nan
+    if n == 1:
+        total = float((1.0 + rr[0]) - 1.0)
+        return total, total, total
+    bs = max(2, min(int(block_size), n))
+    rng = np.random.default_rng(42)
+    totals: List[float] = []
+    for _ in range(max(100, int(n_boot))):
+        chunks: List[np.ndarray] = []
+        while sum(len(c) for c in chunks) < n:
+            s = int(rng.integers(0, n))
+            e = s + bs
+            if e <= n:
+                blk = rr[s:e]
+            else:
+                pad = e - n
+                blk = np.concatenate([rr[s:n], rr[0:pad]])
+            chunks.append(blk)
+        sample = np.concatenate(chunks)[:n]
+        totals.append(float(np.prod(1.0 + sample) - 1.0))
+    lo = float(np.percentile(totals, 100.0 * (alpha / 2.0)))
+    med = float(np.percentile(totals, 50.0))
+    hi = float(np.percentile(totals, 100.0 * (1.0 - alpha / 2.0)))
+    return lo, med, hi
+
+
+def _compute_sharpe_like(returns: pd.Series) -> Optional[float]:
+    clean = pd.to_numeric(returns, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+    if len(clean) < 2:
+        return None
+    values = [float(x) for x in clean.tolist()]
+    stdev = statistics.stdev(values)
+    if stdev <= 0:
+        return None
+    return statistics.mean(values) / stdev
+
+
+def _compute_skew_kurtosis(returns: pd.Series) -> Tuple[float, float]:
+    clean = pd.to_numeric(returns, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+    values = [float(x) for x in clean.tolist()]
+    n = len(values)
+    if n < 3:
+        return 0.0, 3.0
+
+    mu = statistics.mean(values)
+    m2 = sum((x - mu) ** 2 for x in values) / n
+    if m2 <= 0:
+        return 0.0, 3.0
+    s = math.sqrt(m2)
+    m3 = sum((x - mu) ** 3 for x in values) / n
+    m4 = sum((x - mu) ** 4 for x in values) / n
+    skew = m3 / (s ** 3)
+    kurt = m4 / (s ** 4)
+    if not math.isfinite(skew):
+        skew = 0.0
+    if not math.isfinite(kurt):
+        kurt = 3.0
+    return skew, kurt
+
+
+def _first_trade_timestamp(bt: "BacktestResult") -> Optional[pd.Timestamp]:
+    trades = getattr(bt, "trades", None)
+    if not isinstance(trades, pd.DataFrame) or trades.empty:
+        return None
+
+    candidates: List[pd.Timestamp] = []
+    idx = pd.to_datetime(trades.index, errors="coerce")
+    if len(idx):
+        idx = idx[~pd.isna(idx)]
+        if len(idx):
+            candidates.append(pd.Timestamp(idx.min()))
+
+    for col in ("timestamp", "date", "datetime"):
+        if col not in trades.columns:
+            continue
+        vals = pd.to_datetime(trades[col], errors="coerce")
+        vals = vals[~pd.isna(vals)]
+        if len(vals):
+            candidates.append(pd.Timestamp(vals.min()))
+
+    return min(candidates) if candidates else None
+
+
+def _oper_start_timestamp() -> pd.Timestamp:
+    raw = "".join(ch for ch in str(os.getenv("PAPER_OPER_START_YMD", "20260301") or "") if ch.isdigit())
+    ymd = raw[:8] if len(raw) >= 8 else "20260301"
+    ts = pd.to_datetime(ymd, format="%Y%m%d", errors="coerce")
+    if pd.isna(ts):
+        return pd.Timestamp("2026-03-01")
+    return pd.Timestamp(ts)
+
+
+def _active_returns(bt: "BacktestResult") -> Tuple[pd.Series, pd.Timestamp]:
+    returns_nonnull = bt.returns.dropna().copy()
+    returns_index = pd.to_datetime(returns_nonnull.index, errors="coerce")
+    returns_nonnull = returns_nonnull.loc[~pd.isna(returns_index)]
+    returns_index = returns_index[~pd.isna(returns_index)]
+    returns_nonnull.index = pd.DatetimeIndex(returns_index)
+
+    oper_start = _oper_start_timestamp()
+    active = returns_nonnull.loc[returns_nonnull.index >= oper_start]
+    return active, oper_start
+
+
+def _operating_market_df(market_df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    oper_start = _oper_start_timestamp()
+    idx = pd.to_datetime(market_df.index, errors="coerce")
+    keep = ~pd.isna(idx)
+    filtered = market_df.loc[keep].copy()
+    idx = idx[keep]
+    filtered.index = pd.DatetimeIndex(idx)
+    filtered = filtered.loc[filtered.index >= oper_start].copy()
+    filtered.attrs["oper_start_ymd"] = oper_start.strftime("%Y%m%d")
+    filtered.attrs["operating_window_applied"] = True
+    return filtered, {
+        "oper_start_ymd": oper_start.strftime("%Y%m%d"),
+        "raw_rows": int(len(market_df)),
+        "operating_rows": int(len(filtered)),
+    }
+
+
+def _is_operating_window_df(market_df: pd.DataFrame) -> bool:
+    return bool(getattr(market_df, "attrs", {}).get("operating_window_applied"))
+
+
+def _compute_dsr_proxy(
+    sharpe_like: Optional[float],
+    n_obs: int,
+    n_trials: int,
+    skew: float,
+    kurt: float,
+) -> Optional[float]:
+    if sharpe_like is None or n_obs < 2:
+        return None
+
+    n = int(max(2, n_obs))
+    trials = int(max(1, n_trials))
+    nd = statistics.NormalDist()
+
+    if trials <= 1:
+        sr_star = 0.0
+    else:
+        p1 = min(0.999999, max(1e-6, 1.0 - 1.0 / trials))
+        p2 = min(0.999999, max(1e-6, 1.0 - 1.0 / (trials * math.e)))
+        z1 = nd.inv_cdf(p1)
+        z2 = nd.inv_cdf(p2)
+        euler_gamma = 0.5772156649015329
+        expected_max_z = (1.0 - euler_gamma) * z1 + euler_gamma * z2
+        sr_star = expected_max_z / math.sqrt(max(1, n - 1))
+
+    denom = 1.0 - float(skew) * float(sharpe_like) + ((float(kurt) - 1.0) / 4.0) * (float(sharpe_like) ** 2)
+    denom = math.sqrt(max(1e-8, denom))
+    z = (float(sharpe_like) - sr_star) * math.sqrt(max(1, n - 1)) / denom
+    return float(nd.cdf(z))
 
 
 def _safe_pct_change(s: pd.Series) -> pd.Series:
@@ -398,8 +795,10 @@ def _call_backtest_fn(fn: Callable[..., Any], market_df: pd.DataFrame, signal_df
             if isinstance(raw, BacktestResult):
                 return raw
             if isinstance(raw, dict):
-                returns = pd.Series(raw.get("returns"), dtype=float)
-                equity = pd.Series(raw.get("equity"), dtype=float)
+                raw_returns = raw.get("returns")
+                raw_equity = raw.get("equity")
+                returns = raw_returns if isinstance(raw_returns, pd.Series) else pd.Series(raw_returns, dtype=float)
+                equity = raw_equity if isinstance(raw_equity, pd.Series) else pd.Series(raw_equity, dtype=float)
                 if len(equity) == 0 and len(returns):
                     equity = make_equity_curve(returns)
                 trades = raw.get("trades", pd.DataFrame())
@@ -427,31 +826,85 @@ def reference_backtest(market_df: pd.DataFrame, signal_df: pd.DataFrame, params:
     else:
         out["position"] = out["signal"].shift(1).fillna(0.0)
 
-    out["turnover"] = out["position"].diff().abs().fillna(out["position"].abs())
-
-    cost_rate = (cost_model.commission_bps + cost_model.slippage_bps + cost_model.spread_bps / 2.0) / 10000.0
+    if "turnover" in sig.columns:
+        out["turnover"] = pd.to_numeric(sig["turnover"], errors="coerce").reindex(out.index).fillna(0.0).clip(lower=0.0)
+    else:
+        out["turnover"] = out["position"].diff().abs().fillna(out["position"].abs())
     out["gross_return"] = out["position"] * out["ret_cc"]
-    out["cost"] = out["turnover"] * cost_rate
+    out["cost_commission"] = out["turnover"] * (float(cost_model.commission_bps) / 10000.0)
+    out["cost_slippage"] = out["turnover"] * (float(cost_model.slippage_bps) / 10000.0)
+    out["cost_spread"] = out["turnover"] * (float(cost_model.spread_bps) / 2.0 / 10000.0)
+    out["cost_impact"] = out["turnover"] * (float(cost_model.impact_bps) / 10000.0)
+    out["cost_adverse"] = out["turnover"] * (float(cost_model.adverse_bps) / 10000.0)
+    out["cost"] = out[
+        ["cost_commission", "cost_slippage", "cost_spread", "cost_impact", "cost_adverse"]
+    ].sum(axis=1)
     out["net_return"] = out["gross_return"] - out["cost"]
 
     equity = make_equity_curve(out["net_return"])
+    annual_turnover = _annual_turnover_from_series(out["turnover"])
+    delay_proxy_days = 1.0
+    adv_ratio = float((out["cost_adverse"].sum() / out["cost"].sum())) if float(out["cost"].sum()) > 0 else np.nan
+    lo_ci, med_ci, hi_ci = _block_bootstrap_total_return_ci(out["net_return"], alpha=0.05, n_boot=1000, block_size=21)
+    cost_breakdown = {
+        "commission": float(out["cost_commission"].sum()),
+        "slippage": float(out["cost_slippage"].sum()),
+        "spread": float(out["cost_spread"].sum()),
+        "impact": float(out["cost_impact"].sum()),
+        "adverse_selection": float(out["cost_adverse"].sum()),
+        "total": float(out["cost"].sum()),
+    }
     trades = pd.DataFrame(
         {
             "timestamp": out.index[out["turnover"] > 0],
             "return": out.loc[out["turnover"] > 0, "net_return"].values,
             "cost": out.loc[out["turnover"] > 0, "cost"].values,
+            "cost_commission": out.loc[out["turnover"] > 0, "cost_commission"].values,
+            "cost_slippage": out.loc[out["turnover"] > 0, "cost_slippage"].values,
+            "cost_spread": out.loc[out["turnover"] > 0, "cost_spread"].values,
+            "cost_impact": out.loc[out["turnover"] > 0, "cost_impact"].values,
+            "cost_adverse": out.loc[out["turnover"] > 0, "cost_adverse"].values,
         }
     )
-
-    return BacktestResult(out["net_return"], equity, trades, basic_metrics(out["net_return"], equity), {"engine": "reference_backtest"})
+    metrics = basic_metrics(out["net_return"], equity)
+    metrics["annual_turnover"] = annual_turnover
+    metrics["pnl_total_return"] = float(np.prod(1.0 + out["net_return"].fillna(0.0)) - 1.0)
+    metrics["pnl_total_return_ci95_low"] = lo_ci
+    metrics["pnl_total_return_ci95_med"] = med_ci
+    metrics["pnl_total_return_ci95_high"] = hi_ci
+    meta = {
+        "engine": "reference_backtest",
+        "execution": {
+            "turnover_annualized": annual_turnover,
+            "fill_delay_proxy_days": delay_proxy_days,
+            "adverse_selection_ratio": adv_ratio,
+            "cost_breakdown": cost_breakdown,
+        },
+    }
+    return BacktestResult(out["net_return"], equity, trades, metrics, meta)
 
 
 class BiasAudit:
-    def run(self, market_df: pd.DataFrame, signal_df: pd.DataFrame, threshold_corr: float = 0.2) -> List[ValidationResult]:
+    def run(
+        self,
+        market_df: pd.DataFrame,
+        signal_df: pd.DataFrame,
+        threshold_corr: float = 0.2,
+        min_corr_obs: int = 63,
+    ) -> List[ValidationResult]:
         sig = ensure_signal_schema(signal_df, market_df.index)
         future_ret = _safe_pct_change(market_df["close"]).shift(-1)
-        corr = sig["signal"].corr(future_ret)
-        lookahead_ok = not (pd.notna(corr) and abs(float(corr)) > threshold_corr)
+        corr_df = pd.DataFrame({"signal": sig["signal"], "future_ret": future_ret}).dropna()
+        corr = corr_df["signal"].corr(corr_df["future_ret"]) if len(corr_df) else np.nan
+        n_obs = int(len(corr_df))
+        enough_obs = n_obs >= int(min_corr_obs)
+        deferred = bool((not enough_obs) and _is_operating_window_df(market_df))
+        lookahead_ok = bool(deferred or (enough_obs and not (pd.notna(corr) and abs(float(corr)) > threshold_corr)))
+        lookahead_summary = (
+            "signal-future corr audit"
+            if enough_obs
+            else ("deferred: insufficient operating observations for signal-future corr audit" if deferred else "insufficient data for signal-future corr audit")
+        )
 
         if "position" in sig.columns:
             expected = sig["signal"].shift(1).fillna(0.0)
@@ -462,7 +915,20 @@ class BiasAudit:
             lag_ok = False
 
         return [
-            ValidationResult("look_ahead_proxy", lookahead_ok, "signal-future corr audit", {"corr": corr, "threshold": threshold_corr}),
+            ValidationResult(
+                "look_ahead_proxy",
+                lookahead_ok,
+                lookahead_summary,
+                {
+                    "corr": corr,
+                    "threshold": threshold_corr,
+                    "n_obs": n_obs,
+                    "min_n": int(min_corr_obs),
+                    "deferred": bool(deferred),
+                    "skipped": bool(deferred),
+                    "oper_start_ymd": market_df.attrs.get("oper_start_ymd", ""),
+                },
+            ),
             ValidationResult("position_lag", lag_ok, "position follows lagged signal", {"mismatch_ratio": mismatch}),
         ]
 
@@ -522,9 +988,33 @@ class WalkForwardValidator:
         self.strategy_fn = strategy_fn
         self.backtest_fn = backtest_fn
 
-    def run(self, market_df: pd.DataFrame, base_params: Dict[str, Any], param_grid: Sequence[Dict[str, Any]], cost_model: CostModel, train_size: int, test_size: int) -> Tuple[ValidationResult, pd.DataFrame]:
+    def run(
+        self,
+        market_df: pd.DataFrame,
+        base_params: Dict[str, Any],
+        param_grid: Sequence[Dict[str, Any]],
+        cost_model: CostModel,
+        train_size: int,
+        test_size: int,
+        lambda_turnover: float = 0.0,
+    ) -> Tuple[ValidationResult, pd.DataFrame]:
         if len(market_df) < train_size + test_size:
-            return ValidationResult("walk_forward", False, "insufficient data", {"len": len(market_df)}), pd.DataFrame()
+            deferred = _is_operating_window_df(market_df)
+            return (
+                ValidationResult(
+                    "walk_forward",
+                    bool(deferred),
+                    "deferred: insufficient operating rows for walk-forward" if deferred else "insufficient data",
+                    {
+                        "len": int(len(market_df)),
+                        "required_rows": int(train_size + test_size),
+                        "deferred": bool(deferred),
+                        "skipped": bool(deferred),
+                        "oper_start_ymd": market_df.attrs.get("oper_start_ymd", ""),
+                    },
+                ),
+                pd.DataFrame(),
+            )
 
         rows: List[Dict[str, Any]] = []
         start = 0
@@ -542,8 +1032,10 @@ class WalkForwardValidator:
                 sc = _safe_float(bt_is.metrics.get("sharpe", np.nan), np.nan)
                 if pd.isna(sc):
                     sc = _safe_float(annualized_return(bt_is.returns), np.nan)
-                if pd.notna(sc) and sc > best_score:
-                    best_score = sc
+                turn = _safe_float(bt_is.metrics.get("annual_turnover", np.nan), np.nan)
+                obj = _objective_score(sc, turn, lambda_turnover=lambda_turnover)
+                if pd.notna(obj) and obj > best_score:
+                    best_score = obj
                     best_params = params
                     best_is_bt = bt_is
 
@@ -560,6 +1052,8 @@ class WalkForwardValidator:
                 oos_s = _safe_float(bt_oos.metrics.get("sharpe", np.nan), np.nan)
                 if pd.isna(oos_s):
                     oos_s = _safe_float(annualized_return(bt_oos.returns), np.nan)
+                oos_turn = _safe_float(bt_oos.metrics.get("annual_turnover", np.nan), np.nan)
+                oos_obj = _objective_score(oos_s, oos_turn, lambda_turnover=lambda_turnover)
 
                 min_abs_is = 0.25
                 if pd.isna(is_s) or pd.isna(oos_s) or abs(is_s) < min_abs_is:
@@ -576,6 +1070,8 @@ class WalkForwardValidator:
                         "fold": fold,
                         "is_sharpe": is_s,
                         "oos_sharpe": oos_s,
+                        "oos_annual_turnover": oos_turn,
+                        "oos_objective": oos_obj,
                         "wfe": float(wfe),
                         "wfe_valid": bool(wfe_valid),
                         "reason": reason,
@@ -590,40 +1086,99 @@ class WalkForwardValidator:
         if len(wf) == 0:
             med = -999.0
             valid_folds = 0
+            invalid_reason_counts: Dict[str, int] = {}
         else:
             valid = wf[wf["wfe_valid"] == True] if "wfe_valid" in wf.columns else pd.DataFrame()
             valid_folds = int(len(valid))
             med = float(valid["wfe"].median()) if valid_folds > 0 else -999.0
+            invalid_reason_counts = {}
+            if "reason" in wf.columns:
+                invalid_reason_counts = {str(k): int(v) for k, v in wf["reason"].value_counts(dropna=False).items()}
+
+        wf_summary = "median WFE >= 50" if valid_folds > 0 else "insufficient data: no valid walk-forward folds"
 
         gate = ValidationResult(
             "walk_forward",
             bool(valid_folds >= 1 and med >= 50.0),
-            "median WFE >= 50",
-            {"median_wfe": med, "n_folds": int(len(wf)), "valid_folds": valid_folds, "min_abs_is_sharpe": 0.25},
+            wf_summary,
+            {
+                "median_wfe": med,
+                "n_folds": int(len(wf)),
+                "valid_folds": valid_folds,
+                "min_abs_is_sharpe": 0.25,
+                "objective_lambda_turnover": float(lambda_turnover),
+                "invalid_reason_counts": invalid_reason_counts,
+            },
         )
         return gate, wf
 class MonteCarloValidator:
-    def run(self, bt: BacktestResult, max_allowed_mc95_mdd: float = -0.30, n_sim: int = 2500) -> Tuple[ValidationResult, Dict[str, Any]]:
+    def run(
+        self,
+        bt: BacktestResult,
+        max_allowed_mc95_mdd: float = -0.30,
+        n_sim: int = 2500,
+        alpha: float = 0.05,
+        block_size: int = 1,
+    ) -> Tuple[ValidationResult, Dict[str, Any]]:
         r = bt.returns.dropna().to_numpy(dtype=float)
         if len(r) == 0:
             return ValidationResult("monte_carlo", False, "no returns", {}), {}
 
+        n = len(r)
+        bs = max(1, min(int(block_size), n))
+        alpha = min(0.40, max(0.001, float(alpha)))
         mdds: List[float] = []
         finals: List[float] = []
+        rng = np.random.default_rng(42)
         for _ in range(n_sim):
-            sampled = np.random.choice(r, size=len(r), replace=True)
+            if bs <= 1:
+                sampled = rng.choice(r, size=n, replace=True)
+            else:
+                chunks: List[np.ndarray] = []
+                cur = 0
+                while cur < n:
+                    s = int(rng.integers(0, n))
+                    e = s + bs
+                    if e <= n:
+                        blk = r[s:e]
+                    else:
+                        pad = e - n
+                        blk = np.concatenate([r[s:n], r[0:pad]])
+                    chunks.append(blk)
+                    cur += len(blk)
+                sampled = np.concatenate(chunks)[:n]
             eq = np.cumprod(1.0 + sampled)
             peak = np.maximum.accumulate(eq)
             dd = eq / peak - 1.0
             mdds.append(float(dd.min()))
             finals.append(float(eq[-1] - 1.0))
 
-        mc95 = float(np.percentile(mdds, 95))
+        mdd_pct = np.percentile(mdds, [1, 5, 10, 50, 90, 95, 99])
+        final_pct = np.percentile(finals, [1, 5, 10, 50, 90, 95, 99])
+        mc_tail = float(np.percentile(mdds, 100.0 * alpha))
+        mc95_legacy = float(np.percentile(mdds, 95))
         art = {
-            "mdd_pct": {str(k): float(v) for k, v in zip([50, 90, 95, 99], np.percentile(mdds, [50, 90, 95, 99]))},
-            "final_pct": {str(k): float(v) for k, v in zip([50, 90, 95, 99], np.percentile(finals, [50, 90, 95, 99]))},
+            "mdd_pct": {str(k): float(v) for k, v in zip([1, 5, 10, 50, 90, 95, 99], mdd_pct)},
+            "final_pct": {str(k): float(v) for k, v in zip([1, 5, 10, 50, 90, 95, 99], final_pct)},
+            "mc_alpha": float(alpha),
+            "mc_tail_mdd": float(mc_tail),
+            "mc95_mdd_legacy": float(mc95_legacy),
+            "block_size": int(bs),
+            "n_sim": int(n_sim),
         }
-        gate = ValidationResult("monte_carlo", bool(mc95 >= max_allowed_mc95_mdd), "MC 95pct MDD check", {"mc95_mdd": mc95, "limit": max_allowed_mc95_mdd})
+        gate = ValidationResult(
+            "monte_carlo",
+            bool(mc_tail >= max_allowed_mc95_mdd),
+            "MC tail MDD check",
+            {
+                "mc_alpha": float(alpha),
+                "mc_tail_mdd": float(mc_tail),
+                "limit": max_allowed_mc95_mdd,
+                "mc95_mdd_legacy": float(mc95_legacy),
+                "block_size": int(bs),
+                "n_sim": int(n_sim),
+            },
+        )
         return gate, art
 
 
@@ -632,10 +1187,41 @@ class CPCVValidator:
         self.strategy_fn = strategy_fn
         self.backtest_fn = backtest_fn
 
-    def run(self, market_df: pd.DataFrame, base_params: Dict[str, Any], param_grid: Sequence[Dict[str, Any]], cost_model: CostModel, n_groups: int = 8, k_test: int = 2, purge_bars: int = 2, max_splits: int = 40) -> Tuple[ValidationResult, pd.DataFrame]:
+    def run(
+        self,
+        market_df: pd.DataFrame,
+        base_params: Dict[str, Any],
+        param_grid: Sequence[Dict[str, Any]],
+        cost_model: CostModel,
+        n_groups: int = 8,
+        k_test: int = 2,
+        purge_bars: int = 2,
+        embargo_bars: int = 0,
+        max_splits: int = 40,
+        nested_inner_wf: bool = False,
+        inner_train_size: int = 252,
+        inner_test_size: int = 42,
+        lambda_turnover: float = 0.0,
+        min_ess: float = 200.0,
+    ) -> Tuple[ValidationResult, pd.DataFrame]:
         n = len(market_df)
         if n < 200:
-            return ValidationResult("cpcv_pbo", False, "insufficient data", {"len": n}), pd.DataFrame()
+            deferred = _is_operating_window_df(market_df)
+            return (
+                ValidationResult(
+                    "cpcv_pbo",
+                    bool(deferred),
+                    "deferred: insufficient operating rows for CPCV" if deferred else "insufficient data",
+                    {
+                        "len": int(n),
+                        "min_n": 200,
+                        "deferred": bool(deferred),
+                        "skipped": bool(deferred),
+                        "oper_start_ymd": market_df.attrs.get("oper_start_ymd", ""),
+                    },
+                ),
+                pd.DataFrame(),
+            )
 
         n_groups = max(3, min(int(n_groups), n))
         idx = np.arange(n)
@@ -660,6 +1246,13 @@ class CPCVValidator:
                     lo = max(0, t - purge_bars)
                     hi = min(n, t + purge_bars + 1)
                     train_mask[lo:hi] = False
+            if embargo_bars > 0:
+                tix = np.where(test_mask)[0]
+                for t in tix:
+                    lo = min(n, t + 1)
+                    hi = min(n, t + 1 + embargo_bars)
+                    if hi > lo:
+                        train_mask[lo:hi] = False
 
             if train_mask.sum() < 80 or test_mask.sum() < 20:
                 continue
@@ -669,22 +1262,69 @@ class CPCVValidator:
 
             best_score = -np.inf
             best_params = None
-            for p in param_grid:
-                params = {**base_params, **p}
-                bt_is = self.backtest_fn(train_df, self.strategy_fn(train_df, params), params, cost_model)
-                sc = _safe_float(bt_is.metrics.get("sharpe", np.nan), np.nan)
-                if pd.isna(sc):
-                    sc = _safe_float(annualized_return(bt_is.returns), np.nan)
-                if pd.notna(sc) and sc > best_score:
-                    best_score = sc
-                    best_params = params
+            if nested_inner_wf:
+                wf_gate, wf_df = WalkForwardValidator(self.strategy_fn, self.backtest_fn).run(
+                    train_df,
+                    base_params=base_params,
+                    param_grid=param_grid,
+                    cost_model=cost_model,
+                    train_size=max(20, int(inner_train_size)),
+                    test_size=max(5, int(inner_test_size)),
+                    lambda_turnover=float(lambda_turnover),
+                )
+                _ = wf_gate
+                if len(wf_df) > 0 and "best_params" in wf_df.columns:
+                    cand = wf_df["best_params"].dropna().tolist()
+                    if len(cand) > 0:
+                        score_rows: List[Tuple[float, Dict[str, Any]]] = []
+                        for cp in cand:
+                            if not isinstance(cp, dict):
+                                continue
+                            merged = {**base_params, **cp}
+                            bt_is = self.backtest_fn(train_df, self.strategy_fn(train_df, merged), merged, cost_model)
+                            sc = _safe_float(bt_is.metrics.get("sharpe", np.nan), np.nan)
+                            if pd.isna(sc):
+                                sc = _safe_float(annualized_return(bt_is.returns), np.nan)
+                            turn = _safe_float(bt_is.metrics.get("annual_turnover", np.nan), np.nan)
+                            obj = _objective_score(sc, turn, lambda_turnover=float(lambda_turnover))
+                            if pd.notna(obj):
+                                score_rows.append((float(obj), merged))
+                        if len(score_rows) > 0:
+                            score_rows.sort(key=lambda x: x[0], reverse=True)
+                            best_score, best_params = score_rows[0]
+            if best_params is None:
+                for p in param_grid:
+                    params = {**base_params, **p}
+                    bt_is = self.backtest_fn(train_df, self.strategy_fn(train_df, params), params, cost_model)
+                    sc = _safe_float(bt_is.metrics.get("sharpe", np.nan), np.nan)
+                    if pd.isna(sc):
+                        sc = _safe_float(annualized_return(bt_is.returns), np.nan)
+                    turn = _safe_float(bt_is.metrics.get("annual_turnover", np.nan), np.nan)
+                    obj = _objective_score(sc, turn, lambda_turnover=float(lambda_turnover))
+                    if pd.notna(obj) and obj > best_score:
+                        best_score = obj
+                        best_params = params
 
             if best_params is None:
                 continue
 
             bt_oos = self.backtest_fn(test_df, self.strategy_fn(test_df, best_params), best_params, cost_model)
             oos_sharpe = _safe_float(bt_oos.metrics.get("sharpe", np.nan), np.nan)
-            rows.append({"split": i, "test_groups": list(test_groups), "is_best_sharpe": float(best_score), "oos_sharpe": oos_sharpe})
+            oos_turn = _safe_float(bt_oos.metrics.get("annual_turnover", np.nan), np.nan)
+            oos_obj = _objective_score(oos_sharpe, oos_turn, lambda_turnover=float(lambda_turnover))
+            oos_ess = _effective_sample_size(bt_oos.returns, max_lag=10)
+            rows.append(
+                {
+                    "split": i,
+                    "test_groups": list(test_groups),
+                    "is_best_objective": float(best_score),
+                    "oos_sharpe": oos_sharpe,
+                    "oos_annual_turnover": oos_turn,
+                    "oos_objective": oos_obj,
+                    "oos_ess": float(oos_ess),
+                    "nested_inner_wf": bool(nested_inner_wf),
+                }
+            )
 
         df = pd.DataFrame(rows)
         if len(df) == 0:
@@ -692,10 +1332,126 @@ class CPCVValidator:
 
         pbo_approx = float((df["oos_sharpe"] <= 0).mean())
         med_oos = float(df["oos_sharpe"].median())
-        passed = bool(pbo_approx <= 0.50 and med_oos >= 0.0)
+        ess_med = float(df["oos_ess"].median()) if "oos_ess" in df.columns and len(df) else np.nan
+        passed = bool(pbo_approx <= 0.50 and med_oos >= 0.0 and (pd.isna(ess_med) or ess_med >= float(min_ess)))
 
-        gate = ValidationResult("cpcv_pbo", passed, "PBO approx <= 0.50 and median OOS Sharpe >= 0", {"pbo_approx": pbo_approx, "median_oos_sharpe": med_oos, "n_splits": int(len(df))})
+        gate = ValidationResult(
+            "cpcv_pbo",
+            passed,
+            "PBO approx <= 0.50 and median OOS Sharpe >= 0",
+            {
+                "pbo_approx": pbo_approx,
+                "median_oos_sharpe": med_oos,
+                "median_oos_ess": ess_med,
+                "min_ess": float(min_ess),
+                "n_splits": int(len(df)),
+                "purge_bars": int(purge_bars),
+                "embargo_bars": int(embargo_bars),
+                "nested_inner_wf": bool(nested_inner_wf),
+                "objective_lambda_turnover": float(lambda_turnover),
+            },
+        )
         return gate, df
+
+
+# [2026-08-29] DSR 의 n_trials 는 종전에 len(param_grid) = 4 였다.
+#   그런데 이 프로젝트는 감사 전체에 걸쳐 수백 개 조합을 훑었다(HPO 160, 파라미터 표면 56,
+#   94조합, 신호 재고 15축 ...). 4 를 넣으면 다중검정 보정이 사실상 없는 것과 같고,
+#   그 상태의 "DSR PASS" 는 아무 보증도 아니다.
+#   기록으로 방어 가능한 누적치를 원장에서 읽는다. 원장이 없으면 종전 동작(param_grid)로
+#   떨어지되 details 에 출처를 남겨 과소 상태임이 보이게 한다.
+_TRIAL_LEDGER_PATH = Path(__file__).resolve().parents[1] / "2_Logs" / "research_trial_ledger.json"
+
+
+def load_research_trial_total(fallback: int) -> tuple:
+    """(n_trials, source, breakdown) 을 돌려준다."""
+    env = str(os.environ.get("BTVAL_N_TRIALS_TOTAL", "")).strip()
+    if env.isdigit() and int(env) > 0:
+        return int(env), "env:BTVAL_N_TRIALS_TOTAL", []
+    try:
+        obj = json.loads(_TRIAL_LEDGER_PATH.read_text(encoding="utf-8"))
+        entries = obj.get("entries") or []
+        total = sum(int(e.get("n") or 0) for e in entries if isinstance(e, dict))
+        if total > 0:
+            brk = [{"n": int(e.get("n") or 0), "source": str(e.get("source") or "")} for e in entries]
+            return max(int(fallback), total), "research_trial_ledger.json", brk
+    except Exception:
+        pass
+    return max(1, int(fallback)), "param_grid(UNDERSTATED)", []
+
+
+class DeflatedSharpeValidator:
+    def run(self, bt: BacktestResult, min_dsr: float = 0.10, n_trials: int = 1) -> ValidationResult:
+        rr = pd.to_numeric(bt.returns, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+        if len(rr) < 2:
+            return ValidationResult(
+                "deflated_sharpe_ratio",
+                False,
+                "insufficient return observations for DSR",
+                {
+                    "deflated_sharpe_ratio": np.nan,
+                    "min_dsr": float(min_dsr),
+                    "n_obs": int(len(rr)),
+                    "n_trials": int(max(1, n_trials)),
+                    "reason": "insufficient_returns",
+                },
+            )
+
+        sharpe_like = _compute_sharpe_like(rr)
+        if sharpe_like is None:
+            return ValidationResult(
+                "deflated_sharpe_ratio",
+                False,
+                "invalid sharpe-like statistic for DSR",
+                {
+                    "deflated_sharpe_ratio": np.nan,
+                    "min_dsr": float(min_dsr),
+                    "n_obs": int(len(rr)),
+                    "n_trials": int(max(1, n_trials)),
+                    "reason": "invalid_sharpe_like",
+                },
+            )
+
+        skew, kurt = _compute_skew_kurtosis(rr)
+        dsr = _compute_dsr_proxy(
+            sharpe_like=sharpe_like,
+            n_obs=int(len(rr)),
+            n_trials=int(max(1, n_trials)),
+            skew=skew,
+            kurt=kurt,
+        )
+        if dsr is None or not math.isfinite(dsr):
+            return ValidationResult(
+                "deflated_sharpe_ratio",
+                False,
+                "dsr proxy computation failed",
+                {
+                    "deflated_sharpe_ratio": np.nan,
+                    "min_dsr": float(min_dsr),
+                    "n_obs": int(len(rr)),
+                    "n_trials": int(max(1, n_trials)),
+                    "sharpe_like": sharpe_like,
+                    "skew": skew,
+                    "kurt": kurt,
+                    "reason": "dsr_compute_failed",
+                },
+            )
+
+        passed = bool(float(dsr) >= float(min_dsr))
+        return ValidationResult(
+            "deflated_sharpe_ratio",
+            passed,
+            "deflated sharpe ratio proxy gate",
+            {
+                "deflated_sharpe_ratio": float(dsr),
+                "min_dsr": float(min_dsr),
+                "n_obs": int(len(rr)),
+                "n_trials": int(max(1, n_trials)),
+                "sharpe_like": float(sharpe_like),
+                "skew": float(skew),
+                "kurt": float(kurt),
+            },
+        )
 
 
 
@@ -814,11 +1570,17 @@ class MarketRegimeValidator:
 
         perf = pd.DataFrame(rows)
         if len(perf) == 0:
+            deferred = _is_operating_window_df(market_df)
             return ValidationResult(
                 "market_regime_response",
-                False,
-                "no regime observations",
-                {"valid_regimes": 0},
+                bool(deferred),
+                "deferred: insufficient operating observations for regime analysis" if deferred else "no regime observations",
+                {
+                    "valid_regimes": 0,
+                    "deferred": bool(deferred),
+                    "skipped": bool(deferred),
+                    "oper_start_ymd": market_df.attrs.get("oper_start_ymd", ""),
+                },
             ), {"regime_performance": []}
 
         valid = perf[perf["n_obs"] >= 20].copy()
@@ -827,57 +1589,99 @@ class MarketRegimeValidator:
         median_regime_sharpe = float(valid["sharpe"].median()) if valid_count > 0 else np.nan
         catastrophic = int((valid["max_drawdown"] <= -0.60).sum()) if valid_count > 0 else 0
 
+        deferred = bool(_is_operating_window_df(market_df) and valid_count < 2)
         passed = bool(
+            deferred
+            or (
             valid_count >= 2
             and catastrophic == 0
             and pd.notna(median_regime_sharpe)
             and median_regime_sharpe >= -0.50
+            )
         )
 
         gate = ValidationResult(
             "market_regime_response",
             passed,
-            "multi-regime performance validation",
+            "deferred: insufficient operating regimes for regime analysis" if deferred else "multi-regime performance validation",
             {
                 "valid_regimes": valid_count,
                 "worst_mdd": worst_mdd,
                 "median_regime_sharpe": median_regime_sharpe,
                 "catastrophic_regimes": catastrophic,
+                "deferred": bool(deferred),
+                "skipped": bool(deferred),
+                "oper_start_ymd": market_df.attrs.get("oper_start_ymd", ""),
             },
         )
         return gate, {"regime_performance": perf.to_dict(orient="records")}
 
 
 class InflationValidator:
-    def run(self, bt: BacktestResult, inflation_by_year: Optional[pd.Series]) -> ValidationResult:
+    def run(
+        self,
+        bt: BacktestResult,
+        inflation_by_year: Optional[pd.Series],
+        require_inflation_data: bool = False,
+    ) -> ValidationResult:
         if inflation_by_year is None or len(inflation_by_year.dropna()) == 0:
             return ValidationResult(
                 "inflation_real_return",
-                False,
-                "real return vs inflation",
-                {"years_covered": 0, "median_real_return": np.nan, "worst_real_return": np.nan, "reason": "inflation data missing"},
+                (not bool(require_inflation_data)),
+                ("real return vs inflation (skipped: inflation data missing)" if not require_inflation_data else "real return vs inflation"),
+                {
+                    "years_covered": 0,
+                    "median_real_return": np.nan,
+                    "worst_real_return": np.nan,
+                    "reason": "inflation data missing",
+                    "skipped": (not bool(require_inflation_data)),
+                    "require_inflation_data": bool(require_inflation_data),
+                },
             )
 
         infl = pd.to_numeric(inflation_by_year, errors="coerce").dropna().copy()
         if len(infl) == 0:
             return ValidationResult(
                 "inflation_real_return",
-                False,
-                "real return vs inflation",
-                {"years_covered": 0, "median_real_return": np.nan, "worst_real_return": np.nan, "reason": "inflation data invalid"},
+                (not bool(require_inflation_data)),
+                ("real return vs inflation (skipped: inflation data invalid)" if not require_inflation_data else "real return vs inflation"),
+                {
+                    "years_covered": 0,
+                    "median_real_return": np.nan,
+                    "worst_real_return": np.nan,
+                    "reason": "inflation data invalid",
+                    "skipped": (not bool(require_inflation_data)),
+                    "require_inflation_data": bool(require_inflation_data),
+                },
             )
 
         if infl.abs().median() > 1.0:
             infl = infl / 100.0
 
-        yearly_nominal = bt.returns.dropna().groupby(bt.returns.dropna().index.year).apply(lambda x: (1.0 + x).prod() - 1.0)
+        returns_nonnull, oper_start = _active_returns(bt)
+        returns_index = pd.to_datetime(returns_nonnull.index, errors="coerce")
+        yearly_nominal = returns_nonnull.groupby(returns_index.year).apply(lambda x: (1.0 + x).prod() - 1.0)
         common_years = sorted(set(yearly_nominal.index).intersection(set(infl.index.astype(int))))
         if len(common_years) < 2:
+            skipped = not bool(require_inflation_data)
             return ValidationResult(
                 "inflation_real_return",
-                False,
-                "real return vs inflation",
-                {"years_covered": len(common_years), "median_real_return": np.nan, "worst_real_return": np.nan, "reason": "insufficient overlapping years"},
+                skipped,
+                (
+                    "real return vs inflation (skipped: insufficient overlapping years)"
+                    if skipped
+                    else "insufficient data: overlapping operating years"
+                ),
+                {
+                    "years_covered": len(common_years),
+                    "median_real_return": np.nan,
+                    "worst_real_return": np.nan,
+                    "reason": "insufficient overlapping operating years",
+                    "deferred": skipped,
+                    "skipped": skipped,
+                    "require_inflation_data": bool(require_inflation_data),
+                    "oper_start_ymd": oper_start.strftime("%Y%m%d"),
+                },
             )
 
         nom = yearly_nominal.loc[common_years].astype(float)
@@ -896,20 +1700,30 @@ class InflationValidator:
                 "years_covered": int(len(common_years)),
                 "median_real_return": median_real,
                 "worst_real_return": worst_real,
+                "skipped": False,
+                "require_inflation_data": bool(require_inflation_data),
+                "oper_start_ymd": oper_start.strftime("%Y%m%d"),
             },
         )
 
 
 class TemporalConsistencyValidator:
     def run(self, bt: BacktestResult) -> ValidationResult:
-        rr = bt.returns.dropna()
+        rr, oper_start = _active_returns(bt)
         yearly = rr.groupby(rr.index.year).apply(lambda x: (1.0 + x).prod() - 1.0)
         if len(yearly) < 3:
             return ValidationResult(
                 "temporal_consistency",
-                False,
-                "cross-period performance consistency",
-                {"n_years": int(len(yearly)), "positive_year_ratio": np.nan, "worst_year_return": np.nan},
+                True,
+                "deferred: insufficient operating years for temporal consistency",
+                {
+                    "n_years": int(len(yearly)),
+                    "positive_year_ratio": np.nan,
+                    "worst_year_return": np.nan,
+                    "deferred": True,
+                    "skipped": True,
+                    "oper_start_ymd": oper_start.strftime("%Y%m%d"),
+                },
             )
 
         pos_ratio = float((yearly > 0).mean())
@@ -926,6 +1740,7 @@ class TemporalConsistencyValidator:
                 "positive_year_ratio": pos_ratio,
                 "worst_year_return": worst_y,
                 "median_year_return": med_y,
+                "oper_start_ymd": oper_start.strftime("%Y%m%d"),
             },
         )
 
@@ -1059,9 +1874,16 @@ class HistoricalScenarioValidator:
         if covered_n == 0:
             gate = ValidationResult(
                 "historical_scenario_response",
-                False,
-                "historical scenario response",
-                {"covered_scenarios": 0, "worst_mdd": -1.0, "median_sharpe": -999.0, "median_score": -999.0},
+                True,
+                "deferred: insufficient operating observations for historical scenarios",
+                {
+                    "covered_scenarios": 0,
+                    "worst_mdd": np.nan,
+                    "median_sharpe": np.nan,
+                    "median_score": np.nan,
+                    "deferred": True,
+                    "skipped": True,
+                },
             )
             return gate, {"scenarios": rows}
 
@@ -1091,6 +1913,108 @@ class HistoricalScenarioValidator:
             },
         )
         return gate, {"scenarios": rows}
+
+
+class StatisticalPowerMDEValidator:
+    def run(
+        self,
+        bt: BacktestResult,
+        *,
+        economic_mde_sharpe: Optional[float],
+        economic_mde_return: Optional[float],
+        sharpe_scale: str = "annual",
+        alpha: float = 0.01,
+        power: float = 0.80,
+        block_size: int = 21,
+        n_boot: int = 500,
+        seed: int = 42,
+    ) -> ValidationResult:
+        rr = pd.to_numeric(bt.returns, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+        n_obs = int(len(rr))
+        if n_obs < 2:
+            return ValidationResult(
+                "statistical_power_mde",
+                False,
+                "insufficient returns for MDE pre-registration",
+                {"reason": "insufficient_returns", "n_obs": n_obs},
+            )
+
+        alpha = min(0.40, max(0.0001, float(alpha)))
+        power = min(0.999, max(0.5001, float(power)))
+        z_alpha_2 = float(statistics.NormalDist().inv_cdf(1.0 - alpha / 2.0))
+        z_power = float(statistics.NormalDist().inv_cdf(power))
+        z_sum = z_alpha_2 + z_power
+
+        n_eff, sigma = _mbb_mean_effective_sample_size(
+            rr,
+            block_size=max(1, int(block_size)),
+            n_boot=max(100, int(n_boot)),
+            seed=int(seed),
+        )
+        if not math.isfinite(sigma) or sigma <= 0.0 or n_eff < 1.0:
+            return ValidationResult(
+                "statistical_power_mde",
+                False,
+                "invalid return volatility for MDE pre-registration",
+                {"reason": "invalid_sigma", "n_obs": n_obs, "n_eff": n_eff, "sigma": sigma},
+            )
+
+        mde_return = float(z_sum * sigma / math.sqrt(n_eff))
+        mde_sharpe_daily = float(mde_return / sigma)
+        scale = str(sharpe_scale or "annual").strip().lower()
+        if scale in {"annual", "annualized", "yearly"}:
+            mde_sharpe = float(mde_sharpe_daily * math.sqrt(252.0))
+            scale = "annual"
+        else:
+            mde_sharpe = mde_sharpe_daily
+            scale = "daily"
+
+        target_return = None if economic_mde_return is None else float(economic_mde_return)
+        target_sharpe = None if economic_mde_sharpe is None else float(economic_mde_sharpe)
+        if target_return is None and target_sharpe is None:
+            return ValidationResult(
+                "statistical_power_mde",
+                False,
+                "economic MDE target is not pre-registered",
+                {
+                    "reason": "missing_economic_mde",
+                    "n_obs": n_obs,
+                    "n_eff": n_eff,
+                    "sigma": sigma,
+                    "mde_return": mde_return,
+                    "mde_sharpe": mde_sharpe,
+                    "sharpe_scale": scale,
+                },
+            )
+
+        return_ok = True if target_return is None else (math.isfinite(target_return) and mde_return <= abs(target_return))
+        sharpe_ok = True if target_sharpe is None else (math.isfinite(target_sharpe) and mde_sharpe <= abs(target_sharpe))
+        passed = bool(return_ok and sharpe_ok)
+        summary = "pre-registered economic MDE is detectable" if passed else "sample power is below pre-registered economic MDE"
+        return ValidationResult(
+            "statistical_power_mde",
+            passed,
+            summary,
+            {
+                "alpha": alpha,
+                "power": power,
+                "z_alpha_2": z_alpha_2,
+                "z_power": z_power,
+                "n_obs": n_obs,
+                "n_eff": n_eff,
+                "sigma": sigma,
+                "block_size": int(block_size),
+                "bootstrap_runs": int(n_boot),
+                "seed": int(seed),
+                "mde_return": mde_return,
+                "economic_mde_return": target_return,
+                "mde_sharpe": mde_sharpe,
+                "economic_mde_sharpe": target_sharpe,
+                "sharpe_scale": scale,
+                "return_target_detectable": bool(return_ok),
+                "sharpe_target_detectable": bool(sharpe_ok),
+            },
+        )
 
 def make_param_grid(grid_spec: Dict[str, Sequence[Any]]) -> List[Dict[str, Any]]:
     keys = list(grid_spec.keys())
@@ -1134,8 +2058,15 @@ def sma_cross_strategy(market_df: pd.DataFrame, params: Dict[str, Any]) -> pd.Da
 
 
 def make_demo_market(periods: int = 252 * 8) -> pd.DataFrame:
+    """데모/시험용 합성 시장.
+
+    [2026-09-09] 시작일이 2015-01-01 고정이라 ValidationPipeline 의 운영구간 필터
+      (index >= PAPER_OPER_START_YMD, 기본 20260301)에 **전부 잘려 0행**이 됐다.
+      날짜 자체에는 의미가 없으므로 운영구간 시작에 맞춰 앞으로 당긴다.
+      길이(periods)와 난수 시드는 그대로라 생성되는 가격 계열은 동일하다.
+    """
     np.random.seed(42)
-    idx = pd.date_range("2015-01-01", periods=periods, freq="B")
+    idx = pd.date_range(_oper_start_timestamp(), periods=periods, freq="B")
     rets = np.random.normal(0.0003, 0.012, len(idx))
     close = 100 * np.cumprod(1 + rets)
     high = close * (1 + np.random.uniform(0, 0.01, len(idx)))
@@ -1183,10 +2114,13 @@ def calibrate_cost_from_fills(fills_df: pd.DataFrame, base_cost: CostModel, fill
         return base_cost, {"calibrated": False, "reason": "invalid estimated roundtrip bps", "roundtrip_bps_est": rt_est, "fills_map_used": use}
 
     base_rt = max(base_cost.roundtrip_bps(), 1e-9)
+    scale = float(rt_est / base_rt)
     new_cost = CostModel(
-        commission_bps=float(max(0.01, rt_est * (base_cost.commission_bps / base_rt))),
-        slippage_bps=float(max(0.01, rt_est * (base_cost.slippage_bps / base_rt))),
-        spread_bps=float(max(0.01, rt_est * (base_cost.spread_bps / base_rt))),
+        commission_bps=float(max(0.0, base_cost.commission_bps * scale)),
+        slippage_bps=float(max(0.0, base_cost.slippage_bps * scale)),
+        spread_bps=float(max(0.0, base_cost.spread_bps * scale)),
+        impact_bps=float(max(0.0, base_cost.impact_bps * scale)),
+        adverse_bps=float(max(0.0, base_cost.adverse_bps * scale)),
     )
 
     info = {
@@ -1200,6 +2134,232 @@ def calibrate_cost_from_fills(fills_df: pd.DataFrame, base_cost: CostModel, fill
     return new_cost, info
 
 
+class SignalQualityValidator:
+    def run(self, market_df: pd.DataFrame, signal_df: pd.DataFrame, min_ess: float = 200.0) -> Tuple[ValidationResult, Dict[str, Any]]:
+        sig = ensure_signal_schema(signal_df, market_df.index)
+        if "close" not in market_df.columns:
+            gate = ValidationResult(
+                "signal_quality_ic_ir",
+                False,
+                "signal IC/IR stability",
+                {"ic_mean": np.nan, "ic_std": np.nan, "ir": np.nan, "ess": 0.0, "min_ess": float(min_ess)},
+            )
+            return gate, {"ic_series": []}
+        future_ret = _safe_pct_change(market_df["close"]).shift(-1)
+        ic_series = _rolling_ic_series(sig["signal"], future_ret, window=63)
+        ic_mean = float(ic_series.mean()) if len(ic_series) else np.nan
+        ic_std = float(ic_series.std(ddof=1)) if len(ic_series) > 1 else np.nan
+        ir = float(ic_mean / ic_std) if (pd.notna(ic_mean) and pd.notna(ic_std) and ic_std > 0) else np.nan
+        ess = _effective_sample_size(future_ret.dropna(), max_lag=10)
+        deferred = bool(_is_operating_window_df(market_df) and ess < float(min_ess))
+        passed = bool(deferred or (pd.notna(ic_mean) and pd.notna(ir) and ir > 0 and ess >= float(min_ess)))
+        gate = ValidationResult(
+            "signal_quality_ic_ir",
+            passed,
+            "deferred: insufficient operating observations for signal IC/IR" if deferred else "signal IC/IR stability",
+            {
+                "ic_mean": ic_mean,
+                "ic_std": ic_std,
+                "ir": ir,
+                "ess": float(ess),
+                "min_ess": float(min_ess),
+                "deferred": bool(deferred),
+                "skipped": bool(deferred),
+                "oper_start_ymd": market_df.attrs.get("oper_start_ymd", ""),
+            },
+        )
+        art = {
+            "ic_series": [{"ts": str(k), "ic": float(v)} for k, v in ic_series.items()],
+            "ic_mean": ic_mean,
+            "ic_std": ic_std,
+            "ir": ir,
+            "ess": float(ess),
+        }
+        return gate, art
+
+
+class AcceptanceStressValidator:
+    def run(
+        self,
+        bt: BacktestResult,
+        market_df: pd.DataFrame,
+        signal_df: pd.DataFrame,
+        monthly_turnover_limit: float = 0.20,
+        ci_alpha: float = 0.05,
+    ) -> Tuple[ValidationResult, Dict[str, Any]]:
+        rr = pd.to_numeric(bt.returns, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+        if len(rr) == 0:
+            gate = ValidationResult(
+                "acceptance_pnl_turnover",
+                False,
+                "pnl ci95 and turnover acceptance",
+                {"pnl_ci95_low": np.nan, "turnover_monthly": np.nan, "turnover_limit_monthly": float(monthly_turnover_limit)},
+            )
+            return gate, {}
+        pnl_low, pnl_med, pnl_high = _block_bootstrap_total_return_ci(rr, alpha=float(ci_alpha), n_boot=1200, block_size=21)
+        sig = ensure_signal_schema(signal_df, market_df.index)
+        pos = pd.to_numeric(sig.get("position", sig.get("signal", 0.0)), errors="coerce").reindex(market_df.index).fillna(0.0)
+        if "turnover" in sig.columns:
+            turn = pd.to_numeric(sig["turnover"], errors="coerce").reindex(market_df.index).fillna(0.0).clip(lower=0.0)
+        else:
+            turn = pos.diff().abs().fillna(pos.abs())
+        turnover_monthly = float(turn.mean() * 21.0) if len(turn) else np.nan
+
+        base = rr.to_numpy(dtype=float)
+        vix = [0.8, 1.0, 1.2, 1.5]
+        stress_rows: List[Dict[str, Any]] = []
+        for vf in vix:
+            shocked = base * float(vf)
+            eq = np.cumprod(1.0 + shocked)
+            peak = np.maximum.accumulate(eq)
+            dd = eq / peak - 1.0
+            sh = _compute_sharpe_like(pd.Series(shocked))
+            stress_rows.append(
+                {
+                    "vol_mult": float(vf),
+                    "sharpe_like": (float(sh) if sh is not None else np.nan),
+                    "mdd": float(np.min(dd)) if len(dd) else np.nan,
+                    "total_return": float(eq[-1] - 1.0) if len(eq) else np.nan,
+                }
+            )
+
+        passed = bool(
+            pd.notna(pnl_low)
+            and float(pnl_low) > 0.0
+            and pd.notna(turnover_monthly)
+            and float(turnover_monthly) <= float(monthly_turnover_limit)
+        )
+        gate = ValidationResult(
+            "acceptance_pnl_turnover",
+            passed,
+            "pnl ci95 and turnover acceptance",
+            {
+                "pnl_ci95_low": pnl_low,
+                "pnl_ci95_med": pnl_med,
+                "pnl_ci95_high": pnl_high,
+                "turnover_monthly": turnover_monthly,
+                "turnover_limit_monthly": float(monthly_turnover_limit),
+            },
+        )
+        art = {
+            "pnl_ci95_low": pnl_low,
+            "pnl_ci95_med": pnl_med,
+            "pnl_ci95_high": pnl_high,
+            "turnover_monthly": turnover_monthly,
+            "turnover_limit_monthly": float(monthly_turnover_limit),
+            "stress_scenarios": stress_rows,
+        }
+        return gate, art
+
+
+class OnlineConformalValidator:
+    def run(
+        self,
+        market_df: pd.DataFrame,
+        signal_df: pd.DataFrame,
+        *,
+        alpha: float = 0.10,
+        calib_window: int = 252,
+        gamma: float = 0.02,
+        local_window: int = 63,
+        coverage_tol: float = 0.05,
+    ) -> Tuple[ValidationResult, Dict[str, Any]]:
+        if "close" not in market_df.columns:
+            gate = ValidationResult(
+                "online_conformal_coverage",
+                False,
+                "adaptive conformal local coverage",
+                {"reason": "close missing"},
+            )
+            return gate, {}
+
+        sig = ensure_signal_schema(signal_df, market_df.index)
+        y = _safe_pct_change(market_df["close"]).shift(-1)
+        amp = y.abs().rolling(20, min_periods=5).mean()
+        mu = pd.to_numeric(sig["signal"], errors="coerce").reindex(y.index).fillna(0.0) * amp.fillna(0.0)
+
+        scores = (y - mu).abs()
+        a_target = float(min(0.45, max(0.01, alpha)))
+        a_t = a_target
+        a_min = max(0.005, a_target / 5.0)
+        a_max = min(0.49, a_target * 3.0)
+
+        rows: List[Dict[str, Any]] = []
+        miss_hist: List[int] = []
+        idxs = list(scores.index)
+        for i in range(len(idxs)):
+            idx = idxs[i]
+            if i < max(5, calib_window):
+                continue
+            hist = pd.to_numeric(scores.iloc[max(0, i - calib_window) : i], errors="coerce").dropna()
+            yy = _safe_float(y.iloc[i], np.nan)
+            mm = _safe_float(mu.iloc[i], np.nan)
+            if len(hist) < 10 or pd.isna(yy) or pd.isna(mm):
+                continue
+            q = float(np.quantile(hist.to_numpy(dtype=float), 1.0 - float(a_t)))
+            covered = bool(abs(yy - mm) <= q)
+            miss = 0 if covered else 1
+            miss_hist.append(int(miss))
+            a_t = float(min(a_max, max(a_min, a_t + float(gamma) * (a_target - miss))))
+            local_cov = np.nan
+            if len(miss_hist) >= max(10, local_window):
+                part = miss_hist[-int(local_window) :]
+                local_cov = float(1.0 - (sum(part) / len(part)))
+            rows.append(
+                {
+                    "ts": str(idx),
+                    "alpha_t": float(a_t),
+                    "q_t": float(q),
+                    "covered": bool(covered),
+                    "local_coverage": local_cov,
+                    "target_coverage": float(1.0 - a_target),
+                }
+            )
+
+        df = pd.DataFrame(rows)
+        if len(df) == 0:
+            gate = ValidationResult(
+                "online_conformal_coverage",
+                False,
+                "adaptive conformal local coverage",
+                {"reason": "insufficient conformal samples", "rows": 0},
+            )
+            return gate, {"rows": 0}
+
+        cov_series = pd.to_numeric(df["covered"], errors="coerce").fillna(0.0)
+        global_cov = float(cov_series.mean())
+        local_series = pd.to_numeric(df["local_coverage"], errors="coerce").dropna()
+        local_cov = float(local_series.iloc[-1]) if len(local_series) else np.nan
+        target_cov = float(1.0 - a_target)
+        local_gap = abs(local_cov - target_cov) if pd.notna(local_cov) else np.inf
+        global_gap = abs(global_cov - target_cov)
+        passed = bool(local_gap <= float(coverage_tol) and global_gap <= float(max(coverage_tol, 0.08)))
+
+        gate = ValidationResult(
+            "online_conformal_coverage",
+            passed,
+            "adaptive conformal local coverage",
+            {
+                "target_coverage": target_cov,
+                "global_coverage": global_cov,
+                "local_coverage_last": (float(local_cov) if pd.notna(local_cov) else np.nan),
+                "local_gap": (float(local_gap) if math.isfinite(local_gap) else np.nan),
+                "global_gap": float(global_gap),
+                "coverage_tol": float(coverage_tol),
+                "rows": int(len(df)),
+            },
+        )
+        art = {
+            "target_coverage": target_cov,
+            "global_coverage": global_cov,
+            "local_coverage_last": (float(local_cov) if pd.notna(local_cov) else np.nan),
+            "coverage_tol": float(coverage_tol),
+            "rows": int(len(df)),
+            "series": df.tail(500).to_dict(orient="records"),
+        }
+        return gate, art
+
+
 class ValidationPipeline:
     def __init__(self, strategy_fn: Callable[..., pd.DataFrame], backtest_fn: Callable[..., BacktestResult]):
         self.strategy_fn = strategy_fn
@@ -1209,6 +2369,7 @@ class ValidationPipeline:
         self.wf = WalkForwardValidator(strategy_fn, backtest_fn)
         self.mc = MonteCarloValidator()
         self.cpcv = CPCVValidator(strategy_fn, backtest_fn)
+        self.dsrv = DeflatedSharpeValidator()
         self.paramv = StrategyParameterValidator(strategy_fn, backtest_fn)
         self.regimev = MarketRegimeValidator()
         self.inflationv = InflationValidator()
@@ -1216,6 +2377,10 @@ class ValidationPipeline:
         self.psychv = PsychologicalToleranceValidator()
         self.outlierv = OutlierConcentrationValidator()
         self.scenariov = HistoricalScenarioValidator(strategy_fn, backtest_fn)
+        self.signalq = SignalQualityValidator()
+        self.acceptv = AcceptanceStressValidator()
+        self.conformalv = OnlineConformalValidator()
+        self.powerv = StatisticalPowerMDEValidator()
 
     def run(
         self,
@@ -1231,31 +2396,96 @@ class ValidationPipeline:
         cpcv_groups: int = 8,
         cpcv_k_test: int = 2,
         cpcv_purge_bars: int = 2,
+        cpcv_embargo_bars: int = 0,
         cpcv_max_splits: int = 40,
+        cpcv_nested_inner_wf: bool = False,
+        cpcv_inner_wf_train_size: int = 252,
+        cpcv_inner_wf_test_size: int = 42,
         wf_train_size: int = 252,
         wf_test_size: int = 42,
+        objective_lambda_turnover: float = 0.0,
+        monthly_turnover_limit: float = 0.20,
+        pnl_ci_alpha: float = 0.05,
+        min_ess: float = 200.0,
+        enable_online_conformal: bool = False,
+        conformal_alpha: float = 0.10,
+        conformal_window: int = 252,
+        conformal_gamma: float = 0.02,
+        conformal_local_window: int = 63,
+        conformal_coverage_tol: float = 0.05,
+        min_dsr: float = 0.10,
+        mc_n_sim: int = 2500,
+        mc_alpha: float = 0.05,
+        mc_block_size: int = 1,
+        require_inflation_data: bool = False,
+        enable_power_prereg: bool = False,
+        economic_mde_sharpe: Optional[float] = None,
+        economic_mde_return: Optional[float] = None,
+        mde_sharpe_scale: str = "annual",
+        mde_alpha: float = 0.01,
+        mde_power: float = 0.80,
+        mde_block_size: int = 21,
+        mde_bootstrap_runs: int = 500,
+        mde_seed: int = 42,
     ) -> PipelineReport:
+        raw_market_df = market_df
+        market_df, operating_meta = _operating_market_df(raw_market_df)
+        # [2026-09-09] 운영구간 필터가 입력을 **통째로 잘라내면 조용히 넘어가지 않는다.**
+        #   _operating_market_df 는 index >= PAPER_OPER_START_YMD(기본 20260301) 만 남긴다.
+        #   그보다 오래된 시장을 넣으면 0행이 되고, 그 뒤 모든 게이트가
+        #   "insufficient_returns" 로 실패한다 - 진짜 이유(구간 밖)는 어디에도 안 보인다.
+        #   실측 2026-09-09: 프레임워크 자체 데모(make_demo_market, 2015~2017)가 이 상태였고
+        #   test_statistical_power_mde_... 가 그 때문에 실패하고 있었다. CLI main() 도 같다.
+        if int(operating_meta.get("operating_rows", 0)) == 0 and int(operating_meta.get("raw_rows", 0)) > 0:
+            raise ValueError(
+                "operating window removed every row: raw_rows=%d oper_start=%s. "
+                "Input market ends before the operating window. "
+                "Set PAPER_OPER_START_YMD or pass market data inside the window."
+                % (int(operating_meta.get("raw_rows", 0)), operating_meta.get("oper_start_ymd"))
+            )
         sig = self.strategy_fn(market_df, params)
         bt = self.backtest_fn(market_df, sig, params, cost_model)
 
         gates: List[ValidationResult] = []
         artifacts: Dict[str, Any] = {
+            "operating_window": operating_meta,
             "base_metrics": bt.metrics,
             "base_meta": bt.meta,
+            "base_series": {
+                "returns": _series_records(bt.returns, "return"),
+                "equity": _series_records(bt.equity, "equity"),
+                "trades": _trade_records(bt.trades),
+            },
         }
 
         gates.extend(self.dataq.run(market_df))
         gates.extend(self.bias.run(market_df, sig))
+        signalq_gate, signalq_art = self.signalq.run(market_df, sig, min_ess=float(min_ess))
+        gates.append(signalq_gate)
+        artifacts["signal_quality"] = signalq_art
 
         param_gate, param_art = self.paramv.run(market_df, params, param_grid, cost_model)
         gates.append(param_gate)
         artifacts["strategy_parameter_validation"] = param_art
 
-        wf_gate, wf_df = self.wf.run(market_df, {}, param_grid, cost_model, train_size=wf_train_size, test_size=wf_test_size)
+        wf_gate, wf_df = self.wf.run(
+            market_df,
+            {},
+            param_grid,
+            cost_model,
+            train_size=wf_train_size,
+            test_size=wf_test_size,
+            lambda_turnover=float(objective_lambda_turnover),
+        )
         gates.append(wf_gate)
         artifacts["walk_forward"] = wf_df.to_dict(orient="records")
 
-        mc_gate, mc_art = self.mc.run(bt)
+        mc_gate, mc_art = self.mc.run(
+            bt,
+            n_sim=max(100, int(mc_n_sim)),
+            alpha=min(0.40, max(0.001, float(mc_alpha))),
+            block_size=max(1, int(mc_block_size)),
+        )
         gates.append(mc_gate)
         artifacts["monte_carlo"] = mc_art
 
@@ -1268,7 +2498,11 @@ class ValidationPipeline:
         gates.append(scen_gate)
         artifacts["historical_scenario_response"] = scen_art
 
-        infl_gate = self.inflationv.run(bt, inflation_by_year)
+        infl_gate = self.inflationv.run(
+            bt,
+            inflation_by_year,
+            require_inflation_data=bool(require_inflation_data),
+        )
         gates.append(infl_gate)
 
         temporal_gate = self.temporalv.run(bt)
@@ -1279,6 +2513,27 @@ class ValidationPipeline:
 
         outlier_gate = self.outlierv.run(bt)
         gates.append(outlier_gate)
+        accept_gate, accept_art = self.acceptv.run(
+            bt,
+            market_df,
+            sig,
+            monthly_turnover_limit=float(monthly_turnover_limit),
+            ci_alpha=float(pnl_ci_alpha),
+        )
+        gates.append(accept_gate)
+        artifacts["acceptance"] = accept_art
+        if enable_online_conformal:
+            conformal_gate, conformal_art = self.conformalv.run(
+                market_df,
+                sig,
+                alpha=float(conformal_alpha),
+                calib_window=max(30, int(conformal_window)),
+                gamma=float(conformal_gamma),
+                local_window=max(20, int(conformal_local_window)),
+                coverage_tol=float(conformal_coverage_tol),
+            )
+            gates.append(conformal_gate)
+            artifacts["online_conformal"] = conformal_art
 
         if enable_cpcv:
             cpcv_gate, cpcv_df = self.cpcv.run(
@@ -1289,10 +2544,44 @@ class ValidationPipeline:
                 n_groups=cpcv_groups,
                 k_test=cpcv_k_test,
                 purge_bars=cpcv_purge_bars,
+                embargo_bars=cpcv_embargo_bars,
                 max_splits=cpcv_max_splits,
+                nested_inner_wf=bool(cpcv_nested_inner_wf),
+                inner_train_size=max(20, int(cpcv_inner_wf_train_size)),
+                inner_test_size=max(5, int(cpcv_inner_wf_test_size)),
+                lambda_turnover=float(objective_lambda_turnover),
+                min_ess=float(min_ess),
             )
             gates.append(cpcv_gate)
             artifacts["cpcv"] = cpcv_df.to_dict(orient="records")
+
+        _n_trials, _nt_src, _nt_brk = load_research_trial_total(max(1, len(param_grid)))
+        dsr_gate = self.dsrv.run(bt, min_dsr=max(0.0, float(min_dsr)), n_trials=_n_trials)
+        try:
+            dsr_gate.details["n_trials_source"] = _nt_src
+            dsr_gate.details["n_trials_param_grid"] = int(len(param_grid))
+            if _nt_brk:
+                dsr_gate.details["n_trials_breakdown"] = _nt_brk
+        except Exception:
+            pass
+        gates.append(dsr_gate)
+        artifacts["deflated_sharpe_ratio"] = dict(dsr_gate.details)
+
+        power_gate = self.powerv.run(
+            bt,
+            economic_mde_sharpe=economic_mde_sharpe,
+            economic_mde_return=economic_mde_return,
+            sharpe_scale=mde_sharpe_scale,
+            alpha=float(mde_alpha),
+            power=float(mde_power),
+            block_size=max(1, int(mde_block_size)),
+            n_boot=max(100, int(mde_bootstrap_runs)),
+            seed=int(mde_seed),
+        )
+        artifacts["statistical_power_mde"] = dict(power_gate.details)
+        artifacts["statistical_power_mde"]["enabled_as_gate"] = bool(enable_power_prereg)
+        if enable_power_prereg:
+            gates.append(power_gate)
 
         return PipelineReport(passed=all(g.passed for g in gates), gate_results=gates, artifacts=artifacts)
 
@@ -1310,6 +2599,7 @@ def main() -> int:
     ap.add_argument("--grid-spec-json", default="")
 
     ap.add_argument("--cost-model-json", default="")
+    ap.add_argument("--cost-profile", default="backtest", choices=["backtest", "paper", "real"])
     ap.add_argument("--fills-csv", default="")
     ap.add_argument("--fills-map-json", default="")
 
@@ -1317,17 +2607,45 @@ def main() -> int:
     ap.add_argument("--cpcv-groups", type=int, default=8)
     ap.add_argument("--cpcv-k-test", type=int, default=2)
     ap.add_argument("--cpcv-purge-bars", type=int, default=2)
+    ap.add_argument("--cpcv-embargo-bars", type=int, default=0)
     ap.add_argument("--cpcv-max-splits", type=int, default=40)
+    ap.add_argument("--cpcv-nested-inner-wf", action="store_true")
+    ap.add_argument("--cpcv-inner-wf-train-size", type=int, default=252)
+    ap.add_argument("--cpcv-inner-wf-test-size", type=int, default=42)
 
     ap.add_argument("--wf-train-size", type=int, default=504)
     ap.add_argument("--wf-test-size", type=int, default=63)
+    ap.add_argument("--objective-lambda-turnover", type=float, default=0.0)
+    ap.add_argument("--monthly-turnover-limit", type=float, default=0.20)
+    ap.add_argument("--pnl-ci-alpha", type=float, default=0.05)
+    ap.add_argument("--min-ess", type=float, default=200.0)
+    ap.add_argument("--enable-online-conformal", action="store_true")
+    ap.add_argument("--conformal-alpha", type=float, default=0.10)
+    ap.add_argument("--conformal-window", type=int, default=252)
+    ap.add_argument("--conformal-gamma", type=float, default=0.02)
+    ap.add_argument("--conformal-local-window", type=int, default=63)
+    ap.add_argument("--conformal-coverage-tol", type=float, default=0.05)
 
     ap.add_argument("--inflation-csv", default="")
     ap.add_argument("--auto-fetch-inflation", action="store_true")
     ap.add_argument("--inflation-country-code", default="KR")
+    ap.add_argument("--require-inflation-data", action="store_true")
     ap.add_argument("--scenario-market-csv", default="")
     ap.add_argument("--scenario-windows-json", default="")
     ap.add_argument("--max-tolerable-mdd", type=float, default=0.30)
+    ap.add_argument("--min-dsr", type=float, default=0.10)
+    ap.add_argument("--mc-n-sim", type=int, default=2500)
+    ap.add_argument("--mc-alpha", type=float, default=0.05)
+    ap.add_argument("--mc-block-size", type=int, default=1)
+    ap.add_argument("--enable-power-prereg", action="store_true")
+    ap.add_argument("--economic-mde-sharpe", type=float, default=None)
+    ap.add_argument("--economic-mde-return", type=float, default=None)
+    ap.add_argument("--mde-sharpe-scale", default="annual", choices=["annual", "daily"])
+    ap.add_argument("--mde-alpha", type=float, default=0.01)
+    ap.add_argument("--mde-power", type=float, default=0.80)
+    ap.add_argument("--mde-block-size", type=int, default=21)
+    ap.add_argument("--mde-bootstrap-runs", type=int, default=500)
+    ap.add_argument("--mde-seed", type=int, default=42)
 
     ap.add_argument("--out-json", default="")
     ap.add_argument("--out-csv", default="")
@@ -1341,14 +2659,10 @@ def main() -> int:
     params = _parse_json_arg(args.params_json) or {"fast": 10, "slow": 100, "allow_short": True, "position_scale": 0.7}
     grid_spec = _parse_json_arg(args.grid_spec_json) or {"fast": [8, 10, 12], "slow": [90, 100, 110], "allow_short": [True], "position_scale": [0.6, 0.7, 0.8]}
 
-    cost_model = CostModel()
+    cost_model, cost_profile_meta = _resolve_cost_model(args.cost_profile, {})
     cm_json = _parse_json_arg(args.cost_model_json)
     if cm_json:
-        cost_model = CostModel(
-            commission_bps=_safe_float(cm_json.get("commission_bps", cost_model.commission_bps), cost_model.commission_bps),
-            slippage_bps=_safe_float(cm_json.get("slippage_bps", cost_model.slippage_bps), cost_model.slippage_bps),
-            spread_bps=_safe_float(cm_json.get("spread_bps", cost_model.spread_bps), cost_model.spread_bps),
-        )
+        cost_model, cost_profile_meta = _resolve_cost_model(args.cost_profile, cm_json)
 
     if args.demo or not args.market_csv:
         market = make_demo_market()
@@ -1424,9 +2738,37 @@ def main() -> int:
         cpcv_groups=max(3, args.cpcv_groups),
         cpcv_k_test=max(1, args.cpcv_k_test),
         cpcv_purge_bars=max(0, args.cpcv_purge_bars),
+        cpcv_embargo_bars=max(0, args.cpcv_embargo_bars),
         cpcv_max_splits=max(1, args.cpcv_max_splits),
+        cpcv_nested_inner_wf=bool(args.cpcv_nested_inner_wf),
+        cpcv_inner_wf_train_size=max(20, args.cpcv_inner_wf_train_size),
+        cpcv_inner_wf_test_size=max(5, args.cpcv_inner_wf_test_size),
         wf_train_size=max(20, args.wf_train_size),
         wf_test_size=max(5, args.wf_test_size),
+        objective_lambda_turnover=max(0.0, float(args.objective_lambda_turnover)),
+        monthly_turnover_limit=max(0.0, float(args.monthly_turnover_limit)),
+        pnl_ci_alpha=min(0.2, max(0.001, float(args.pnl_ci_alpha))),
+        min_ess=max(20.0, float(args.min_ess)),
+        enable_online_conformal=bool(args.enable_online_conformal),
+        conformal_alpha=min(0.45, max(0.01, float(args.conformal_alpha))),
+        conformal_window=max(30, int(args.conformal_window)),
+        conformal_gamma=min(0.5, max(0.0, float(args.conformal_gamma))),
+        conformal_local_window=max(20, int(args.conformal_local_window)),
+        conformal_coverage_tol=min(0.30, max(0.01, float(args.conformal_coverage_tol))),
+        min_dsr=max(0.0, float(args.min_dsr)),
+        mc_n_sim=max(100, int(args.mc_n_sim)),
+        mc_alpha=min(0.40, max(0.001, float(args.mc_alpha))),
+        mc_block_size=max(1, int(args.mc_block_size)),
+        require_inflation_data=bool(args.require_inflation_data),
+        enable_power_prereg=bool(args.enable_power_prereg),
+        economic_mde_sharpe=args.economic_mde_sharpe,
+        economic_mde_return=args.economic_mde_return,
+        mde_sharpe_scale=str(args.mde_sharpe_scale),
+        mde_alpha=min(0.40, max(0.0001, float(args.mde_alpha))),
+        mde_power=min(0.999, max(0.5001, float(args.mde_power))),
+        mde_block_size=max(1, int(args.mde_block_size)),
+        mde_bootstrap_runs=max(100, int(args.mde_bootstrap_runs)),
+        mde_seed=int(args.mde_seed),
     )
 
     report.artifacts["integration"] = {
@@ -1438,12 +2780,41 @@ def main() -> int:
         "market_meta": market_meta,
         "column_map_input": column_map,
         "cost_model": asdict(cost_model),
+        "cost_profile": cost_profile_meta,
         "cost_calibration": calibration_info,
         "fills_map_input": fills_map,
         "inflation_meta": inflation_meta,
+        "require_inflation_data": bool(args.require_inflation_data),
         "scenario_market_meta": scenario_market_meta,
         "scenario_windows": scenario_windows,
         "max_tolerable_mdd": max(0.01, float(args.max_tolerable_mdd)),
+        "objective_lambda_turnover": max(0.0, float(args.objective_lambda_turnover)),
+        "monthly_turnover_limit": max(0.0, float(args.monthly_turnover_limit)),
+        "pnl_ci_alpha": min(0.2, max(0.001, float(args.pnl_ci_alpha))),
+        "min_ess": max(20.0, float(args.min_ess)),
+        "cpcv_embargo_bars": max(0, args.cpcv_embargo_bars),
+        "cpcv_nested_inner_wf": bool(args.cpcv_nested_inner_wf),
+        "cpcv_inner_wf_train_size": max(20, args.cpcv_inner_wf_train_size),
+        "cpcv_inner_wf_test_size": max(5, args.cpcv_inner_wf_test_size),
+        "enable_online_conformal": bool(args.enable_online_conformal),
+        "conformal_alpha": min(0.45, max(0.01, float(args.conformal_alpha))),
+        "conformal_window": max(30, int(args.conformal_window)),
+        "conformal_gamma": min(0.5, max(0.0, float(args.conformal_gamma))),
+        "conformal_local_window": max(20, int(args.conformal_local_window)),
+        "conformal_coverage_tol": min(0.30, max(0.01, float(args.conformal_coverage_tol))),
+        "min_dsr": max(0.0, float(args.min_dsr)),
+        "mc_n_sim": max(100, int(args.mc_n_sim)),
+        "mc_alpha": min(0.40, max(0.001, float(args.mc_alpha))),
+        "mc_block_size": max(1, int(args.mc_block_size)),
+        "enable_power_prereg": bool(args.enable_power_prereg),
+        "economic_mde_sharpe": args.economic_mde_sharpe,
+        "economic_mde_return": args.economic_mde_return,
+        "mde_sharpe_scale": str(args.mde_sharpe_scale),
+        "mde_alpha": min(0.40, max(0.0001, float(args.mde_alpha))),
+        "mde_power": min(0.999, max(0.5001, float(args.mde_power))),
+        "mde_block_size": max(1, int(args.mde_block_size)),
+        "mde_bootstrap_runs": max(100, int(args.mde_bootstrap_runs)),
+        "mde_seed": int(args.mde_seed),
     }
 
     gate_df = report_to_dataframe(report)
@@ -1456,11 +2827,11 @@ def main() -> int:
 
     pass_n = int(gate_df["passed"].fillna(False).astype(bool).sum()) if len(gate_df) else 0
     fail_n = int(len(gate_df) - pass_n)
-    print(f"[BTVAL] passed={report.passed} pass_n={pass_n} fail_n={fail_n}")
-    print(f"[BTVAL] strategy={strategy_src} backtest={backtest_src}")
-    print(f"[BTVAL] cpcv={'on' if args.enable_cpcv else 'off'} n_param_grid={len(param_grid)}")
-    print(f"[BTVAL] json={out_json}")
-    print(f"[BTVAL] csv={out_csv}")
+    _log_print(f"[BTVAL] passed={report.passed} pass_n={pass_n} fail_n={fail_n}")
+    _log_print(f"[BTVAL] strategy={strategy_src} backtest={backtest_src}")
+    _log_print(f"[BTVAL] cpcv={'on' if args.enable_cpcv else 'off'} n_param_grid={len(param_grid)}")
+    _log_print(f"[BTVAL] json={out_json}")
+    _log_print(f"[BTVAL] csv={out_csv}")
 
     return 0 if report.passed else 2
 

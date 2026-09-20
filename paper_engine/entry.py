@@ -310,6 +310,7 @@ from paper_engine.common import (
     _extract_note_field,
     _next_krx_session_ymd,
     _norm_ymd_text,
+    _business_day_gap,
     _ops_policy,
     _v411_trade_sig,
     compute_dynamic_probe_floor,
@@ -379,6 +380,17 @@ ENTRY_SIGNAL_SNAPSHOT_SCHEMA: List[str] = [
     "is_split_entry_2nd",
     "surge_type_normalized",
 ]
+
+def _env_exit_only() -> bool:
+    """PAPER_EXIT_ONLY / PAPER_NO_ENTRY 를 **강제 지점과 같은 규칙으로** 읽는다.
+
+    paper_engine.py:440 과 동일해야 한다. 다르면 산출물이 실제와 어긋난다.
+    "0" / "false" / 빈값은 꺼짐이다. bool() 로 읽으면 "0" 이 True 가 된다.
+    """
+    import os as _os
+    v = str(_os.getenv("PAPER_EXIT_ONLY", "") or _os.getenv("PAPER_NO_ENTRY", "") or "")
+    return v.strip().lower() in {"1", "true", "yes", "on"}
+
 
 def _entry_source_kind(
     *,
@@ -1423,6 +1435,56 @@ def _apply_p1_intraday_gate(
             status["actions"].append(f"intraday:lunch_cap {prev_max_new}->{int(max_new)}")
     return candidate_df, int(max_new)
 
+# [2026-09-12] 경로를 하드코딩하지 않는다. LOG_DIR 는 이미 위에서 import 돼 있다
+#   (오늘 백슬래시 손상을 네 번 겪었다 - 절대경로 문자열 자체를 줄인다)
+MARKET_ANOMALY_STATUS_PATH = LOG_DIR / "market_anomaly_detector_status_latest.json"
+
+
+def _market_event_observation_block(
+    event_doc: Dict[str, Any],
+    event_policy: Dict[str, Any],
+) -> Tuple[bool, str]:
+    """시장 이벤트를 **관측할 수 있었나**를 판정한다. 못 봤으면 진입을 막는다.
+
+    [2026-09-12] 왜 필요한가
+      탐지기는 정직하다. 볼 수 있는 지수가 하나도 없으면 게이트 파일을 건드리지 않고
+      `valid=false / action=no_observation` 만 남긴다. 그런데 소비자가 그것을 안 읽어서
+      **"이벤트 없음" 과 "관측 못 함" 이 같은 뜻**이 됐다.
+      폭락장에 WS 가 끊기는 것이 가장 그럴듯한 시나리오이고, 그때 게이트가 열린다.
+
+      차단 비용은 없다 - 사이드카·CB 발동 구간에는 어차피 매매가 이루어지지 않는다.
+
+    끄려면 `event_gate.require_market_observation=false`. 기본은 **fail-closed** 다.
+    """
+    if not bool(event_policy.get("require_market_observation", True)):
+        return False, ""
+    today = now_ymd()
+
+    # (1) 게이트 파일이 오늘 것인가
+    gate_ymd = _norm_ymd_text(event_doc.get("as_of_ymd") or event_doc.get("date") or "")
+    if gate_ymd != today:
+        return True, "gate_not_today(as_of=%s)" % (gate_ymd or "none")
+
+    # (2) 자리표시자를 정상으로 읽지 않는다
+    level = str(event_doc.get("market_event_level") or "").strip().upper()
+    if level in {"", "UNKNOWN"}:
+        return True, "level_unknown"
+
+    # (3) 탐지기가 오늘 실제로 관측했나
+    try:
+        st = json.loads(MARKET_ANOMALY_STATUS_PATH.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return True, "detector_status_unreadable(%s)" % type(exc).__name__
+    st_ymd = _norm_ymd_text(st.get("as_of_ymd") or "")
+    if st_ymd != today:
+        return True, "detector_status_not_today(as_of=%s)" % (st_ymd or "none")
+    if st.get("valid") is False or str(st.get("action") or "").strip().lower() == "no_observation":
+        return True, "no_observation(%s)" % (str(st.get("action") or "invalid")[:40])
+    if not (st.get("observed") or {}):
+        return True, "no_observed_index"
+    return False, ""
+
+
 def _apply_p1_event_gate(
     candidate_df: pd.DataFrame,
     max_new: int,
@@ -1450,6 +1512,32 @@ def _apply_p1_event_gate(
     if events_file.exists():
         try:
             event_doc = json.loads(events_file.read_text(encoding="utf-8"))
+            # [2026-09-12] **관측 불가와 이벤트 없음은 다른 말이다.**
+            #   탐지기(market_anomaly_detector.py)는 정직하다 - 볼 수 있는 지수가 하나도 없으면
+            #   "없는 이벤트를 만들지도, 있는 이벤트를 지우지도 않는다" 며 게이트를 그대로 둔다.
+            #   그런데 **소비자가 정직하지 않았다.** 여기서 파일 나이를 보지 않아서,
+            #   어제 이벤트는 as_of_ymd 불일치로 전부 걸러지고 -> 이벤트 0건 -> 통과가 됐다.
+            #   폭락장에 WS 가 끊기는 것이 가장 그럴듯한 시나리오인데 그때 게이트가 열린다.
+            #   그 구간에는 어차피 매매가 이루어지지 않으므로 차단 비용이 없다(사용자 판단).
+            _gate_block, _gate_reason = _market_event_observation_block(event_doc, event_policy)
+            if _gate_block:
+                if int(max_new) != 0:
+                    status["actions"].append("event:market_observation BLOCK(%s)" % _gate_reason)
+                max_new = 0
+                status["states"]["event_observation_block"] = str(_gate_reason)
+                _write_market_event_guard_status({
+                    "generated_at": now_ts(),
+                    "runtime_ymd": now_ymd(),
+                    "status": "BLOCK",
+                    "policy_effect": True,
+                    "trading_effect": True,
+                    "source_path": str(events_file),
+                    "market_wide": True,
+                    "blocked_codes": [],
+                    "events": [],
+                    "observation_block_reason": str(_gate_reason),
+                })
+                return candidate_df, 0
             explicit_event_guard = _detect_explicit_market_events(event_doc, candidate_df, event_policy, now_ymd())
             market_guard_payload = {
                 "generated_at": now_ts(),
@@ -1518,11 +1606,17 @@ def _apply_p1_event_gate(
         if bool(event_policy.get("auto_stub_when_missing", True)):
             try:
                 events_file.parent.mkdir(parents=True, exist_ok=True)
+                # [2026-09-12] **NORMAL 을 지어내던 자리다.**
+                #   게이트 파일이 없다는 것은 "시장이 정상" 이 아니라 "모른다" 다.
+                #   그런데 여기서 NORMAL 스텁을 만들고 아래에서 status=PASS 를 찍었다 -
+                #   위험 경로가 없는 사실을 생산한 것이다.
+                #   파일은 그대로 만든다(하류 도구가 읽는다). 다만 UNKNOWN 으로 적고 진입은 막는다.
                 stub = {
                     "generated_at": now_ts(),
                     "as_of_ymd": now_ymd(),
-                    "market_event_level": "NORMAL",
+                    "market_event_level": "UNKNOWN",
                     "source": "paper_engine_event_gate_autostub",
+                    "note": "탐지기 산출물이 없어 만든 자리표시자다. 시장이 정상이라는 뜻이 아니다.",
                 }
                 events_file.write_text(json.dumps(stub, ensure_ascii=False, indent=2), encoding="utf-8")
                 status["states"]["event_file_exists"] = True
@@ -2583,6 +2677,17 @@ def _write_p1_gate_status(
             "entry_candidates_after": int(entry_candidates_after_p1),
             "max_new_before": int(max_new_before_p1),
             "max_new_after": int(max_new_after_p1),
+            # [2026-08-24] max_new_after 는 P1 게이트 직후 값이지 최종이 아니다.
+            #   PAPER_EXIT_ONLY 가 켜져 있으면 하류에서 0 으로 잠긴다.
+            #   기존 필드는 호환을 위해 그대로 두고 정직한 값을 추가한다.
+            # [2026-09-10] bool(os.getenv(...)) 는 **"0" 도 True** 로 읽는다.
+            #   강제 지점(paper_engine.py:440)은 제대로 파싱하는데 여기만 거짓말했다.
+            #   PAPER_EXIT_ONLY=0 으로 껐을 때 산출물이 "켜져 있다" 고 적히면
+            #   다음 사람이 그 산출물을 믿는다. 같은 파싱으로 맞춘다.
+            "exit_only_mode": _env_exit_only(),
+            "max_new_final_expected": (
+                0 if _env_exit_only() else int(max_new_after_p1)
+            ),
             "market_regime": str(market_regime or ""),
             "entry_gate_decision_before_p1": str(entry_decision_code or ""),
             "entry_gate_reason_before_p1": str(entry_decision_reason or ""),
@@ -2740,6 +2845,25 @@ def _adaptive_good_stock_route_map(cfg: Dict[str, Any]) -> Dict[str, Dict[str, A
     except Exception as exc:
         print(f"[ADAPTIVE_GOOD_STOCK_ENTRY] policy_read_fail path={path} reason={type(exc).__name__}:{exc}")
         return {}
+    # [2026-09-13] **낡은 매핑을 오늘 진입에 쓰지 않는다.**
+    #   실측: 이 파일은 2026-07-15 에 한 번 쓰인 뒤 **생산자가 없다**(전수 grep 0건).
+    #   그런데 `current_candidate_mapping` 7종목이 최근 10일 후보에 **전부** 들어 있어서,
+    #   40거래일 전 품질 판정이 오늘 수량 배수와 모멘텀 차단 완화를 계속 정하고 있었다.
+    #   이름 그대로 "현재 후보" 매핑이라 며칠만 지나도 근거가 사라진다.
+    #   방향: 이 검사는 **특례 경로를 줄인다**(차단을 강화한다).
+    # `or 5` 를 쓰면 안 된다 - 0(검사 끄기)이 falsy 라 5로 덮인다.
+    #   2026-07-24 에 10건 고친 그 트랩을 여기서 또 썼다 (feedback_or_falsy_trap_pattern)
+    _max_age = int(_to_int(policy.get("policy_max_age_trading_days"), 5))
+    if _max_age > 0:
+        _gen = _norm_ymd_text(str(obj.get("generated_at") or "")[:10].replace("-", "")) if isinstance(obj, dict) else ""
+        if len(_gen) != 8:
+            print(f"[ADAPTIVE_GOOD_STOCK_ENTRY] policy_no_generated_at path={path} -> skip")
+            return {}
+        _age = _business_day_gap(_gen, now_ymd())
+        if _age is None or int(_age) > _max_age:
+            print(f"[ADAPTIVE_GOOD_STOCK_ENTRY] policy_stale generated={_gen} "
+                  f"age_trading_days={_age} max={_max_age} -> skip")
+            return {}
     rows = obj.get("current_candidate_mapping") if isinstance(obj, dict) else None
     if not isinstance(rows, list):
         return {}
@@ -3178,14 +3302,24 @@ def _resolve_initial_entry_qty(
     if is_open_order_replay and qty_override is not None and qty_override > 0:
         return {"qty": int(qty_override), "qty_override": qty_override, "reason": "REPLAY_QTY_OVERRIDE"}
 
+    # [2026-09-12] **여기가 장치 앞의 사각지대였다.** `_qty_trail` 은 2026-08-21 에 만들어졌는데
+    #   추적이 이 함수가 **끝난 뒤**부터 시작했다. 그래서 09-11 에 qty_initial=1 로 차단된
+    #   4종목의 사슬이 전부 빈 값이었다 - 붕괴는 이 함수 안에서 이미 끝나 있었다.
+    #   아래는 기록만 한다. 수량 산식은 한 글자도 바뀌지 않았다. 미결 대장 C20.
+    _trail = row.get("_qty_trail")
     spl_cfg = cfg.get("split_entry", {}) if isinstance(cfg, dict) else {}
     qty = calc_qty(entry_price, cfg, fee_pct, row_slip_pct)
+    row["_qty_raw_calc"] = int(qty)
     if not is_surge_immediate:
+        _qty_prev_cap = int(qty)
         qty = cap_basic_qty(int(qty), float(entry_price), code)
+        _track_qty(_trail, "budget_cap", _qty_prev_cap, qty)
     if spl_cfg.get("enabled") and qty > 0:
         first_ratio_key = "surge_first_ratio" if is_surge_immediate else "first_ratio"
         first_ratio = float(spl_cfg.get(first_ratio_key, spl_cfg.get("first_ratio", 0.5)))
+        _qty_prev_split = int(qty)
         qty = max(1, int(math.floor(qty * first_ratio)))
+        _track_qty(_trail, "split_first_ratio", _qty_prev_split, qty)
 
     adaptive_good_stock_mult = _adaptive_good_stock_qty_mult(cfg, str(row.get("adaptive_good_stock_route") or ""))
     if qty > 0 and 0.0 < adaptive_good_stock_mult < 1.0:
@@ -3195,6 +3329,7 @@ def _resolve_initial_entry_qty(
         row["adaptive_good_stock_post_split_qty_multiplier"] = round(float(adaptive_good_stock_mult), 6)
         row["adaptive_good_stock_qty_before"] = int(old_qty_adaptive_good_stock)
         row["adaptive_good_stock_qty_after"] = int(qty)
+        _track_qty(_trail, "adaptive_good_stock", int(old_qty_adaptive_good_stock), qty)
         print(
             f"[ADAPTIVE_GOOD_STOCK_QTY] code={code} qty={old_qty_adaptive_good_stock}->{qty} "
             f"route={row.get('adaptive_good_stock_route', '')} mult={adaptive_good_stock_mult:.3f}"
@@ -3342,7 +3477,21 @@ def _apply_normal_entry_qty_reductions(
             row["normal_intraday_momentum_qty_after"] = int(qty)
             sector_risk_note_parts.append(f"normal_intraday_momentum_qty={old_qty_mom}->{qty}")
             sector_risk_note_parts.append(str(mom_reason or ""))
-            mom_min_reason, mom_notional = _normal_reduced_min_qty_block_reason(qty, entry_price, cfg)
+            # [2026-09-12] **축소가 실제로 일어났을 때만** 최소수량 바닥을 적용한다.
+            #   위의 `qty = max(1, floor(qty * mult))` 는 qty 가 1이면 1 그대로다.
+            #   그런데도 min_reduced_qty(=2) 가 걸려 차단됐다 - 반토막 나지도 않은 주문을
+            #   "축소 후 먼지" 라고 버린 것이다. 가드의 목적을 벗어난 발동이다.
+            #   실측 2026-09-11: NORMAL 후보 6종목 중 4종목이 이 사유로 차단됐고
+            #   4종목 전부 qty_initial=1 (심텍 133,900 / 주성 221,000 / SK이노 153,100).
+            #   주가가 비싸 1주가 된 것이지 작은 주문이 아니다 - 221,000원 1주는
+            #   같은 날 체결된 컴투스 6주보다 큰 금액이다. 바닥을 **주식 수**로 재던 것이
+            #   설계와 어긋난다. 금액 바닥(min_reduced_notional_krw)은 그대로 살아 있다.
+            #   PLANS 2026-08-20 (56) 이 "차단이 이동할 수 있다 - 약 22%" 로 예고한 그 지점이다.
+            mom_min_reason, mom_notional = (
+                _normal_reduced_min_qty_block_reason(qty, entry_price, cfg)
+                if int(qty) < int(old_qty_mom)
+                else ("", float(max(0, int(qty))) * max(0.0, float(entry_price or 0.0)))
+            )
             if mom_min_reason:
                 row["normal_intraday_momentum_min_block_reason"] = mom_min_reason
                 print(
@@ -4278,6 +4427,42 @@ def _resolve_split2_target_position_gate(
     return {"blocked": True, "target_position": None, "reason": "SPLIT2ND_NO_OPEN_POSITION"}
 
 
+def _track_qty(trail: Any, stage: str, prev_qty: Any, new_qty: Any) -> None:
+    """수량 축소 사슬을 기록만 한다. 수량 자체는 바꾸지 않는다.
+
+    2026-08-21 005690 실측: 758 -> 65 -> 20 -> 10 -> 2 -> 1 로 6단계에 걸쳐 깎였는데
+    남은 기록은 체결 note 의 2단계뿐이었고, 결정 행에는 최종 qty=1 만 있었다.
+    의도한 배분 713,050원 중 실제로 들어간 것은 10,970원(1.5%)인데
+    "왜 1주인가"를 사후에 답할 수 없었다. 이 함수는 그 답을 남긴다.
+
+    축소기 각각은 독립적으로 안전하게 줄이지만 결합 결과를 계산하는 주체가 없다.
+    먼저 기록을 남기고, 재조정 여부는 표본이 쌓인 뒤에 판단한다.
+    상세: .agent/PLANS.md 2026-08-21 (8)
+    """
+    if not isinstance(trail, list):
+        return
+    try:
+        before = int(prev_qty or 0)
+        after = int(new_qty or 0)
+    except (TypeError, ValueError):
+        return
+    if before == after:
+        return
+    trail.append({"stage": str(stage or ""), "before": before, "after": after})
+
+
+def _qty_trail_text(trail: Any) -> str:
+    """축소 사슬을 CSV note 에 넣을 수 있는 한 줄로 만든다."""
+    if not isinstance(trail, list) or not trail:
+        return ""
+    parts: List[str] = []
+    for stage in trail:
+        if not isinstance(stage, dict):
+            continue
+        parts.append(f"{stage.get('stage', '')}:{stage.get('before', '')}>{stage.get('after', '')}")
+    return "|".join([x for x in parts if x])
+
+
 def _resolve_entry_take_profit_pct(
     row: Dict[str, Any],
     cfg: Dict[str, Any],
@@ -4285,7 +4470,7 @@ def _resolve_entry_take_profit_pct(
     *,
     is_surge_immediate: bool,
     has_surge_type_policy: bool,
-) -> float:
+) -> Optional[float]:
     resolved = _to_float(take_profit, None)
     if resolved is not None:
         return float(resolved)
@@ -4306,7 +4491,32 @@ def _resolve_entry_take_profit_pct(
     if resolved is not None:
         return float(resolved)
 
-    raise ValueError("take_profit_pct_missing")
+    # [2026-08-21] 스칼라 TP 가 없으면 None 이다. 예외가 아니다.
+    #
+    # 예전에는 여기서 ValueError("take_profit_pct_missing") 를 던졌고, 그 결과
+    # NORMAL 후보가 체결 커밋까지 도달할 때마다 paper_engine 전체가 rc=1 로 죽었다
+    # (2026-08-21 09:24, code=005690). SURGE 행만 surge_exit_policy.take_profit_pct
+    # 폴백으로 살아남았다.
+    #
+    # None 이 정상값인 근거:
+    #   - stable_params_v41_1.json 은 take_profit/trail_pct 를 나란히 null 로 둔다.
+    #     trail_pct=None 은 _resolve_entry_trail_pct 가 그대로 통과시킨다.
+    #   - 청산 측이 None 을 정식 계약으로 다룬다 (exit.py `tp = float(tp) if tp is not None else None`).
+    #   - 저장 계층도 Optional 이다 (positions.py `None if take_profit is None else float(...)`).
+    #   - 실제 익절은 sell_rules.take_profit(3단계 사다리)가 담당하며,
+    #     2026-07-27 SYNC 이후 optimize_params_v41_1.py 도 그 사다리를 정책 원본으로 읽는다.
+    #     스칼라 TP 는 FROZEN_KEYS 로 탐색에서 빠져 있다.
+    # 상세: .agent/PLANS.md 2026-08-21 (5)
+    return None
+
+
+def _resolve_entry_trail_pct(trail_pct: Any) -> Optional[float]:
+    if trail_pct in ("", "None", None):
+        return None
+    try:
+        return float(trail_pct)
+    except Exception:
+        return None
 
 
 def _commit_entry_fill_and_position(
@@ -4343,7 +4553,7 @@ def _commit_entry_fill_and_position(
     row_slip_pct: float,
     take_profit: float,
     stop_loss: float,
-    trail_pct: float,
+    trail_pct: Any,
     row_market_cap: Any,
     horizon_label: str,
     lineage: Dict[str, Any],
@@ -4365,6 +4575,47 @@ def _commit_entry_fill_and_position(
     surge_type_text: str,
     current_surge_notional_krw: float,
 ) -> Dict[str, Any]:
+    # [2026-08-21] 청산 파라미터는 첫 상태 변경 이전에 확정한다.
+    #
+    # 예전에는 이 해석이 함수 후반의 _build_entry_base_position 인자 자리에서 일어났다.
+    # 그래서 해석이 실패하면 체결 행 append 와 T2 현금 기록이 이미 끝난 뒤에 예외가 터졌고,
+    # paper_engine 프로세스가 rc=1 로 죽으면서 그 사이클의 청산·원장 처리까지 같이 중단됐다.
+    # 여기서 먼저 확정하면 (1) 실패해도 남는 부분 상태가 없고 (2) 그 행만 스킵된다.
+    # 상세: .agent/PLANS.md 2026-08-21 (5)
+    try:
+        resolved_take_profit = _resolve_entry_take_profit_pct(
+            row,
+            cfg,
+            take_profit,
+            is_surge_immediate=is_surge_immediate,
+            has_surge_type_policy=has_surge_type_policy,
+        )
+        resolved_trail_pct = _resolve_entry_trail_pct(trail_pct)
+        resolved_stop_loss = float(stop_loss)
+    except Exception as exc:
+        reason = f"ENTRY_EXIT_PARAM_UNRESOLVED:{type(exc).__name__}"
+        print(f"[SKIP_EXIT_PARAM_UNRESOLVED] code={code} error={type(exc).__name__}: {exc}")
+        record_decision(
+            code=code,
+            signal_date=effective_signal_date,
+            signal="HOLD",
+            reason=reason,
+            row=row,
+            is_surge=is_surge_immediate,
+            is_replay=is_open_order_replay,
+            is_carryover=is_carryover_row,
+        )
+        return {
+            "entry_ready_delta": 0,
+            "new_count_delta": 0,
+            "new_notional_delta": 0.0,
+            "surge_new_count_delta": 0,
+            "surge_notional_delta": 0.0,
+            "split_notional_delta": 0.0,
+            "open_order_replay_used_delta": 0,
+            "partial_fill_expired_delta": 0,
+        }
+
     fills_new.append(_build_entry_fill_row(
         schema=schema,
         entry_ts_value=entry_ts_value,
@@ -4433,15 +4684,9 @@ def _commit_entry_fill_and_position(
         entry_ts_value=entry_ts_value,
         row_entry_timing=row_entry_timing,
         entry_price=float(entry_price),
-        take_profit=_resolve_entry_take_profit_pct(
-            row,
-            cfg,
-            take_profit,
-            is_surge_immediate=is_surge_immediate,
-            has_surge_type_policy=has_surge_type_policy,
-        ),
-        stop_loss=float(stop_loss),
-        trail_pct=float(trail_pct),
+        take_profit=resolved_take_profit,
+        stop_loss=resolved_stop_loss,
+        trail_pct=resolved_trail_pct,
         row_slip_pct=float(row_slip_pct),
         row_market_cap=row_market_cap,
         horizon_label=horizon_label,
@@ -4991,7 +5236,18 @@ def _pick_signal_date_candidates_path(signal_date: str) -> Optional[Path]:
             candidates.append((ymd, fp))
     if not candidates:
         return None
-    return max(candidates, key=lambda x: x[0])[1]
+    _best_ymd, _best_path = max(candidates, key=lambda x: x[0])
+    if _best_ymd != sd:
+        # [2026-08-24] B6: 정확 날짜 파일이 없으면 과거 중 최신을 쓴다.
+        #   나이 상한이 없다 - 6개월 전 파일도 조용히 쓰였다. 상한을 두는 것은
+        #   매매 동작 변경이므로 여기서는 보이게만 만든다.
+        try:
+            _age = (datetime.strptime(sd, "%Y%m%d") - datetime.strptime(_best_ymd, "%Y%m%d")).days
+        except Exception:
+            _age = -1
+        print(f"[CAND_FALLBACK] exact file missing for signal_date={sd}; "
+              f"using {_best_ymd} (age_days={_age}). No age cap is enforced.")
+    return _best_path
 def _load_signal_date_top_codes_by_score(signal_date: str, top_n: int = 3) -> Tuple[Optional[set[str]], str]:
     path = _pick_signal_date_candidates_path(signal_date)
     if path is None:
@@ -5492,8 +5748,22 @@ def _is_sector_fallback_observe_only_row(row: Any) -> bool:
     # positive-entry and sector-eligibility checks below.
     return bool(origin == "SECTOR_PREFILTER_UNION" and (not natural_pass))
 def _sector_fallback_observe_only_mask(df: pd.DataFrame) -> pd.Series:
+    """매매 불가 행 마스크.
+
+    [2026-09-10] A 수리. **여기서 다시 유도하지 않는다.**
+      generate_candidates_v41_1 이 `tradable` 을 한 번 정해 내려보낸다.
+      종전에는 소비자마다 candidate_origin + natural_pass 를 재조합했고,
+      그 중 natural_pass 는 폴백 행에만 False 가 박힌 **죽은 상수**였다
+      (게이트 통과분은 keep_cols 에서 NaN 이 됐다). 우연히 결과가 맞고 있었을 뿐이다.
+
+    이행 가드: `tradable` 이 있으면 그것을 쓰되, **옛 판정과 다르면 크게 알린다.**
+      값이 같아야 정상이다. 다르면 규칙이 바뀐 것이므로 드러나야 한다.
+      옛 CSV(tradable 없음)에서도 동작하도록 종전 유도를 남겨 둔다.
+    """
     if not isinstance(df, pd.DataFrame) or df.empty:
         return pd.Series(False, index=(df.index if isinstance(df, pd.DataFrame) else None))
+
+    # 종전 유도 (기준선 / tradable 이 없을 때의 대체)
     if "candidate_origin" in df.columns:
         origin = df["candidate_origin"].astype(str).str.strip().str.upper().eq("SECTOR_PREFILTER_UNION")
     else:
@@ -5502,7 +5772,20 @@ def _sector_fallback_observe_only_mask(df: pd.DataFrame) -> pd.Series:
         natural = df["natural_pass"].map(_entry_truthy)
     else:
         natural = pd.Series(False, index=df.index)
-    return origin & (~natural)
+    legacy = origin & (~natural)
+
+    if "tradable" not in df.columns:
+        return legacy
+
+    authoritative = ~df["tradable"].map(_entry_truthy)
+    diff = int((authoritative != legacy).sum())
+    if diff:
+        print(
+            f"[ENTRY_POOL][TRADABLE_MISMATCH] 내려온 tradable 과 종전 유도가 {diff}행 다르다. "
+            f"tradable_block={int(authoritative.sum())} legacy_block={int(legacy.sum())} "
+            f"-> 규칙이 바뀌었거나 생성층 표시가 틀렸다. 확인 필요"
+        )
+    return authoritative
 def _check_positive_entry_criteria(row: pd.Series, cfg: Dict[str, Any]) -> Dict[str, Any]:
     pol = cfg.get("positive_entry_criteria", {}) if isinstance(cfg.get("positive_entry_criteria"), dict) else {}
     if not bool(pol.get("enabled", True)):
@@ -6333,6 +6616,19 @@ def _prepare_pretrade_runtime(
     if ddm_enabled and bool(ddm_cfg.get("sector_concentration_block", True)) and entry_sector_col:
         blocked_sector_value, sector_concentration = _ddm_sector_concentration(open_pos, code_to_sector, px=px)
         sector_limit = _ddm_pct01(ddm_cfg.get("sector_concentration_limit", 0.40), 0.40)
+        # [2026-08-31 O5-3] 발동 불가 설정을 매일 드러낸다. 동작은 바꾸지 않는다.
+        #   _ddm_sector_concentration 의 반환은 top_notional/total_notional 이므로 항상 0..1 이다.
+        #   따라서 limit >= 1.0 이면 `concentration > limit` 이 결코 참이 될 수 없고,
+        #   sector_concentration_block=true 여도 이 차단은 영원히 발동하지 않는다.
+        #   실측(2026-08-31): 실제 설정이 limit=1 이었다. 코드 기본값은 0.40 이다.
+        #   값을 고치는 것은 매매 동작 변경이고 근거 기록이 0이라 정책 결정이 필요하다
+        #   (docs/references/GATE_THRESHOLD_INVENTORY.md [가동] 미분류, .agent/PLANS.md (158)).
+        #   그때까지 사실만 남긴다.
+        if sector_limit >= 1.0:
+            print(
+                f"[DDM][UNFIREABLE] sector_concentration_block=true 이나 limit={sector_limit:.2f} >= 1.00 "
+                f"이므로 이 차단은 발동할 수 없다 (집중도는 정의상 0..1). 코드 기본값은 0.40"
+            )
         if blocked_sector_value and sector_concentration > sector_limit:
             block_same_sector_entry = True
             print(
@@ -7632,7 +7928,7 @@ def _build_entry_base_position(
     entry_price: float,
     take_profit: float,
     stop_loss: float,
-    trail_pct: float,
+    trail_pct: Optional[float],
     row_slip_pct: float,
     row_market_cap: Any,
     horizon_label: str,
@@ -7705,6 +8001,15 @@ def _build_entry_base_position(
         "entry_slippage_pct": float(row_slip_pct),
         "horizon_label": horizon_label,
         "horizon_max_hold_days": position_horizon_max_hold_days,
+        # [2026-08-31 O5-11] 진입 시점 점수를 **경로와 무관하게** 포지션에 싣는다.
+        #   왜: 아래 surge_score_final 은 `is_surge_immediate or has_surge_type_policy` 일 때만
+        #   실린다. 그래서 급등 경로 344건에는 점수가 남고 **일반 경로 195건에는 0건**이었다.
+        #   row(대기열)에는 final_score 가 있는데(io.py PENDING_SIGNALS_SCHEMA:202) 버려졌다.
+        #   결과: 거래 원장에 "무엇을 보고 샀는지" 가 없어 사후 분석이 전부 패널 재계산이 됐고,
+        #   calibration_stream 은 예측이 0.5 상수라 7개월간 무의미하게 돌았다(PLANS (178)(179)).
+        #   급등 필드는 건드리지 않는다. 이 값은 **추가**다.
+        "entry_final_score": _to_float(row.get("final_score"), None),
+        "entry_rank_score": _to_float(row.get("rank_score"), None),
         "_surge_immediate": 1 if is_surge_immediate else 0,
         "surge_type": position_surge_type,
         "surge_type_stop_pct": position_surge_stop_pct,
@@ -8310,6 +8615,35 @@ def _process_entry_rows(
         )
     basic_per_symbol_pct = effective_basic_alloc_pct / float(basic_target_positions)
 
+    # [2026-09-14] **예산 배분을 원장에 남긴다. 수량 산식은 한 글자도 안 바뀐다.**
+    #   09-14 에 사슬 곱 0.0066(의도의 0.7%)을 추적하다 막혔다. 첫 단계 budget_cap 이
+    #   무엇으로 계산됐는지 **어디에도 기록이 없었다** - capture 산출물 최상위 키 61개 중
+    #   budget/alloc/capital 관련이 0개다. 그래서 설정을 읽어 재현한 값(effective 0.000)과
+    #   사슬이 말하는 값(539>53 이므로 0.15)이 달랐는데 어느 쪽이 맞는지 판정할 수 없었다.
+    #   09-12 에 '장치가 붕괴 뒤에서 시작해 안 보였다'고 적었다. 같은 형태가 한 겹 더 있었다.
+    #   날짜 없는 append-only 원장으로 쓴다.
+    try:
+        _bdg_row = {
+            "ts": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+            "enabled": bool(budget_policy_enabled),
+            "capital_total": float(capital_total),
+            "basic_alloc_pct_cfg": float(basic_alloc_pct),
+            "surge_reserved": float(surge_reserved_alloc_pct),
+            "split_alloc": float(split_alloc_pct),
+            "recovery_alloc": float(recovery_alloc_pct),
+            "reserve_alloc": float(reserve_alloc_pct),
+            "common_reserved": float(common_reserved_alloc_pct),
+            "basic_remaining": float(basic_alloc_remaining_pct),
+            "effective_basic": float(effective_basic_alloc_pct),
+            "target_positions": int(basic_target_positions),
+            "per_symbol_pct": float(basic_per_symbol_pct),
+            "cap_notional": float(capital_total) * float(basic_per_symbol_pct),
+        }
+        with open(str(LOG_DIR / "budget_alloc_ledger.jsonl"), "a", encoding="utf-8") as _bdg_fh:
+            print(json.dumps(_bdg_row, ensure_ascii=False), file=_bdg_fh)
+    except Exception as _bdg_exc:                     # 계측이 매매를 막으면 안 된다
+        print("[BUDGET_LEDGER_FAIL] %s" % type(_bdg_exc).__name__)
+
     def _cap_basic_qty(qty_in: int, entry_px: float, code_val: str) -> int:
         if not budget_policy_enabled or qty_in <= 0 or entry_px <= 0 or float(capital_total) <= 0:
             return int(qty_in)
@@ -8382,6 +8716,11 @@ def _process_entry_rows(
                 "cap_fallback_reason": row.get("_cap_fallback_reason", ""),
                 "qty_before_psm": row.get("_qty_before_psm", ""),
                 "qty_after_psm": row.get("_qty_after_psm", ""),
+                "qty_initial": row.get("_qty_initial", ""),
+                "qty_trail": _qty_trail_text(row.get("_qty_trail")),
+                # [2026-09-12] 예산상한 이전의 **날 수량**. 사슬의 출발점이 없으면
+                #   "139주가 1주가 됐다" 를 사후에 말할 수 없다 (C20).
+                "qty_raw_calc": row.get("_qty_raw_calc", ""),
                 "final_qty": qty,
                 "final_decision_reason": str(reason or ""),
                 "normal_exec_quality_enabled": row.get("normal_exec_quality_enabled", ""),
@@ -9116,6 +9455,44 @@ def _process_entry_rows(
             reason = str(_open_chase_action.get("reason") or "OPEN_CHASE_BLOCK")
             chase_pct = _open_chase_guard.get("open_to_entry_chase_pct")
             max_chase_pct = float(_open_chase_guard.get("max_open_to_entry_chase_pct") or 0.0)
+            # TEMP(2026-08-20): bounded capture of open-chase guard inputs.
+            # intraday_paper_loop keeps only the last 10 stdout lines, so the
+            # diagnostic print below never survives a cycle. One file per code
+            # per day. REMOVE once the code-vs-runtime mismatch is resolved.
+            try:
+                _oc_se = cfg.get("split_entry") if isinstance(cfg, dict) else None
+                _oc_cfg_max = (_oc_se or {}).get("max_open_to_entry_chase_pct")
+                _oc_path = LOG_DIR / (
+                    "open_chase_block_capture_"
+                    + datetime.now().strftime("%Y%m%d")
+                    + f"_{str(code)}.json"
+                )
+                if not _oc_path.exists():
+                    _oc_path.write_text(
+                        json.dumps(
+                            {
+                                "generated_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+                                "code": str(code),
+                                "reason": reason,
+                                "chase_pct": None if chase_pct is None else float(chase_pct),
+                                "max_chase_pct": float(max_chase_pct),
+                                "open_price": _open_chase_guard.get("open_price"),
+                                "entry_price": float(entry_price),
+                                "guard_enabled": bool(_open_chase_action.get("enabled", False)),
+                                "is_split_2nd": bool(is_split_2nd),
+                                "is_open_order_replay": bool(is_open_order_replay),
+                                "config_max_open_to_entry_chase_pct": (
+                                    None if _oc_cfg_max is None else float(_oc_cfg_max)
+                                ),
+                                "config_split_entry_enabled": bool((_oc_se or {}).get("enabled", False)),
+                            },
+                            ensure_ascii=False,
+                            indent=2,
+                        ),
+                        encoding="utf-8",
+                    )
+            except Exception:
+                pass
             if chase_pct is None:
                 print(
                     f"[OPEN_CHASE_BLOCK] code={code} entry={entry_price:.2f} "
@@ -9567,6 +9944,10 @@ def _process_entry_rows(
         row_slip_pct = float(_entry_slippage.get("row_slip_pct", slip_pct) or slip_pct)
         sector_risk_note_parts: List[str] = list(_entry_slippage.get("sector_risk_note_parts", []) or [])
         row_sector_for_corr = ""
+        # [2026-09-12] 사슬을 **초기 산정 전에** 연다. 예전에는 이 호출 뒤에 열어서
+        #   예산상한·분할·적응 축소가 기록되지 않았다 (C20).
+        _qty_trail: List[Dict[str, Any]] = []
+        r["_qty_trail"] = _qty_trail
         _initial_entry_qty = _resolve_initial_entry_qty(
             r,
             cfg,
@@ -9581,6 +9962,7 @@ def _process_entry_rows(
         )
         qty_override = _initial_entry_qty.get("qty_override")
         qty = int(_initial_entry_qty.get("qty", 0) or 0)
+        r["_qty_initial"] = int(qty)
         if not (is_split_2nd or (is_open_order_replay and qty_override is not None and int(qty_override) > 0)):
             _entry_gap_up_reduce_qty = _apply_entry_gap_up_reduce_qty(
                 r,
@@ -9591,7 +9973,9 @@ def _process_entry_rows(
                 is_surge_immediate=is_surge_immediate,
                 is_open_order_replay=is_open_order_replay,
             )
+            _qty_prev = qty
             qty = int(_entry_gap_up_reduce_qty.get("qty", qty) or 0)
+            _track_qty(_qty_trail, "gap_up_reduce", _qty_prev, qty)
             _normal_entry_qty_reduce = _apply_normal_entry_qty_reductions(
                 r,
                 cfg,
@@ -9606,7 +9990,9 @@ def _process_entry_rows(
                 is_open_order_replay=is_open_order_replay,
                 is_split_2nd=is_split_2nd,
             )
+            _qty_prev = qty
             qty = int(_normal_entry_qty_reduce.get("qty", qty) or 0)
+            _track_qty(_qty_trail, "normal_qty_reduce", _qty_prev, qty)
             if bool(_normal_entry_qty_reduce.get("blocked", False)):
                 _record_decision(
                     code=code,
@@ -9627,7 +10013,9 @@ def _process_entry_rows(
                 position_size_multiplier=position_size_multiplier,
                 entry_decision_code=entry_decision_code,
             )
+            _qty_prev = qty
             qty = int(_entry_weight_qty.get("qty", qty) or 0)
+            _track_qty(_qty_trail, "weight_adjust", _qty_prev, qty)
             _surge_lob_exec_quality = _apply_surge_lob_exec_quality(
                 r,
                 cfg,
@@ -9672,7 +10060,9 @@ def _process_entry_rows(
                 t_enabled=t_enabled,
                 t_seasonal_mult=t_seasonal_mult,
             )
+            _qty_prev = qty
             qty = int(_entry_risk_cap_atr.get("qty", qty) or 0)
+            _track_qty(_qty_trail, "risk_cap_atr", _qty_prev, qty)
             _entry_sector_corr_hrp = _apply_entry_sector_corr_hrp(
                 r,
                 sector_corr_ctx,
@@ -9694,7 +10084,9 @@ def _process_entry_rows(
                 )
                 continue
             sector_corr_reduce_count += int(_entry_sector_corr_hrp.get("reduce_count", 0))
+            _qty_prev = qty
             qty = int(_entry_sector_corr_hrp.get("qty", qty))
+            _track_qty(_qty_trail, "sector_corr_hrp", _qty_prev, qty)
         if qty <= 0:
             if is_surge_immediate:
                 print(f"[SKIP_SURGE_QTY] code={code} entry_price={entry_price:.4f} mode={str(cfg.get('sizing_mode',''))}")
@@ -9765,7 +10157,9 @@ def _process_entry_rows(
             _qty_before_surge_budget = int(surge_budget_fit.get("old_qty", qty))
             qty_from_budget = int(surge_budget_fit.get("qty_from_budget", qty))
             target_notional = float(surge_budget_fit.get("target_notional", 0.0))
+            _qty_prev = qty
             qty = int(surge_budget_fit.get("qty", qty))
+            _track_qty(_qty_trail, "surge_budget_fit", _qty_prev, qty)
             r["_surge_qty_before_budget_cap"] = int(_qty_before_surge_budget)
             r["_surge_qty_from_budget"] = int(qty_from_budget)
             r["_surge_qty_after_budget_cap"] = int(qty)
@@ -9792,7 +10186,9 @@ def _process_entry_rows(
                 is_surge_immediate=is_surge_immediate,
             )
             sector_corr_reduce_count += int(_entry_sector_corr_hrp.get("reduce_count", 0))
+            _qty_prev = qty
             qty = int(_entry_sector_corr_hrp.get("qty", qty))
+            _track_qty(_qty_trail, "sector_corr_hrp2", _qty_prev, qty)
         _post_sector_qty_limits = _apply_entry_post_sector_qty_limits(
             r,
             cfg,
@@ -9807,7 +10203,9 @@ def _process_entry_rows(
             split_alloc_pct=split_alloc_pct,
             split_notional_krw=split_notional_krw,
         )
+        _qty_prev = qty
         qty = int(_post_sector_qty_limits.get("qty", qty) or 0)
+        _track_qty(_qty_trail, "post_sector_limits", _qty_prev, qty)
         if bool(_post_sector_qty_limits.get("blocked", False)):
             continue
 
@@ -9831,7 +10229,9 @@ def _process_entry_rows(
                 row=r, is_surge=is_surge_immediate, is_replay=is_open_order_replay, is_carryover=is_carryover_row
             )
             continue
+        _qty_prev = qty
         qty = int(_ai_min_qty_fit.get("qty", qty) or 0)
+        _track_qty(_qty_trail, "ai_cap_min_qty", _qty_prev, qty)
         entry_notional = float(_ai_min_qty_fit["entry_notional"])
         entry_cost_buffer = float(_ai_min_qty_fit["entry_cost_buffer"])
         entry_notional_for_cap = float(_ai_min_qty_fit["entry_notional_for_cap"])
@@ -9853,7 +10253,9 @@ def _process_entry_rows(
             current_open_notional=current_open_notional,
             new_notional_krw=new_notional_krw,
         )
+        _qty_prev = qty
         qty = int(_entry_cap_limits.get("qty", qty) or 0)
+        _track_qty(_qty_trail, "cap_limits", _qty_prev, qty)
         entry_notional = float(_entry_cap_limits.get("entry_notional", entry_notional))
         entry_notional_for_cap = float(_entry_cap_limits.get("entry_notional_for_cap", entry_notional_for_cap))
         cap_block_count += int(_entry_cap_limits.get("cap_block_delta", 0) or 0)
@@ -9872,7 +10274,9 @@ def _process_entry_rows(
             is_surge_immediate=is_surge_immediate,
             is_split_2nd=is_split_2nd,
         )
+        _qty_prev = qty
         qty = int(_normal_exec_quality.get("qty", qty) or 0)
+        _track_qty(_qty_trail, "normal_exec_quality", _qty_prev, qty)
         if bool(_normal_exec_quality.get("blocked", False)):
             _record_decision(
                 code=code,
@@ -9928,7 +10332,9 @@ def _process_entry_rows(
             entry_notional_for_cap=entry_notional_for_cap,
             is_open_order_replay=is_open_order_replay,
         )
+        _qty_prev = qty
         qty = int(_t2_budget_gate.get("qty", qty) or 0)
+        _track_qty(_qty_trail, "t2_budget_gate", _qty_prev, qty)
         entry_notional = float(_t2_budget_gate.get("entry_notional", entry_notional))
         entry_notional_for_cap = float(_t2_budget_gate.get("entry_notional_for_cap", entry_notional_for_cap))
         cap_block_count += int(_t2_budget_gate.get("cap_block_delta", 0) or 0)
@@ -9994,6 +10400,10 @@ def _process_entry_rows(
             is_split_2nd=is_split_2nd,
         )
         note_text = str(note_context.get("note_text", "") or "")
+        # [2026-08-21] 수량 축소 사슬을 체결 기록에 남긴다. 기록 전용이며 수량에 영향 없다.
+        _qty_trail_note = _qty_trail_text(_qty_trail)
+        if _qty_trail_note:
+            note_text = f"{note_text};qty_initial={int(r.get('_qty_initial', 0) or 0)};qty_trail={_qty_trail_note}"
         horizon_label = str(note_context.get("horizon_label", "") or "")
 
         existing_fill_gate = _handle_existing_fill_idempotent_buy(

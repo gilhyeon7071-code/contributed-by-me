@@ -3,6 +3,7 @@
 import argparse
 import datetime as dt
 import json
+import logging
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
@@ -12,6 +13,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 PAPER_DIR = ROOT / "paper"
 LOG_DIR = ROOT / "2_Logs"
+logger = logging.getLogger("kis_mode_compare_report")
 
 
 def _detect_date(args_date: str) -> Optional[str]:
@@ -55,13 +57,16 @@ def _summ(df: pd.DataFrame) -> Dict[str, object]:
 
 
 def main() -> int:
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+
     ap = argparse.ArgumentParser(description="Compare mock vs prod broker submit logs")
     ap.add_argument("--date", default="", help="YYYYMMDD")
     args = ap.parse_args()
 
     d = _detect_date(args.date)
     if not d:
-        print("[STOP] no date detected")
+        logger.error("[STOP] no date detected")
         return 2
 
     mock_csv = PAPER_DIR / f"orders_{d}_broker_submit_mock.csv"
@@ -105,8 +110,8 @@ def main() -> int:
     ]
     out_md.write_text("\n".join(md), encoding="utf-8")
 
-    print(f"[OK] json={out_json}")
-    print(f"[OK] md={out_md}")
+    logger.info("[OK] json=%s", out_json)
+    logger.info("[OK] md=%s", out_md)
     return 0
 
 

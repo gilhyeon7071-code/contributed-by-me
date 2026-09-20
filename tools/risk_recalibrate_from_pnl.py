@@ -5,6 +5,7 @@ import datetime as dt
 import json
 from pathlib import Path
 from typing import Any, Dict, Optional
+import logging
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -12,6 +13,19 @@ LOG_DIR = ROOT / "2_Logs"
 CFG_PATH = ROOT / "paper" / "paper_engine_config.json"
 
 
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
 def _latest(pattern: str) -> Optional[Path]:
     files = sorted(LOG_DIR.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
     return files[0] if files else None
@@ -28,11 +42,11 @@ def main() -> int:
 
     pnl_path = _latest("paper_pnl_summary_*.json")
     if pnl_path is None:
-        print("[STOP] no paper_pnl_summary found")
+        _log_print("[STOP] no paper_pnl_summary found")
         return 2
 
     if not CFG_PATH.exists():
-        print(f"[STOP] missing config: {CFG_PATH}")
+        _log_print(f"[STOP] missing config: {CFG_PATH}")
         return 2
 
     pnl = json.loads(pnl_path.read_text(encoding="utf-8"))
@@ -90,8 +104,8 @@ def main() -> int:
     out_json = LOG_DIR / "risk_recalibration_latest.json"
     out_json.write_text(json.dumps(suggestion, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print(f"[OK] suggestion={out_json}")
-    print(f"[OK] applied={bool(suggestion['applied'])} reason={reason}")
+    _log_print(f"[OK] suggestion={out_json}")
+    _log_print(f"[OK] applied={bool(suggestion['applied'])} reason={reason}")
     return 0
 
 

@@ -13,7 +13,9 @@ Outputs:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -24,23 +26,114 @@ import numpy as np
 import pandas as pd
 
 
-ROOT = Path(r"E:\1_Data")
+ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "tools"
 LOG_DIR = ROOT / "2_Logs"
 RISK_DIR = ROOT / "12_Risk_Controlled"
+META_LATEST = LOG_DIR / "indicator_diag_recommend_meta_latest.json"
 
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import generate_candidates_v41_1 as gen  # noqa: E402
+import logging
 
 
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
 def _now_ts() -> str:
     return pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
 
 
 def _load_json(p: Path) -> Dict:
     return json.loads(p.read_text(encoding="utf-8"))
+
+
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _stable_final_score_hash(path: Path) -> str:
+    if not path.exists():
+        return ""
+    try:
+        df = pd.read_csv(path)
+    except Exception:
+        return _sha256_file(path)
+
+    cols = [c for c in ["date", "code", "final_score", "sector_score", "news_score", "regime_score"] if c in df.columns]
+    if not cols or "code" not in cols:
+        return _sha256_file(path)
+
+    x = df[cols].copy()
+    if "code" in x.columns:
+        x["code"] = x["code"].astype(str).str.replace(".0", "", regex=False).str.strip().str.zfill(6)
+    if "date" in x.columns:
+        x["date"] = x["date"].astype(str).str.replace("-", "", regex=False).str.extract(r"(\d{8})", expand=False).fillna("")
+    for c in ["final_score", "sector_score", "news_score", "regime_score"]:
+        if c in x.columns:
+            x[c] = pd.to_numeric(x[c], errors="coerce").round(6)
+    x = x.sort_values([c for c in ["date", "code"] if c in x.columns]).reset_index(drop=True)
+    payload = x.to_csv(index=False, encoding="utf-8")
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _should_skip_run(lookback_days: int, min_universe: int, horizons: list[int]) -> bool:
+    if str(os.environ.get("INDICATOR_DIAG_FORCE", "0")).strip() == "1":
+        return False
+    src = LOG_DIR / "candidates_latest_data.with_final_score.csv"
+    latest_json = RISK_DIR / "param_candidates_v41_1_latest.json"
+    if not src.exists() or not latest_json.exists() or not META_LATEST.exists():
+        return False
+    try:
+        meta = _load_json(META_LATEST)
+    except Exception:
+        return False
+
+    today = pd.Timestamp.now().strftime("%Y%m%d")
+    if str(meta.get("as_of_ymd", "")).strip() != today:
+        return False
+    if int(meta.get("lookback_days", -1)) != int(lookback_days):
+        return False
+    if int(meta.get("min_universe", -1)) != int(min_universe):
+        return False
+    if list(meta.get("horizons", [])) != list(horizons):
+        return False
+    return True
+
+
+def _write_skip_meta(lookback_days: int, min_universe: int, horizons: list[int]) -> None:
+    src = LOG_DIR / "candidates_latest_data.with_final_score.csv"
+    if not src.exists():
+        return
+    try:
+        payload = {
+            "as_of_ymd": pd.Timestamp.now().strftime("%Y%m%d"),
+            "lookback_days": int(lookback_days),
+            "min_universe": int(min_universe),
+            "horizons": [int(x) for x in horizons],
+            "source_file": str(src),
+            "source_hash": _stable_final_score_hash(src),
+            "updated_at": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        META_LATEST.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
 
 
 def _run_diag(py_exe: str, lookback_days: int, min_universe: int, h: int) -> None:
@@ -58,13 +151,13 @@ def _run_diag(py_exe: str, lookback_days: int, min_universe: int, h: int) -> Non
         "--tag",
         tag,
     ]
-    print("[RUN]", " ".join(cmd))
+    _log_print("[RUN]", " ".join(cmd))
     cp = subprocess.run(cmd, capture_output=True, text=True)
     if cp.stdout:
-        print(cp.stdout.strip())
+        _log_print(cp.stdout.strip())
     if cp.stderr:
         # keep warnings visible, but not fatal unless return code non-zero
-        print(cp.stderr.strip())
+        _log_print(cp.stderr.strip())
     if cp.returncode != 0:
         raise RuntimeError(f"indicator_factor_diagnostic failed (h={h}, rc={cp.returncode})")
 
@@ -165,6 +258,10 @@ def main() -> int:
         if h not in (1, 2, 5):
             raise ValueError(f"unsupported horizon: {h}")
 
+    if _should_skip_run(args.lookback_days, args.min_universe, horizons):
+        _log_print("[SKIP] indicator diag unchanged input for today; keep latest artifacts")
+        return 0
+
     for h in horizons:
         _run_diag(py_exe, lookback_days=args.lookback_days, min_universe=args.min_universe, h=h)
 
@@ -241,14 +338,57 @@ def main() -> int:
     shutil.copyfile(out_path, latest_path)
 
     ROOT.joinpath("docs").mkdir(parents=True, exist_ok=True)
+    # [2026-09-10] avg_alpha_bps 를 표본 없이 찍지 않는다.
+    #   실측: h5 +846bps 의 정체가 8일 x 1종목이었고, 그중 +9883bps 한 건을 빼면
+    #   나머지 7건 평균이 -445bps 로 부호가 뒤집혔다. t=0.63 이다.
+    #   권고 로직에는 sparse 가드가 있어 결과는 안전했지만, 읽는 사람은 숫자만 본다.
+    def _hrow(h: int) -> str:
+        c = {1: h1_summary, 2: h2_summary, 5: h5_summary}[h].get("combo", {}) or {}
+        n = c.get("alpha_n")
+        t = c.get("alpha_t")
+        mx = c.get("alpha_max_abs_bps")
+        bits = [f"- h{h} avg_alpha_bps: `{sigs[f'h{h}_avg_alpha_bps']:.2f}`"]
+        if n is not None:
+            bits.append(f"(표본 {n}일 / {c.get('total_days')}일")
+            if t is not None and t == t:
+                bits.append(f", t={t:.2f}")
+            if mx is not None and mx == mx:
+                bits.append(f", 최대기여 1건 {mx:+.0f}bps")
+            bits.append(")")
+        return "".join(bits) if len(bits) > 1 else bits[0]
+
+    # [2026-09-10] 조건이 둘이다. **날 수와 하루 바스켓 폭은 다른 얘기다.**
+    #   D4 수리로 생산 단계(L6 중앙값)를 재게 되면서 선정일이 8일 -> 70여일로 늘었다.
+    #   날 수만 보면 경고가 사라지는데, 하루 1~2종목이라는 **얇음은 그대로**다.
+    #   1~2종목의 평균은 여전히 개별 종목 한 건에 끌려간다.
+    _combo = (h1_summary.get("combo", {}) or {})
+    sparse_days = _combo.get("selected_days")
+    avg_n = _combo.get("avg_selected_n")
+    warn = []
+    _few_days = isinstance(sparse_days, (int, float)) and sparse_days < 20
+    _thin = isinstance(avg_n, (int, float)) and avg_n < 3.0
+    if _few_days or _thin:
+        why = []
+        if _few_days:
+            why.append(f"선정이 있었던 날이 {int(sparse_days)}일뿐입니다")
+        if _thin:
+            why.append(f"하루 평균 선정 종목이 {float(avg_n):.2f}개입니다")
+        warn = [
+            "",
+            "> **표본이 얇습니다 — 이 알파 수치로 판단하지 마세요.** " + " / ".join(why) + ".",
+            "> 평균이 개별 종목 한두 건에 끌려갑니다. 위 각 줄의 `최대기여 1건` 을 함께 보세요.",
+            "> 아래 프로파일은 참고값이며, 권고에는 sparse 가드가 걸려 있습니다.",
+        ]
+
     md_lines = [
         f"# Param Candidates v41.1 ({ts})",
         "",
         f"- Recommended: `{recommended}`",
-        f"- h1 avg_alpha_bps: `{sigs['h1_avg_alpha_bps']:.2f}`",
-        f"- h2 avg_alpha_bps: `{sigs['h2_avg_alpha_bps']:.2f}`",
-        f"- h5 avg_alpha_bps: `{sigs['h5_avg_alpha_bps']:.2f}`",
+        _hrow(1),
+        _hrow(2),
+        _hrow(5),
         f"- h1 avg_selected_n: `{sigs['h1_avg_selected_n']:.2f}`",
+    ] + warn + [
         "",
         "## Profiles",
     ]
@@ -272,13 +412,15 @@ def main() -> int:
         f"- `{latest_path}`",
     ]
     md_path.write_text("\n".join(md_lines), encoding="utf-8")
+    _write_skip_meta(args.lookback_days, args.min_universe, horizons)
 
-    print(f"[OK] candidates={out_path}")
-    print(f"[OK] latest={latest_path}")
-    print(f"[OK] report={md_path}")
+    _log_print(f"[OK] candidates={out_path}")
+    _log_print(f"[OK] latest={latest_path}")
+    _log_print(f"[OK] report={md_path}")
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
 

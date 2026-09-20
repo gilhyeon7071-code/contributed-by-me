@@ -1,0 +1,28 @@
+{
+  "version": "1.1.0",
+  "written_at": "2026-09-18",
+  "note": "v1.0 의 결함 수정. ① 종속회사·자회사 공시는 그 상장사 주식의 강제 매매와 무관하니 제외 ② 정정 공시는 새 사건이 아니라 표시만 ③ 대량보유·임원 소유상황 보고(월 1,283건)는 강제 매매와 무관한 게 대부분이라 제외. 원본(dart_disclosures.jsonl)이 남아 있어 언제든 다시 분류할 수 있어요.",
+  "market": "Y",
+  "exclude_any": ["종속회사", "자회사"],
+  "amendment_markers": ["[기재정정]", "[첨부정정]", "[정정]"],
+  "rules": [
+    {"event_type": "BUYBACK_DIRECT", "direction": "BUY_PRESSURE",
+     "any": ["자기주식취득결정", "자기주식 취득 결정"], "none": ["신탁", "처분"]},
+    {"event_type": "BUYBACK_TRUST", "direction": "BUY_PRESSURE",
+     "any": ["자기주식취득신탁계약체결결정", "신탁계약체결"], "none": ["해지"]},
+    {"event_type": "BUYBACK_TRUST_END", "direction": "NONE",
+     "any": ["자기주식취득신탁계약해지결정", "신탁계약해지"], "none": []},
+    {"event_type": "BUYBACK_DISPOSAL", "direction": "SELL_PRESSURE",
+     "any": ["자기주식처분결정"], "none": []},
+    {"event_type": "RIGHTS_OFFERING", "direction": "SELL_PRESSURE",
+     "any": ["유상증자결정"], "none": []},
+    {"event_type": "BONUS_ISSUE", "direction": "NONE",
+     "any": ["무상증자결정"], "none": []},
+    {"event_type": "CB_BW", "direction": "SELL_PRESSURE",
+     "any": ["전환사채권발행결정", "신주인수권부사채권발행결정", "교환사채권발행결정"], "none": []},
+    {"event_type": "SPLIT_MERGE", "direction": "NONE",
+     "any": ["주식분할결정", "주식병합결정", "액면분할"], "none": []},
+    {"event_type": "DELISTING_RISK", "direction": "SELL_PRESSURE",
+     "any": ["상장폐지", "관리종목지정"], "none": []}
+  ]
+}

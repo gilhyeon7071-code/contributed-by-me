@@ -5,12 +5,26 @@ import datetime as dt
 import json
 from pathlib import Path
 from typing import Dict, List
+import logging
 
 
 ROOT = Path(__file__).resolve().parents[1]
 LOG_DIR = ROOT / "2_Logs"
 
 
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
 def _load_json(path: Path) -> Dict[str, object]:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -25,7 +39,7 @@ def main() -> int:
 
     files = sorted(LOG_DIR.glob("paper_pnl_summary_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
     if not files:
-        print("[STOP] no pnl summary files")
+        _log_print("[STOP] no pnl summary files")
         return 2
 
     cutoff = dt.datetime.now() - dt.timedelta(days=max(1, int(args.lookback_days)))
@@ -85,8 +99,8 @@ def main() -> int:
     ]
     out_md.write_text("\n".join(md), encoding="utf-8")
 
-    print(f"[OK] json={out_json}")
-    print(f"[OK] md={out_md}")
+    _log_print(f"[OK] json={out_json}")
+    _log_print(f"[OK] md={out_md}")
     return 0
 
 

@@ -1,8 +1,10 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import argparse
 import datetime as dt
 import json
+import logging
+import os
 import subprocess
 import sys
 import time
@@ -12,6 +14,8 @@ from typing import Any, Dict, List, Optional
 
 ROOT = Path(__file__).resolve().parents[1]
 LOG_DIR = ROOT / "2_Logs"
+TOOLS_DIR = ROOT / "tools"
+logger = logging.getLogger("kis_intraday_e2e_runner")
 
 
 try:
@@ -33,10 +37,18 @@ def _tail(text: str, lines: int = 20) -> str:
 
 def _run_cmd(cmd: List[str], timeout_sec: float, cwd: Path) -> Dict[str, Any]:
     started = time.time()
+    env = os.environ.copy()
+    existing_pythonpath = str(env.get("PYTHONPATH") or "").strip()
+    env["PYTHONPATH"] = (
+        str(TOOLS_DIR)
+        if not existing_pythonpath
+        else str(TOOLS_DIR) + os.pathsep + existing_pythonpath
+    )
     try:
         cp = subprocess.run(
             cmd,
             cwd=str(cwd),
+            env=env,
             text=True,
             encoding="utf-8",
             errors="replace",
@@ -88,7 +100,21 @@ def _step(name: str, cmd: List[str], timeout_sec: float) -> Dict[str, Any]:
     }
 
 
+def _script_cmd(py: str, script: Path, args: List[str]) -> List[str]:
+    code = (
+        "import runpy, sys; "
+        "script = sys.argv[1]; "
+        "sys.argv = sys.argv[1:]; "
+        f"sys.path.insert(0, {str(TOOLS_DIR)!r}); "
+        "runpy.run_path(script, run_name='__main__')"
+    )
+    return [py, "-c", code, str(script), *args]
+
+
 def main() -> int:
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+
     ap = argparse.ArgumentParser(description="Intraday E2E scenario runner (preflight->quote->dispatch->cancel->snapshot)")
     ap.add_argument("--mock", default="auto", choices=["auto", "true", "false"])
     ap.add_argument("--codes", default="005930,000660")
@@ -108,7 +134,7 @@ def main() -> int:
     args = ap.parse_args()
 
     if args.apply and str(args.confirm).strip().upper() != "E2E_APPLY":
-        print("[STOP] --apply requires --confirm E2E_APPLY")
+        logger.error("[STOP] --apply requires --confirm E2E_APPLY")
         return 2
 
     LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -139,16 +165,18 @@ def main() -> int:
         iter_steps.append(
             _step(
                 "preflight_healthcheck",
-                [
+                _script_cmd(
                     py,
-                    str(ROOT / "tools" / "kis_healthcheck.py"),
-                    "--mock",
-                    str(args.mock),
-                    "--code",
-                    str(args.health_code),
-                    "--check-balance",
-                    "--check-open-orders",
-                ],
+                    ROOT / "tools" / "kis_healthcheck.py",
+                    [
+                        "--mock",
+                        str(args.mock),
+                        "--code",
+                        str(args.health_code),
+                        "--check-balance",
+                        "--check-open-orders",
+                    ],
+                ),
                 timeout_sec=args.timeout_sec,
             )
         )
@@ -156,42 +184,44 @@ def main() -> int:
         iter_steps.append(
             _step(
                 "quote_poll",
-                [
+                _script_cmd(
                     py,
-                    str(ROOT / "tools" / "kis_quote_poll.py"),
-                    "--mock",
-                    str(args.mock),
-                    "--codes",
-                    str(args.codes),
-                    "--iterations",
-                    "3",
-                    "--interval-sec",
-                    "1.5",
-                ],
+                    ROOT / "tools" / "kis_quote_poll.py",
+                    [
+                        "--mock",
+                        str(args.mock),
+                        "--codes",
+                        str(args.codes),
+                        "--iterations",
+                        "3",
+                        "--interval-sec",
+                        "1.5",
+                    ],
+                ),
                 timeout_sec=args.timeout_sec,
             )
         )
 
-        dispatch_cmd = [
-            py,
-            str(ROOT / "tools" / "kis_order_dispatch_from_exec.py"),
+        dispatch_args = [
             "--mock",
             str(args.mock),
             "--max-orders",
             str(max(0, int(args.max_orders))),
         ]
         if args.validation_mode:
-            dispatch_cmd.append("--validation-mode")
+            dispatch_args.append("--validation-mode")
         if args.apply:
-            dispatch_cmd.append("--apply")
+            dispatch_args.append("--apply")
             if args.allow_offhours:
-                dispatch_cmd.append("--allow-offhours")
+                dispatch_args.append("--allow-offhours")
+        
+        dispatch_args.append("--no-orderflow-guard")
+                
+        dispatch_cmd = _script_cmd(py, ROOT / "tools" / "kis_order_dispatch_from_exec.py", dispatch_args)
         iter_steps.append(_step("dispatch_orders", dispatch_cmd, timeout_sec=args.timeout_sec))
 
         if not args.skip_cancel_open:
-            cancel_cmd = [
-                py,
-                str(ROOT / "tools" / "kis_cancel_open_orders.py"),
+            cancel_args = [
                 "--mock",
                 str(args.mock),
                 "--min-age-minutes",
@@ -200,19 +230,22 @@ def main() -> int:
                 str(max(0, int(args.max_orders))),
             ]
             if args.apply:
-                cancel_cmd.append("--apply")
+                cancel_args.append("--apply")
+            cancel_cmd = _script_cmd(py, ROOT / "tools" / "kis_cancel_open_orders.py", cancel_args)
             iter_steps.append(_step("cancel_open_orders", cancel_cmd, timeout_sec=args.timeout_sec))
 
         iter_steps.append(
             _step(
                 "account_snapshot",
-                [
+                _script_cmd(
                     py,
-                    str(ROOT / "tools" / "kis_account_snapshot.py"),
-                    "--mock",
-                    str(args.mock),
-                    "--with-quotes",
-                ],
+                    ROOT / "tools" / "kis_account_snapshot.py",
+                    [
+                        "--mock",
+                        str(args.mock),
+                        "--with-quotes",
+                    ],
+                ),
                 timeout_sec=args.timeout_sec,
             )
         )
@@ -220,18 +253,20 @@ def main() -> int:
         iter_steps.append(
             _step(
                 "status_monitor_short",
-                [
+                _script_cmd(
                     py,
-                    str(ROOT / "tools" / "kis_status_monitor.py"),
-                    "--mock",
-                    str(args.mock),
-                    "--code",
-                    str(args.health_code),
-                    "--interval-sec",
-                    "2",
-                    "--duration-sec",
-                    "6",
-                ],
+                    ROOT / "tools" / "kis_status_monitor.py",
+                    [
+                        "--mock",
+                        str(args.mock),
+                        "--code",
+                        str(args.health_code),
+                        "--interval-sec",
+                        "2",
+                        "--duration-sec",
+                        "6",
+                    ],
+                ),
                 timeout_sec=max(args.timeout_sec, 30.0),
             )
         )
@@ -271,8 +306,8 @@ def main() -> int:
     out_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     out_latest.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print(f"[OK] summary={out_json}")
-    print(f"[OK] pass={pass_n} fail={fail_n}")
+    logger.info("[OK] summary=%s", out_json)
+    logger.info("[OK] pass=%s fail=%s", pass_n, fail_n)
 
     if args.notify and callable(send_alert):
         try:

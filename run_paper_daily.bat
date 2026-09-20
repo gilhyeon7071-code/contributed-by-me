@@ -41,6 +41,31 @@ if not defined RUN_DAILY_STDERR_CAPTURED (
     type "!STDERR_TMP!" >> "%STDERR_LOG%"
     del /f /q "!STDERR_TMP!" >nul 2>nul
   )
+  REM ------------------------------------------------------------
+  REM Per-run log archive (PLANS 2026-08-21 (31) / 2026-08-22 (45)).
+  REM Lines :26 :27 :28 :148 truncate the four run logs on every run, so the
+  REM previous run's evidence was destroyed. That is why the 8 trading days of
+  REM 10-109s rc=0 deaths (08-11..08-20) could not be diagnosed afterwards.
+  REM Copy only. Existing log paths and behavior are unchanged.
+  REM ASCII only: cmd reads .bat using the OEM codepage; non-ASCII corrupts parsing.
+  REM ------------------------------------------------------------
+  set "RUN_ARCHIVE_DIR=%ROOT%2_Logs\run_paper_daily_archive"
+  if not exist "!RUN_ARCHIVE_DIR!" mkdir "!RUN_ARCHIVE_DIR!" >nul 2>nul
+  set "RUN_ARCHIVE_TS="
+  for /f "usebackq delims=" %%T in (`powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"`) do set "RUN_ARCHIVE_TS=%%T"
+  if not "!RUN_ARCHIVE_TS!"=="" (
+    set "RUN_ARCHIVE_BASE=!RUN_ARCHIVE_DIR!\run_paper_daily_!RUN_ARCHIVE_TS!_rc!WRAP_RC!"
+    if exist "%ROOT%2_Logs\run_paper_daily_last.txt" copy /y "%ROOT%2_Logs\run_paper_daily_last.txt" "!RUN_ARCHIVE_BASE!.step.txt" >nul 2>nul
+    if exist "%STDOUT_LOG%" copy /y "%STDOUT_LOG%" "!RUN_ARCHIVE_BASE!.stdout.txt" >nul 2>nul
+    if exist "%STDERR_LOG%" copy /y "%STDERR_LOG%" "!RUN_ARCHIVE_BASE!.stderr.txt" >nul 2>nul
+    if exist "%ROOT%2_Logs\run_paper_daily_wrapper_status.txt" copy /y "%ROOT%2_Logs\run_paper_daily_wrapper_status.txt" "!RUN_ARCHIVE_BASE!.wrapper.txt" >nul 2>nul
+  )
+  REM Prune only files this feature created. Never touches pre-existing artifacts.
+  REM [2026-09-10] %VAR% 는 이 괄호 블록의 파싱 시점에 전개된다. 아래 set 이 듣기 전이라
+  REM   PowerShell 이 `Select-Object -Skip <빈값>` 을 받아 **stdin 으로 값을 물으며 멈춘다**.
+  REM   2026-09-10 배치가 09:12~09:30 동안 여기서 대기했다. 아래 호출은 !VAR! 로 바꿨다.
+  if "!RUN_DAILY_ARCHIVE_KEEP_FILES!"=="" set "RUN_DAILY_ARCHIVE_KEEP_FILES=400"
+  powershell -NoProfile -Command "$d='%ROOT%2_Logs\run_paper_daily_archive'; if (Test-Path $d) { Get-ChildItem -Path $d -Filter 'run_paper_daily_*' -File | Sort-Object Name -Descending | Select-Object -Skip !RUN_DAILY_ARCHIVE_KEEP_FILES! | Remove-Item -Force -ErrorAction SilentlyContinue }" >nul 2>nul
   if exist "%ROOT%2_Logs\run_paper_daily.lock" (
     if exist "%ROOT%2_Logs\run_paper_daily_last.txt" >> "%ROOT%2_Logs\run_paper_daily_last.txt" echo [WRAPPER_CLEANUP_SKIP] lock cleanup delegated to pid-aware stale check rc=!WRAP_RC!
   )
@@ -80,6 +105,27 @@ if "%SURGE_RT_PAPER_LIMIT_NEAR_IGNORE_ENTRY_CAPS%"=="" set "SURGE_RT_PAPER_LIMIT
 if "%SURGE_RT_PAPER_HIGH_REJECTION_ENTRY_BLOCK_PCT%"=="" set "SURGE_RT_PAPER_HIGH_REJECTION_ENTRY_BLOCK_PCT=0.025"
 if "%SURGE_RT_PAPER_ALLOW_KRX_CAUTION%"=="" set "SURGE_RT_PAPER_ALLOW_KRX_CAUTION=1"
 if "%POST_CHAIN_FAIL_SOFT%"=="" set "POST_CHAIN_FAIL_SOFT=0"
+REM [2026-08-24] v41.1 new-entry stop. Step [7/9] paper_engine takes this path too.
+REM   Basis: entry condition negative in 11.6y / all 12 years (.agent/PLANS.md 2026-08-24 (77)(84)).
+REM   PAPER_EXIT_ONLY is the official switch at paper_engine.py:440/448/1255/1388;
+REM   it blocks new entries only. Exit / stop-loss / trailing keep running as before.
+REM   To revert, delete the single line below.
+REM [2026-09-10] 위 2026-08-24 잠금을 **한시 해제**한다. 사용자 승인.
+REM   목적: **배관이 후보를 진입까지 나르는가.** v41.1 로 돈을 버는가가 아니다.
+REM         2026-09-10 되돌리기로 후보가 1 -> 13건(전부 게이트 통과)이 됐는데,
+REM         스위치가 켜져 있으면 13건이 전부 max_new=0 에서 멈춰 시험이 성립하지 않는다.
+REM   판정: 진입 >=1 -> 배관 확인. 그 시점에 스위치를 어떻게 할지 **다시 결정**한다.
+REM         3~5거래일 연속 0 + 사유가 정책이 아닌 결함 -> 배관 결함, 수리 대상.
+REM   경계: 2026-08-24 결정(진입 조건 11.6년 음수)을 **뒤집는 것이 아니다.**
+REM         그것은 신호에 대한 판단이고 이것은 배관에 대한 질문이다.
+REM         실주문은 나가지 않는다 - BROKER_MODE 기본값 DRY, LOOP_DISPATCH_APPLY=0.
+REM         대가는 돈이 아니라 **페이퍼 손익**이며, 엣지 없는 신호이므로 나빠지는 것이 정상이다.
+REM   되돌리려면 위 줄의 0 을 1 로 바꾼다.
+REM   **run_intraday_paper.bat 은 아직 1 이다** (2026-09-10 편집 시점에 실행 중이라 미변경).
+REM [2026-09-19] 사용자 승인: v41.1 을 **청산 전용**으로. 새 로직(분기 시총 V2)과 같은 모의계좌를
+REM   쓰는데(모의계좌는 ID 당 1개) 둘이 같이 사면 매수 가능 금액을 서로 잡아먹는다.
+REM   topn 라운드 때 실제로 겪었다. 10-01 첫 재구성 전에 진입만 막는다. 되돌리려면 0 으로.
+if "%PAPER_EXIT_ONLY%"=="" set "PAPER_EXIT_ONLY=1"
 set "POST_CHAIN_FAILED=0"
 set "POST_CHAIN_FAILED_STEP="
 set "LAST_STEP_LABEL=[BOOT] init"
@@ -377,7 +423,7 @@ if "%CANDIDATES_REFRESHED%"=="1" (
     call :LOG_MSG "[6.4/9] skip liquidity_filter_daily.py (candidate universe unchanged)"
   )
 ) else (
-  call :LOG_MSG "[6.26/9] candidates unchanged -> skip post-candidates refresh steps"
+  call :LOG_MSG "[6.26/9] candidates unchanged  to  skip post-candidates refresh steps"
 )
 
 call :LOG_STEP_BEGIN "[6.262/9] tools\\build_candidate_bridge_shadow_ledger.py"
@@ -466,6 +512,9 @@ if errorlevel 1 (
   )
 )
 
+REM [2026-09-10] LAST_STEP_LABEL 이 여기서 갱신되지 않아 실패 시
+REM   "[6.47/9] build_production_risk_playbook"(이미 성공한 다른 도구)로 오보됐다.
+set "LAST_STEP_LABEL=[6.52/9] tools\build_candidate_price_history.py"
 echo [6.52/9] tools\build_candidate_price_history.py
 "%PY%" tools\build_candidate_price_history.py --lookback 60
 if errorlevel 1 (
@@ -482,9 +531,9 @@ REM [6.55-6.7/9] unified news pipeline (collect -> score -> final)
 REM ------------------------------------------------------------
 echo [6.55-6.7/9] run_news_pipeline_once.bat
 if "%NAVER_CLIENT_ID%"=="" (
-  echo [INFO] NAVER_CLIENT_ID missing -> collector will skip fail-soft
+  echo [INFO] NAVER_CLIENT_ID missing  to  collector will skip fail-soft
 ) else (
-  echo [INFO] NAVER_CLIENT_ID detected -> collector enabled
+  echo [INFO] NAVER_CLIENT_ID detected  to  collector enabled
 )
 if "%NEWS_PIPELINE_PROFILE%"=="" set "NEWS_PIPELINE_PROFILE=POST_CLOSE_FULL"
 if /I "%NEWS_PIPELINE_PROFILE%"=="INTRADAY_LIGHT" (
@@ -561,19 +610,15 @@ set "RC=%ERRORLEVEL%"
 call :LOG_STEP_END "[6.95d/9]" %RC%
 if not "%RC%"=="0" goto :FAILED
 
-call :LOG_STEP_BEGIN "[6.96/9] run_backtest_validation_real.bat"
-set "BT_SCREEN_OPEN=0"
-call :RUN_BATCH_ISOLATED "%ROOT%run_backtest_validation_real.bat"
-set "RC=%ERRORLEVEL%"
-set "BT_SCREEN_OPEN="
-call :LOG_STEP_END "[6.96/9]" %RC%
-if "%RC%"=="0" goto :BTVAL_OK
-if "%RC%"=="2" (
-  echo [WARN] backtest validation refreshed with NO_GO result (rc=2)
-  goto :BTVAL_OK
-)
-goto :FAILED
-:BTVAL_OK
+REM [2026-09-11] **[6.96/9] 백테스트 검증을 [7/9] 진입 뒤로 옮겼다.**
+REM   측정: 이 스텝이 08:58~10:22(84분) 락을 잡아 장중 루프가 94사이클을 건너뛰었고
+REM         (09:01:16~10:36:36), 그 안에 intraday_morning_window 0900-1000 이 통째로 들어간다.
+REM   의존성: paper_engine/guards.py:85 가 읽는 것은 backtest_validation_latest.json 이고
+REM         backtest_validation_guard = {stale_max_age_days:3, caution_affects_entry:false} 다.
+REM         뒤로 가면 엔진은 전일자(약 1일)를 읽는데 3일 허용 안이라 CAUTION 도 안 뜬다.
+REM   후반 40분(09:42~10:17)이 만드는 _full_market_latest.json 은 소비자가
+REM         build_backtest_acceptance_failure_diagnostic.py 하나뿐이라 진입 경로와 무관하다.
+REM   -> 이동 지점은 아래 [7/9] paper_engine main END 직후. PLANS (357)
 
 call :LOG_STEP_BEGIN "[6.966/9] tools\\news_candidates_daily.py"
 "%PY%" tools\news_candidates_daily.py
@@ -597,6 +642,19 @@ if "%FUND_DART_REFRESH%"=="1" (
 )
 
 if "%FINAL_SCORE_MERGE_TIMEOUT_SEC%"=="" set "FINAL_SCORE_MERGE_TIMEOUT_SEC=180"
+REM [2026-08-31] news pipeline OFF. Decision recorded in .agent\PLANS.md (148).
+REM   Evidence: news_score vs final_score corr -0.639 (PLANS 17);
+REM   52%% of candidates are a structural partition that can never enter
+REM   (w_news cap 0.125 < tech floor 0.367); effective axis weight 0.0 at
+REM   final_score_merge_daily.py:2309-2313; wiki theses 100%% blocked;
+REM   5 news tasks failing rc=1. Ten days unresolved (backlog: 'keep or kill').
+REM   NEWS_ONLY rows are appended at final_score_merge_daily.py:1642-1644 where
+REM   append = (collect_mode==accumulate) OR switch. Both are turned off:
+REM   state\news_collect_mode.txt -> production, and the switch below.
+REM   Reversible: delete the set line and restore the mode file to accumulate.
+REM   collect_mode 를 기본값에 맡기면 accumulate 로 나오는 것을 실측했다. 명시한다.
+set "NEWS_COLLECT_MODE=production"
+set "NEWS_CANDIDATES_APPEND_NEWS_ONLY=0"
 call :LOG_STEP_BEGIN "[6.967/9] tools\\final_score_merge_daily.py"
 "%PY%" tools\run_step_with_timeout.py --name final_score_merge_daily --timeout-sec %FINAL_SCORE_MERGE_TIMEOUT_SEC% --status-json 2_Logs\final_score_merge_timeout_status_latest.json -- "%PY%" tools\final_score_merge_daily.py
 set "RC=%ERRORLEVEL%"
@@ -800,12 +858,63 @@ if errorlevel 1 (
   call :LOG_MSG "[6.997e/9] defense_signal_entry_policy_validation pre-engine END rc=0"
 )
 
+REM ------------------------------------------------------------
+REM [6.999/9] [2026-09-11] 진입 전 **검증 산출물 신선도** 검사.
+REM   (358) 에서 [6.96/9] 를 진입 뒤로 옮기면서, 검증 도구가 인프라 실패(rc 60~67:
+REM   파이썬 없음 / 산출물 없음 / 산출물 stale)로 죽었을 때 진입을 막던 2차 차단이 사라졌다.
+REM   전략 실패(rc=2 NO_GO)는 원래도 통과시키는 설계이므로 여기서 보는 것은 인프라뿐이다.
+REM   엔진 내부 가드는 stale_max_age_days=3 이지만 caution_affects_entry=false 라
+REM   낡은 산출물을 막지 않는다. 그 구멍을 같은 임계값(3일)으로 메운다.
+REM   84분을 되돌리지 않고 의도만 복원한다 - 파일 나이 검사라 비용이 없다.
+echo [6.999/9] backtest_validation freshness precheck
+call :LOG_MSG "[6.999/9] btval_freshness_precheck START"
+"%PY%" tools\precheck_btval_freshness.py --max-age-days 3 >> "%LAST_LOG%" 2>&1
+set "RC=%ERRORLEVEL%"
+if not "%RC%"=="0" (
+  call :LOG_MSG "[6.999/9] btval_freshness_precheck END rc=%RC% **BLOCK**"
+  echo [ERR] backtest_validation_latest.json missing or older than 3 days ^(rc=%RC%^) - entry blocked
+  goto :FAILED
+)
+call :LOG_MSG "[6.999/9] btval_freshness_precheck END rc=0"
+
 set "LAST_STEP_LABEL=[7/9] paper_engine.py main"
 echo [7/9] paper_engine.py (main)
 call :LOG_MSG "[7/9] paper_engine main START run_label=main"
 "%PY%" paper_engine.py >> "%LAST_LOG%" 2>&1
 if errorlevel 1 goto :FAILED
 call :LOG_MSG "[7/9] paper_engine main END rc=0 run_label=main"
+
+REM ---- [2026-09-11] 여기로 옮겨온 블록. 원위치는 [6.95d/9] 뒤였다 ----
+REM [2026-09-12] **저녁 실행에서만 돈다.** (358) 은 순서만 바꿨지 창을 비우지 못했다.
+REM   실측: 09-11 이 스텝이 84분(5,030s) 걸려 배치가 개장 후 118분을 점유했고
+REM         장중 루프가 94사이클(09:01~10:36) 막혔다. 그동안 발주 스텝이 안 돈다
+REM         (intraday_paper_loop.py:2705 - 발주는 루프 Step 4 에 있다).
+REM   이 파일은 같은 내용이 하루 두 번 돈다:
+REM         08:30 STOC_FullAuto -> full_auto.bat -> run_daily_auto_sync.ps1:255
+REM         21:30 VIBE_Paper_Daily -> run_paper_daily_hidden.vbs
+REM   그래서 "저녁으로 옮긴다" = 아침 실행에서 건너뛴다 이다.
+REM   진입 가드는 전일자 산출물을 읽어도 된다(stale_max_age_days=3, PLANS 358).
+REM   근거: PLANS (357)(358)(368)
+"%PY%" tools\is_evening_pass.py >> "%LAST_LOG%" 2>&1
+if errorlevel 1 (
+  echo [6.96/9] SKIP morning pass - runs in the evening pass only
+  call :LOG_MSG "[6.96/9] SKIP morning_pass"
+  goto :BTVAL_OK
+)
+call :LOG_STEP_BEGIN "[6.96/9] run_backtest_validation_real.bat"
+set "BT_SCREEN_OPEN=0"
+call :RUN_BATCH_ISOLATED "%ROOT%run_backtest_validation_real.bat"
+set "RC=%ERRORLEVEL%"
+set "BT_SCREEN_OPEN="
+call :LOG_STEP_END "[6.96/9]" %RC%
+if "%RC%"=="0" goto :BTVAL_OK
+if "%RC%"=="2" (
+  echo [WARN] backtest validation refreshed with NO_GO result (rc=2)
+  goto :BTVAL_OK
+)
+goto :FAILED
+:BTVAL_OK
+
 echo [7.00/9] tools\build_intraday_residual_overnight_risk_audit.py
 call :LOG_MSG "[7.00/9] intraday_residual_overnight_risk_audit START"
 "%PY%" tools\build_intraday_residual_overnight_risk_audit.py >> "%LAST_LOG%" 2>&1
@@ -1098,7 +1207,15 @@ if errorlevel 1 (
 
 :RUN_DAILY_AFTER_ADVISORY_DIAGNOSTICS
 REM [7.1/9] optional shadow collect (main path isolated)
-if "%PAPER_SHADOW_ENABLED%"=="" set "PAPER_SHADOW_ENABLED=1"
+REM [7.1/9] shadow_collect retired 2026-08-20.
+REM   Lane ran a second paper_engine with 16 path overrides and 5 config overrides.
+REM   Last shadow fill 20260721; last shadow BUY 20260715 - one month with zero fills,
+REM   undetected because its status files kept refreshing daily.
+REM   Artifacts frozen under backup\20260820_shadow_collect_retire\ (see README there).
+REM   Reason it stopped is NOT known. Re-enable with PAPER_SHADOW_ENABLED=1.
+REM   Review by 2026-11-20: remove the block entirely if still unused.
+REM   Record: .agent\PLANS.md 2026-08-20
+if "%PAPER_SHADOW_ENABLED%"=="" set "PAPER_SHADOW_ENABLED=0"
 if "%PAPER_SHADOW_MAX_NEW%"=="" set "PAPER_SHADOW_MAX_NEW=6"
 if "%PAPER_SHADOW_GAP_UP_MAX_PCT%"=="" set "PAPER_SHADOW_GAP_UP_MAX_PCT=0.07"
 if "%PAPER_SHADOW_GAP_DOWN_STOP_PCT%"=="" set "PAPER_SHADOW_GAP_DOWN_STOP_PCT=0.05"
@@ -1212,7 +1329,7 @@ if /I "%PAPER_EXEC_DATE_MODE%"=="FILLS" (
 )
 set "VIBE_EXEC_MODE=A"
 set "LAST_STEP_LABEL=[10/14] derive D"
-echo [10/14] derive D mode=%PAPER_EXEC_DATE_MODE% today=%D_TODAY% fills=%D_FILLS% -> D=%D%
+echo [10/14] derive D mode=%PAPER_EXEC_DATE_MODE% today=%D_TODAY% fills=%D_FILLS%  to  D=%D%
 
 REM ------------------------------------------------------------
 REM [11/14] onepass + ledger append (A-mode)
@@ -1280,6 +1397,21 @@ REM [12.5/14] optional broker dispatch/sync (default OFF)
 REM BROKER_MODE: OFF | DRY | APPLY | APPLY_SYNC
 REM ------------------------------------------------------------
 if "%BROKER_MODE%"=="" set "BROKER_MODE=DRY"
+
+REM [2026-09-10] 파라미터 되돌리기(value_min 1550억->10억, v_accel_lim 6.6->2.5) 후
+REM   후보가 하루 1개에서 **9개**로 늘었다(83거래일 실측, 전 거래일 L0).
+REM   지금 발주가 안 나가는 것은 BROKER_MODE 기본값이 DRY 이기 때문이다.
+REM   APPLY 를 켜면 늘어난 후보로 실제 주문이 나가고, 그 계좌는
+REM   topn 1단계 라운드(판정 2026-10-29)와 **같은 계좌**다.
+REM   막지는 않는다. **모르고 켜는 것**만 막는다.
+if /I "%BROKER_MODE%"=="APPLY" (
+  echo [WARN][PARAM_REVERT] BROKER_MODE=APPLY 입니다. 2026-09-10 되돌리기로 후보가 약 9배입니다.
+  echo [WARN][PARAM_REVERT]   topn 1단계 라운드와 계좌를 공유합니다. 매수 여력/슬롯 잠식 주의.
+  echo [WARN][PARAM_REVERT]   근거: E:\1_Data\.agent\PLANS.md ^(336^)^(337^)
+)
+if /I "%BROKER_MODE%"=="APPLY_SYNC" (
+  echo [WARN][PARAM_REVERT] BROKER_MODE=APPLY_SYNC 입니다. 위 경고와 동일합니다.
+)
 if "%BROKER_VALIDATION_MODE%"=="" set "BROKER_VALIDATION_MODE=0"
 if "%BROKER_BLOCK_PREFIXES%"=="" set "BROKER_BLOCK_PREFIXES=CAP_"
 if "%BROKER_MIN_LIVE_ORDERS%"=="" set "BROKER_MIN_LIVE_ORDERS=3"
@@ -1370,7 +1502,7 @@ if /I "%BROKER_MODE%"=="OFF" (
         echo [FAILED] BROKER_MODE=APPLY requires BROKER_CONFIRM=LIVE_APPLY
         goto :FAILED
       )
-      "%PY%" tools\kis_order_dispatch_from_exec.py --date %BROKER_D% --mock %BROKER_MOCK% --order-type %BROKER_ORDER_TYPE% %BROKER_VALID_ARGS% --apply
+      "%PY%" tools\kis_order_dispatch_from_exec.py --date %BROKER_D% --mock %BROKER_MOCK% --order-type %BROKER_ORDER_TYPE% %BROKER_VALID_ARGS% --apply --confirm-live %BROKER_CONFIRM%
       if errorlevel 1 goto :FAILED
       if "%BROKER_CANCEL_OPEN%"=="1" (
         "%PY%" tools\kis_cancel_open_orders.py %BROKER_CANCEL_ARGS% --apply
@@ -1402,7 +1534,7 @@ if /I "%BROKER_MODE%"=="OFF" (
           echo [FAILED] BROKER_MODE=APPLY_SYNC requires BROKER_CONFIRM=LIVE_APPLY
           goto :FAILED
         )
-        "%PY%" tools\kis_order_dispatch_from_exec.py --date %BROKER_D% --mock %BROKER_MOCK% --order-type %BROKER_ORDER_TYPE% %BROKER_VALID_ARGS% --apply
+        "%PY%" tools\kis_order_dispatch_from_exec.py --date %BROKER_D% --mock %BROKER_MOCK% --order-type %BROKER_ORDER_TYPE% %BROKER_VALID_ARGS% --apply --confirm-live %BROKER_CONFIRM%
         if errorlevel 1 goto :FAILED
         if "%BROKER_CANCEL_OPEN%"=="1" (
           "%PY%" tools\kis_cancel_open_orders.py %BROKER_CANCEL_ARGS% --apply
@@ -1469,6 +1601,27 @@ if errorlevel 1 (
 )
 
 REM ------------------------------------------------------------
+REM [13.1/14] KIS open-orders snapshot (READ-ONLY, tr_id VTTC0081R)
+REM   Why here: 2_Logs\kis_open_orders_latest.json had NO producer wired
+REM   anywhere. It went stale and the UI kept asserting "no open orders",
+REM   which is a claim about the snapshot date, not about today.
+REM   artifact_freshness_guard already flags it (limit = 1 trading day);
+REM   what was missing is something that actually refreshes it.
+REM   Read-only: no_order_effect=true, execution_allowed=false.
+REM   Non-fatal on purpose - a KIS hiccup must not fail the daily chain.
+REM   Rationale: PLANS (207) item 3, (378). Open items D6.
+REM ------------------------------------------------------------
+echo [13.1/14] kis_open_orders_snapshot.py (read-only)
+set "LAST_STEP_LABEL=[13.1/14] kis_open_orders_snapshot.py"
+REM BROKER_MOCK may be unset on paths that skip the broker block - default it
+set "OO_MOCK=%BROKER_MOCK%"
+if "%OO_MOCK%"=="" set "OO_MOCK=auto"
+"%PY%" tools\kis_open_orders_snapshot.py --mock %OO_MOCK%
+if errorlevel 1 (
+  call :POST_CHAIN_STEP_FAIL "[13.1/14] kis_open_orders_snapshot.py"
+)
+
+REM ------------------------------------------------------------
 REM [13.5/16] policy effect tracking report (fail-soft)
 REM ------------------------------------------------------------
 echo [13.5/16] tools\build_policy_effect_tracking_report.py
@@ -1504,14 +1657,51 @@ if errorlevel 1 (
   echo [WARN] live_vs_bt_paper_daily failed - continuing
 )
 
+REM [2026-09-10] HPO 자동 발동을 다중검정 원장에 반영한다.
+REM   발동 1회 = HPO 라운드 1회 = 다중검정 시도 1건이다.
+REM   안 세면 DSR 의 n_trials 가 거짓이 되고 나중에 찾은 것의 유의성이 부풀려진다
+REM   (n_trials 가 4 였던 2026-08-30 결함과 같은 자리).
+REM   멱등이다. 이미 반영한 발동은 ref 로 걸러 다시 더하지 않는다.
+REM   **위 errorlevel 블록 뒤에 둔다** - 사이에 끼우면 live_vs_bt 의 실패 검사가 깨진다.
+"%PY%" tools\sync_firings_to_trial_ledger.py --apply
+if errorlevel 1 (
+  echo [WARN] sync_firings_to_trial_ledger failed - continuing
+)
+
+REM [2026-09-10] 그날의 결정 상태를 한 줄로 요약해 원장에 쌓는다.
+REM   log_cleanup_30d 가 날짜 붙은 산출물을 30일 뒤 지워서 조사가 두 번 막혔다
+REM   (발동 횟수 / 손상 구간의 유동성 필터). 무차별 보존은 답이 아니라
+REM   **하루 한 줄**로 줄여 날짜 없는 원장에 남긴다. 1년 250줄.
+"%PY%" tools\append_daily_decision_ledger.py
+if errorlevel 1 (
+  echo [WARN] append_daily_decision_ledger failed - continuing
+)
+
+REM [2026-09-10] 그 실행에서 **실제로 적용된 비용 프로파일**을 원장에 남긴다.
+REM   trades.csv 는 비용 분해가 없고 trades_calc.csv 는 오늘 설정으로 전체를
+REM   재계산한 것이라, 어느 파일도 '그때 얼마 들었나' 를 말하지 않았다.
+REM   그래서 C7(왕복 1.400~2.204% 청구)이 몇 주간 보이지 않았다.
+REM   설정이 말하는 값과 엔진 실효값을 **둘 다** 적어 갈리면 diverged=true 로 남는다.
+set "LAST_STEP_LABEL=[15.45/16] tools\append_cost_profile_ledger.py"
+"%PY%" tools\append_cost_profile_ledger.py --note "run_paper_daily"
+if errorlevel 1 (
+  echo [WARN] append_cost_profile_ledger failed - continuing
+)
+
 REM ------------------------------------------------------------
 REM [15.5/16] indicator diag + param recommendation (fail-soft)
 REM ------------------------------------------------------------
 if "%INDICATOR_DIAG_AUTO%"=="" set "INDICATOR_DIAG_AUTO=1"
 echo [INDICATOR_DIAG] auto=%INDICATOR_DIAG_AUTO%
+REM [2026-09-10] indicator diag 타임아웃 300 -> 1200 (INDICATOR_DIAG_TIMEOUT_SEC 로 조절).
+REM   근거: 2026-07-21 에는 세 지평(h1/h2/h5)이 08:57~09:00, 약 3분에 끝났다.
+REM   2026-09-10 에는 h1 하나가 300초를 넘겨 매 배치에서 죽는다(산출물이 07-21 이후 없다).
+REM   일이 커진 것이고 결함이 아니다. 다만 300 은 증명된 과소 예산이다.
+REM   1200 은 측정값이 아니라 상한이다. 실제 비용은 장 마감 후 재야 한다.
+if "%INDICATOR_DIAG_TIMEOUT_SEC%"=="" set "INDICATOR_DIAG_TIMEOUT_SEC=1200"
 if "%INDICATOR_DIAG_AUTO%"=="1" (
   echo [15.5/16] tools\indicator_diag_and_recommend.py
-  "%PY%" tools\run_step_with_timeout.py --name indicator_diag_and_recommend --timeout-sec 300 --status-json 2_Logs\indicator_diag_timeout_status_latest.json -- "%PY%" tools\indicator_diag_and_recommend.py --lookback-days 120 --min-universe 2000 --horizons 1,2,5 >> "%LAST_LOG%" 2>&1
+  "%PY%" tools\run_step_with_timeout.py --name indicator_diag_and_recommend --timeout-sec %INDICATOR_DIAG_TIMEOUT_SEC% --status-json 2_Logs\indicator_diag_timeout_status_latest.json -- "%PY%" tools\indicator_diag_and_recommend.py --lookback-days 120 --min-universe 2000 --horizons 1,2,5 >> "%LAST_LOG%" 2>&1
   if errorlevel 1 (
     echo [WARN] indicator_diag_and_recommend failed - continuing
   )
@@ -1551,7 +1741,7 @@ if errorlevel 1 (
 echo [16.7a/16] E:\vibe\buffett\tools\ssot_today_final_update.py
 "%PY%" E:\vibe\buffett\tools\ssot_today_final_update.py
 if errorlevel 1 (
-  echo [WARN] SSOT_TODAY missing today's FINAL snapshot -> build snapshot
+  echo [WARN] SSOT_TODAY missing today's FINAL snapshot  to  build snapshot
   echo [16.7a/16] refresh RootB data\stats before snapshot build
   call :RUN_ROOTB_STATS
   if errorlevel 1 (
@@ -1568,12 +1758,34 @@ if errorlevel 1 (
 )
 
 REM [16.75/16] streaming calibration gate (fail-closed on FAIL)
-echo [16.75/16] tools\calibration_stream.py
-"%PY%" tools\calibration_stream.py
-if errorlevel 1 (
-  call :POST_CHAIN_STEP_FAIL "[16.75/16] tools\\calibration_stream.py"
+REM ------------------------------------------------------------
+REM [2026-08-31] DISABLED by user decision (B). nothing deleted, artifacts kept.
+REM   full reasoning: .agent/PLANS.md (178)(179)
+REM   why: this step ran daily but never worked.
+REM     - input joined_trades stuck at 36 rows / 2026-02-05 (206 days).
+REM       signal_integration_daily.py reads trades.csv but only to refresh pnl_krw;
+REM       it never appends new trades (it rewrites the same file).
+REM     - root cause: no final_score column exists anywhere.
+REM       calibration_stream.py:51 defaults to 0.0 -> p = sigmoid(0) = 0.5 constant.
+REM       a constant prediction leaves the calibration curve undefined.
+REM   consumer: tools/safe_exploration_review.py only. penalty on FAIL only;
+REM           current status is WARN so no effect. missing file -> UNKNOWN/0 (safe).
+REM   revive when ALL three hold:
+REM     (1) entry-time final_score is recorded in the trade ledger
+REM     (2) a producer appends new trades into joined_trades
+REM     (3) entries resume and a sample accumulates (2026-08 had 3 rows)
+REM   how: set CALIB_STREAM_ENABLED=1 below. code and artifacts are untouched.
+REM ------------------------------------------------------------
+if not defined CALIB_STREAM_ENABLED set "CALIB_STREAM_ENABLED=0"
+if "%CALIB_STREAM_ENABLED%"=="1" (
+  echo [16.75/16] tools\calibration_stream.py
+  "%PY%" tools\calibration_stream.py
+  if errorlevel 1 (
+    call :POST_CHAIN_STEP_FAIL "[16.75/16] tools\calibration_stream.py"
+  )
+) else (
+  echo [16.75/16] skip calibration_stream ^(CALIB_STREAM_ENABLED=0, PLANS 179^)
 )
-
 REM [16.755/16] refresh after_close summary snapshot before dashboard build
 echo [16.755/16] after_close_summary.py
 "%PY%" after_close_summary.py
@@ -1901,11 +2113,11 @@ if "%POST_CHAIN_FAILED%"=="1" (
   echo [WARN] post chain failed at %POST_CHAIN_FAILED_STEP%
   if "%POST_CHAIN_FAIL_SOFT%"=="1" (
     if /I "%BROKER_MODE%"=="DRY" (
-      echo [WARN] POST_CHAIN_FAIL_SOFT=1 and BROKER_MODE=DRY -> continue main success
+      echo [WARN] POST_CHAIN_FAIL_SOFT=1 and BROKER_MODE=DRY  to  continue main success
       exit /b 0
     )
     if /I "%BROKER_MODE%"=="OFF" (
-      echo [WARN] POST_CHAIN_FAIL_SOFT=1 and BROKER_MODE=OFF -> continue main success
+      echo [WARN] POST_CHAIN_FAIL_SOFT=1 and BROKER_MODE=OFF  to  continue main success
       exit /b 0
     )
     echo [FAILED] POST_CHAIN_FAIL_SOFT=1 is blocked for live broker mode=%BROKER_MODE%

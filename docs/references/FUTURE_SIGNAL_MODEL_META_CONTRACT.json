@@ -1,0 +1,39 @@
+{
+  "contract_version": "future_signal_model_meta_v1",
+  "required_keys": [
+    "model_version",
+    "model_type",
+    "model_path",
+    "feature_version",
+    "feature_schema_sha256",
+    "train_window_start",
+    "train_window_end",
+    "calibration_version",
+    "calibration_path",
+    "target",
+    "horizon",
+    "created_at"
+  ],
+  "rules": {
+    "model_version": "non-empty string",
+    "model_type": "non-empty string, e.g. RULE_BASELINE, LIGHTGBM, XGBOOST",
+    "model_path": "existing readable file path when prediction values are emitted",
+    "feature_version": "must match feature artifact metadata",
+    "feature_schema_sha256": "must match feature artifact schema hash",
+    "train_window_start": "YYYYMMDD",
+    "train_window_end": "YYYYMMDD and <= D",
+    "calibration_version": "non-empty string for probabilistic output",
+    "calibration_path": "existing readable file path for calibrated probabilities",
+    "target": "non-empty string",
+    "horizon": "integer days",
+    "created_at": "timestamp string"
+  },
+  "fail_closed_reasons": [
+    "MODEL_META_MISSING",
+    "MODEL_META_REQUIRED_KEY_MISSING",
+    "MODEL_PATH_MISSING",
+    "CALIBRATION_PATH_MISSING",
+    "MODEL_TRAIN_WINDOW_AFTER_D",
+    "FEATURE_SCHEMA_MISMATCH"
+  ]
+}

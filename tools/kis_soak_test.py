@@ -11,12 +11,26 @@ import pandas as pd
 
 from kis_order_client import KISApiError, KISOrderClient
 from notify_channels import send_alert
+import logging
 
 
 ROOT = Path(__file__).resolve().parents[1]
 LOG_DIR = ROOT / "2_Logs"
 
 
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
 def _parse_codes(raw: str) -> List[str]:
     vals: List[str] = []
     for x in str(raw or "").split(","):
@@ -53,7 +67,7 @@ def main() -> int:
 
     codes = _parse_codes(args.codes)
     if not codes:
-        print("[STOP] no valid codes")
+        _log_print("[STOP] no valid codes")
         return 2
 
     mock_opt: Optional[bool]
@@ -72,7 +86,7 @@ def main() -> int:
     try:
         client = KISOrderClient.from_env(mock=mock_opt)
     except Exception as e:
-        print(f"[STOP] KIS env/config failed: {e}")
+        _log_print(f"[STOP] KIS env/config failed: {e}")
         return 2
 
     mode = _mode_label(args.mock, client)
@@ -204,8 +218,8 @@ def main() -> int:
     latest["status"] = "DONE"
     latest_json.write_text(json.dumps(latest, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print(f"[OK] events_csv={out_csv} rows={len(df)}")
-    print(f"[OK] summary={out_json} ok={ok_final}")
+    _log_print(f"[OK] events_csv={out_csv} rows={len(df)}")
+    _log_print(f"[OK] summary={out_json} ok={ok_final}")
 
     if args.notify:
         lv = "info" if ok_final else "error"

@@ -19,6 +19,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+import logging
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -41,6 +42,19 @@ HISTORY_FIELDS = [
 ]
 
 
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
 def _now_ts() -> str:
     return datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
@@ -212,13 +226,13 @@ def main() -> int:
 
     prev_txt = "NA" if prev_q is None else str(prev_q)
     delta_txt = "NA" if delta is None else f"{delta:+d}"
-    print(
+    _log_print(
         "[PENDING_QUEUE_DELTA] "
         f"current={cur_q} prev={prev_txt} delta={delta_txt} trend={report['delta']['trend']} "
         f"status={cur.get('status') or 'NA'}"
     )
-    print(f"[OK] wrote: {LATEST_PATH}")
-    print(f"[OK] wrote: {ts_path}")
+    _log_print(f"[OK] wrote: {LATEST_PATH}")
+    _log_print(f"[OK] wrote: {ts_path}")
     return 0
 
 

@@ -167,7 +167,23 @@ def evaluate_stable_params(stable: Dict[str, Any], gate: Dict[str, Any]) -> Dict
     # pf=0.0 sentinel -- the upstream hurdle excluded them the same way.
     min_oos_worst_fold_pf = float(_gate_value(gate, "min_oos_worst_fold_pf", 0.75))
     min_oos_worst_fold_trades = int(_gate_value(gate, "min_oos_worst_fold_trades", 15))
-    promoted = bool(stable.get("promoted", False))
+    # [2026-08-20] certified / operational 분리.
+    #
+    # `promoted` 하나가 "정식 승격 절차를 통과했는가"(인증)와 "이 파라미터로
+    # 매매해도 되는가"(가동)를 동시에 의미했다. 그래서 "검증 안 됨 + 그래도 가동"
+    # 이라는 실제 상태를 표현할 수단이 없었고, 선택지가 (a) 인증을 참칭한다
+    # (b) 생산을 멈춘다 (c) 게이트를 무력화한다 셋뿐이었다.
+    #
+    # 이제 차단은 `operational`(사람이 명시 승인)만 본다. `certified`(기계가 승격 시
+    # 기록)는 차단하지 않고 라벨로만 실린다. 결측 시 둘 다 `promoted`에서 유도하므로
+    # 기존 아티팩트의 판정은 바뀌지 않는다.
+    #
+    # 주의: 결측이 가동 허용으로 둔갑하지 않아야 한다. 폴백의 최종 기본값은 False다.
+    _promoted_raw = bool(stable.get("promoted", False))
+    certified = bool(stable.get("certified", _promoted_raw))
+    operational = bool(stable.get("operational", _promoted_raw))
+    cert_reason = str(stable.get("cert_reason", "") or "")
+    promoted = operational
     try:
         best_score = float(stable.get("best_score"))
     except Exception:
@@ -232,8 +248,35 @@ def evaluate_stable_params(stable: Dict[str, Any], gate: Dict[str, Any]) -> Dict
             Path(_cfg_path_str),
         )
 
-    if require_promoted and not promoted:
-        reasons.append("not_promoted")
+    # [2026-08-31 O5-1] windows 신선도 검사.
+    #
+    # 이 게이트는 가격 데이터를 받지 않으므로 현직을 재계산할 수 없고,
+    # stable_params 안에 **저장된** windows 를 읽어 판정한다. 그래서 파라미터가
+    # 나중에 바뀌면 "옛 파라미터의 성과로 새 파라미터를 심사" 하게 된다.
+    # 실제로 그랬다 - windows as_of=2026-08-14 인데 파라미터는 2026-08-20 에
+    # 손편집(require_macd_golden 1.0->0.0, rule_e 비활성)됐고 windows 는 재계산되지 않았다.
+    # 같은 게이트에 재계산 입력을 넣으면 세 축이 전부 FAIL 이다.
+    # (.agent/PLANS.md 2026-08-31 (151), docs/references/GATE_JUDGMENT_FORM.md 7절)
+    #
+    # **차단하지 않는다.** 차단으로 연결하면 즉시 후보 0 -> 매매 정지이고,
+    # 그때 무엇을 기본 동작으로 할지가 아직 결정되지 않았다
+    # (GATE_JUDGMENT_FORM.md R1: (a)차단 /(b)통과+경고 /(c)축소가동 미확정).
+    # 그때까지는 provenance 와 같은 advisory 로 사실만 매일 기록한다.
+    windows_as_of = str(stable.get("as_of") or "").strip()
+    _meta = stable.get("meta") if isinstance(stable.get("meta"), dict) else {}
+    _medit = _meta.get("manual_edit") if isinstance(_meta.get("manual_edit"), dict) else {}
+    params_edited_at = str(_medit.get("at") or "").strip()
+    windows_stale = False
+    if not windows_as_of:
+        provenance_warnings = list(provenance_warnings) + ["windows_as_of_missing"]
+    elif params_edited_at and params_edited_at > windows_as_of:
+        windows_stale = True
+        provenance_warnings = list(provenance_warnings) + [
+            "windows_stale(as_of=%s<params_edited=%s)" % (windows_as_of, params_edited_at)
+        ]
+
+    if require_promoted and not operational:
+        reasons.append("not_operational")
     if best_score < min_stable_score:
         reasons.append(f"stable_score_low({best_score:.4f}<{min_stable_score:.4f})")
     if oos_n_total < min_oos_trades:
@@ -280,6 +323,10 @@ def evaluate_stable_params(stable: Dict[str, Any], gate: Dict[str, Any]) -> Dict
             "provenance_code_hash_mismatch": (None, None),
             "provenance_exec_policy_hash_mismatch": (None, None),
             "provenance_data_source_hash_mismatch": (None, None),
+            # [2026-08-31 O5-1] log_gate_event 는 threshold/actual 을 float 로 변환하므로
+            # 날짜는 넣지 않는다. 값은 reason_detail 문자열에 실린다
+            "windows_stale": (None, None),
+            "windows_as_of_missing": (None, None),
         },
     )
 
@@ -294,6 +341,9 @@ def evaluate_stable_params(stable: Dict[str, Any], gate: Dict[str, Any]) -> Dict
         "reasons": critical_reasons,
         "warnings": provenance_warnings,
         "promoted": promoted,
+        "certified": certified,
+        "operational": operational,
+        "cert_reason": cert_reason,
         "best_score": best_score,
         "oos_n_total": oos_n_total,
         "oos_pf_weighted": oos_pf_weighted,
@@ -303,6 +353,10 @@ def evaluate_stable_params(stable: Dict[str, Any], gate: Dict[str, Any]) -> Dict
         "mean_pf_weighted": mean_pf_weighted,
         "all_n_total": all_n_total,
         "malformed_window_rows": malformed_rows,
+        # [2026-08-31 O5-1] windows 신선도. advisory - ok 에 영향을 주지 않는다
+        "windows_stale": windows_stale,
+        "windows_as_of": windows_as_of,
+        "params_edited_at": params_edited_at,
         "thresholds": {
             "require_promoted": require_promoted,
             "min_oos_trades": min_oos_trades,

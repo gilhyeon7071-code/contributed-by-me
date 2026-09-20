@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 import pandas as pd
+import logging
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,6 +15,19 @@ LOG_DIR = ROOT / "2_Logs"
 SOURCE_NAME = "bok_policy_rate_manual_seed_v1"
 
 
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
 def _manual_bok_seed() -> List[Tuple[str, float]]:
     # Bank of Korea base-rate change points (manual seed).
     return [
@@ -108,11 +122,11 @@ def main() -> int:
     out_json.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     latest_json.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print(f"[RATE] csv={out_csv}")
-    print(f"[RATE] latest_csv={latest_csv}")
-    print(f"[RATE] json={out_json}")
-    print(f"[RATE] latest_json={latest_json}")
-    print(f"[RATE] rows={meta['rows']} range={meta['date_min']}..{meta['date_max']} source={meta['source']}")
+    _log_print(f"[RATE] csv={out_csv}")
+    _log_print(f"[RATE] latest_csv={latest_csv}")
+    _log_print(f"[RATE] json={out_json}")
+    _log_print(f"[RATE] latest_json={latest_json}")
+    _log_print(f"[RATE] rows={meta['rows']} range={meta['date_min']}..{meta['date_max']} source={meta['source']}")
     return 0
 
 

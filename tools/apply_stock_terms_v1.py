@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
+import logging
 
 
 DEFAULT_MAP = Path(r"E:/1_Data/docs/주식용어치환맵_v1.json")
@@ -40,6 +41,19 @@ class FileResult:
     error: str | None = None
 
 
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
 def _load_json(path: Path) -> dict[str, Any]:
     for enc in ("utf-8", "utf-8-sig", "cp949"):
         try:
@@ -224,11 +238,11 @@ def main() -> int:
     out = log_dir / f"stock_terms_apply_{_timestamp()}.json"
     out.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print(f"[TERMS] mode={summary['mode']} py_string_only={summary['py_string_only']} files={total_files} changed={changed_files} repl={total_repl}")
-    print(f"[TERMS] log={out}")
+    _log_print(f"[TERMS] mode={summary['mode']} py_string_only={summary['py_string_only']} files={total_files} changed={changed_files} repl={total_repl}")
+    _log_print(f"[TERMS] log={out}")
     for r in results:
         state = "ERR" if r.error else ("CHANGED" if r.changed else "SAME")
-        print(
+        _log_print(
             f"[{state}] {r.path} mode={r.mode_used} repl={r.total_replacements}"
             + (f" err={r.error}" if r.error else "")
         )

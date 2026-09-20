@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Iterable, List, Optional, Tuple
 
 import pandas as pd
+import logging
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +25,15 @@ EXCLUDE_DIR_HINTS = {
     "_bad",
 }
 
+# [2026-08-29] Raw 추가. generate_candidates / optimize_params 와 같은 결함의 세 번째 복사본이었다.
+MARKET_PARQUET_SEARCH_DIRS = [
+    "krx_daily_archive",
+    "_krx_manual",
+    "_krx_seed_full",
+    "_cache",
+    "Raw",
+]
+
 CORE6_BASENAMES = [
     "krx_daily_20200101_20201231_clean.parquet",
     "krx_daily_20210101_20211231_clean.parquet",
@@ -34,6 +44,19 @@ CORE6_BASENAMES = [
 ]
 
 
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
 def _is_excluded(path: Path) -> bool:
     low_parts = {p.lower() for p in path.parts}
     return any(h.lower() in low_parts for h in EXCLUDE_DIR_HINTS)
@@ -41,7 +64,26 @@ def _is_excluded(path: Path) -> bool:
 
 def _find_parquet_files(root: Path) -> List[Path]:
     cands: List[Path] = []
-    for p in root.rglob("*.parquet"):
+    search_roots = [root / x for x in MARKET_PARQUET_SEARCH_DIRS if (root / x).exists()]
+    if not search_roots:
+        search_roots = [root]
+    for search_root in search_roots:
+        for p in search_root.rglob("*.parquet"):
+            if _is_excluded(p):
+                continue
+            name = p.name.lower()
+            if "krx_daily" not in name:
+                continue
+            # [2026-08-29] Raw/ 의 광역 백필은 `_clean` 접미사가 없다. 예외로 허용한다.
+            if "clean" not in name and "valuefix" not in name and p.parent.name != "Raw":
+                continue
+            try:
+                if p.stat().st_size < 4096:
+                    continue
+            except Exception:
+                continue
+            cands.append(p)
+    for p in root.glob("*.parquet"):
         if _is_excluded(p):
             continue
         name = p.name.lower()
@@ -276,7 +318,11 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Build symbol-level panel csv for backtest structure checks")
     ap.add_argument("--out-csv", default="")
     ap.add_argument("--out-json", default="")
-    ap.add_argument("--max-files", type=int, default=32)
+    # [2026-08-29] 기본 32 는 파일을 **mtime 최신순으로** 잘랐다(build_symbol_panel 의
+    #   parquet_files[-max_files:]). 기간이 아니라 수정시각 기준이라 패널에 임의의
+    #   구멍이 생겼다 - 실측 37개월 결손(2022-10~2024-12, 2025-09~2026-06).
+    #   전체 소스를 담을 수 있는 값으로 올린다.
+    ap.add_argument("--max-files", type=int, default=512)
     ap.add_argument("--use-core6", action="store_true")
     ap.add_argument("--only-basenames", default="", help="comma-separated parquet basenames to include")
     args = ap.parse_args()
@@ -306,11 +352,11 @@ def main() -> int:
     out_json.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     out_latest_json.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print(f"[BTPANEL] csv={out_csv}")
-    print(f"[BTPANEL] latest_csv={out_latest_csv}")
-    print(f"[BTPANEL] json={out_json}")
-    print(f"[BTPANEL] latest_json={out_latest_json}")
-    print(
+    _log_print(f"[BTPANEL] csv={out_csv}")
+    _log_print(f"[BTPANEL] latest_csv={out_latest_csv}")
+    _log_print(f"[BTPANEL] json={out_json}")
+    _log_print(f"[BTPANEL] latest_json={out_latest_json}")
+    _log_print(
         f"[BTPANEL] rows={meta['rows']} symbols={meta['n_symbols']} "
         f"sector_cov={meta['sector_coverage']:.3f} mcap_cov={meta['market_cap_coverage']:.3f} "
         f"range={meta['date_min']}..{meta['date_max']}"

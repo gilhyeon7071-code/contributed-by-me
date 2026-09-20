@@ -1,4 +1,4 @@
-﻿@echo off
+@echo off
 setlocal EnableExtensions
 TITLE STOC Daily Runner
 chcp 65001 > nul
@@ -9,7 +9,8 @@ echo [SYSTEM] STOC runner start
 echo [INFO] BASE_DIR=%BASE_DIR%
 
 set "PY="
-if exist "%BASE_DIR%.venv\Scripts\python.exe" set "PY=%BASE_DIR%.venv\Scripts\python.exe"
+if exist "E:\1_Data\_runtime\python312-embed\python.exe" set "PY=E:\1_Data\_runtime\python312-embed\python.exe"
+if not defined PY if exist "%BASE_DIR%.venv\Scripts\python.exe" set "PY=%BASE_DIR%.venv\Scripts\python.exe"
 if not defined PY if exist "E:\vibe\buffett\.venv\Scripts\python.exe" set "PY=E:\vibe\buffett\.venv\Scripts\python.exe"
 if not defined PY if exist "C:\Users\jjtop\AppData\Local\Programs\Python\Python312\python.exe" set "PY=C:\Users\jjtop\AppData\Local\Programs\Python\Python312\python.exe"
 if not defined PY (
@@ -57,11 +58,73 @@ echo [STEP C] Cleanup / Archive
 "%PY%" "%BASE_DIR%cleanup_manager.py"
 if errorlevel 1 goto :FAIL
 
-if "%BROKER_MODE%"=="" set "BROKER_MODE=OFF"
+if "%P1_ENABLE_CORE%"=="" set "P1_ENABLE_CORE=1"
+if "%P1_ENABLE_TUNERS%"=="" set "P1_ENABLE_TUNERS=0"
+if "%P1_FAIL_SOFT%"=="" set "P1_FAIL_SOFT=1"
+
+if "%P1_ENABLE_CORE%"=="1" (
+  echo [P1.1] build_krx_index_constituents_snapshot.py
+  "%PY%" "%BASE_DIR%tools\build_krx_index_constituents_snapshot.py"
+  if errorlevel 1 (
+    if /I "%P1_FAIL_SOFT%"=="1" (
+      echo [WARN] P1.1 failed - continuing, P1_FAIL_SOFT=1
+    ) else (
+      goto :FAIL
+    )
+  )
+
+  echo [P1.2] build_disclosure_risk_log.py
+  "%PY%" "%BASE_DIR%tools\build_disclosure_risk_log.py"
+  if errorlevel 1 (
+    if /I "%P1_FAIL_SOFT%"=="1" (
+      echo [WARN] P1.2 failed - continuing, P1_FAIL_SOFT=1
+    ) else (
+      goto :FAIL
+    )
+  )
+
+  echo [P1.3] build_paper_parameter_review.py
+  "%PY%" "%BASE_DIR%tools\build_paper_parameter_review.py"
+  if errorlevel 1 (
+    if /I "%P1_FAIL_SOFT%"=="1" (
+      echo [WARN] P1.3 failed - continuing, P1_FAIL_SOFT=1
+    ) else (
+      goto :FAIL
+    )
+  )
+) else (
+  echo [P1] core disabled: P1_ENABLE_CORE=%P1_ENABLE_CORE%
+)
+
+if "%P1_ENABLE_TUNERS%"=="1" (
+  echo [P1.4] risk_recalibrate_from_pnl.py suggest_only
+  "%PY%" "%BASE_DIR%tools\risk_recalibrate_from_pnl.py"
+  if errorlevel 1 (
+    if /I "%P1_FAIL_SOFT%"=="1" (
+      echo [WARN] P1.4 failed - continuing, P1_FAIL_SOFT=1
+    ) else (
+      goto :FAIL
+    )
+  )
+
+  echo [P1.5] auto_signal_tuner.py --mode propose
+  "%PY%" "%BASE_DIR%tools\auto_signal_tuner.py" --mode propose
+  if errorlevel 1 (
+    if /I "%P1_FAIL_SOFT%"=="1" (
+      echo [WARN] P1.5 failed - continuing, P1_FAIL_SOFT=1
+    ) else (
+      goto :FAIL
+    )
+  )
+) else (
+  echo [P1] tuners disabled: P1_ENABLE_TUNERS=%P1_ENABLE_TUNERS%
+)
+
+if "%BROKER_MODE%"=="" set "BROKER_MODE=APPLY_SYNC"
 if "%BROKER_VALIDATION_MODE%"=="" set "BROKER_VALIDATION_MODE=0"
 if "%BROKER_BLOCK_PREFIXES%"=="" set "BROKER_BLOCK_PREFIXES=CAP_"
 if "%BROKER_MIN_LIVE_ORDERS%"=="" set "BROKER_MIN_LIVE_ORDERS=3"
-if "%BROKER_MOCK%"=="" set "BROKER_MOCK=auto"
+if "%BROKER_MOCK%"=="" set "BROKER_MOCK=true"
 if "%BROKER_CANCEL_OPEN%"=="" set "BROKER_CANCEL_OPEN=0"
 if "%BROKER_CANCEL_MIN_AGE_MINUTES%"=="" set "BROKER_CANCEL_MIN_AGE_MINUTES=10"
 if "%BROKER_CANCEL_MAX_ORDERS%"=="" set "BROKER_CANCEL_MAX_ORDERS=0"
@@ -120,7 +183,10 @@ if /I "%BROKER_MODE%"=="OFF" (
         )
         for /f "usebackq delims=" %%I in (`"%PY%" -c "import datetime as d; print(d.datetime.now().strftime('%%Y%%m%%d'))"`) do set "D_TODAY=%%I"
         if "%D_TODAY%"=="" goto :FAIL
-        "%PY%" "%BASE_DIR%tools\kis_sync_fills_from_api.py" --date %D_TODAY% --bridge-write --bridge-live-path "%BROKER_LIVE_PATH%"
+        REM [2026-09-10] --mock 을 안 넘겨 auto 로 떨어졌다. auto 는 KIS_MOCK 환경변수를 보고
+REM   실계좌로 풀릴 수 있다. 실제로 그렇게 돼서 **계좌 전환 이후 자기 체결을 못 봤다**
+REM   (모의계좌 09-08 체결 7건이 매일 0건으로 기록됨). dispatch 호출은 넘기는데 여기만 빠져 있었다.
+        "%PY%" "%BASE_DIR%tools\kis_sync_fills_from_api.py" --date %D_TODAY% --mock %BROKER_MOCK% --bridge-write --bridge-live-path "%BROKER_LIVE_PATH%"
         if errorlevel 1 goto :FAIL
       ) else (
         echo [FAILED] invalid BROKER_MODE=%BROKER_MODE%
@@ -129,6 +195,45 @@ if /I "%BROKER_MODE%"=="OFF" (
     )
   )
 )
+
+echo [STEP E] Ops Refresh Chain
+if "%ROOTB%"=="" set "ROOTB=E:\vibe\buffett"
+if exist "%ROOTB%\tools\observer_decision_apply_v2.py" (
+  "%PY%" "%ROOTB%\tools\observer_decision_apply_v2.py"
+  if errorlevel 3 goto :FAIL
+) else (
+  echo [FAILED] missing %ROOTB%\tools\observer_decision_apply_v2.py
+  goto :FAIL
+)
+if exist "%ROOTB%\tools\observer_state_v1.py" (
+  "%PY%" "%ROOTB%\tools\observer_state_v1.py"
+  if errorlevel 3 goto :FAIL
+) else (
+  echo [FAILED] missing %ROOTB%\tools\observer_state_v1.py
+  goto :FAIL
+)
+if exist "%ROOTB%\tools\dashboard_point_today.py" (
+  "%PY%" "%ROOTB%\tools\dashboard_point_today.py"
+  if errorlevel 1 goto :FAIL
+) else (
+  echo [FAILED] missing %ROOTB%\tools\dashboard_point_today.py
+  goto :FAIL
+)
+if exist "%ROOTB%\tools\build_dashboard_state_v2.py" (
+  "%PY%" "%ROOTB%\tools\build_dashboard_state_v2.py"
+  if errorlevel 1 goto :FAIL
+) else (
+  echo [FAILED] missing %ROOTB%\tools\build_dashboard_state_v2.py
+  goto :FAIL
+)
+if exist "%BASE_DIR%tools\build_integrated_ops_snapshot.py" (
+  "%PY%" "%BASE_DIR%tools\build_integrated_ops_snapshot.py"
+  if errorlevel 1 goto :FAIL
+) else (
+  echo [FAILED] missing %BASE_DIR%tools\build_integrated_ops_snapshot.py
+  goto :FAIL
+)
+
 if "%MG%"=="0" goto :OPEN
 echo [SUCCESS] Finished (Market Closed) at %TIME%.
 goto :END_OK
@@ -150,6 +255,7 @@ exit /b 0
 :END_FAIL
 pause
 exit /b %RC%
+
 
 
 

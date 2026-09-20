@@ -3,6 +3,7 @@
 import json, subprocess, sys
 from pathlib import Path
 from datetime import datetime
+import logging
 
 ROOT = Path(__file__).resolve().parent.parent
 LOGS = ROOT / "2_Logs"
@@ -12,6 +13,19 @@ REDTEAM_V1 = ROOT / "tools" / "redteam_check_v1.py"
 FRESHNESS = ROOT / "tools" / "freshness_check_v1.py"
 
 
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
 def _latest(pattern: str) -> Path | None:
     hits = list(LOGS.glob(pattern))
     if not hits:
@@ -22,13 +36,13 @@ def _latest(pattern: str) -> Path | None:
 
 def _run_py(py: str, script: Path) -> int:
     if not script.exists():
-        print(f"[REDTEAM_V2] missing: {script}")
+        _log_print(f"[REDTEAM_V2] missing: {script}")
         return 2
     p = subprocess.run([py, str(script)], capture_output=True, text=True)
     if p.stdout:
-        print(p.stdout.rstrip())
+        _log_print(p.stdout.rstrip())
     if p.stderr:
-        print(p.stderr.rstrip(), file=sys.stderr)
+        _log_print(p.stderr.rstrip(), file=sys.stderr)
     return p.returncode
 
 
@@ -112,14 +126,14 @@ def main() -> int:
         encoding="utf-8",
     )
 
-    print(f"[REDTEAM_V2] wrote: {out_path}")
+    _log_print(f"[REDTEAM_V2] wrote: {out_path}")
     verdict = "PASS" if hard_fails == 0 else "HARD_FAIL"
 
-    print(f"[REDTEAM_V2] verdict={verdict} HARD_FAIL={hard_fails} WARN={warns}")
+    _log_print(f"[REDTEAM_V2] verdict={verdict} HARD_FAIL={hard_fails} WARN={warns}")
     if hard_fails > 0 or verdict != "PASS":
-        print("[REDTEAM_V2] HARD_FAIL reasons:")
+        _log_print("[REDTEAM_V2] HARD_FAIL reasons:")
         for r in reasons[:10]:
-            print(f"- {r}")
+            _log_print(f"- {r}")
 
     return 0 if hard_fails == 0 else 2
 

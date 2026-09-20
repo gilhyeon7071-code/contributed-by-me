@@ -1,0 +1,48 @@
+{
+  "version": "1.0.0",
+  "written_at": "2026-09-18",
+  "note": "D5 후보 분류 — 무엇을 사지 않을 것인가. 층(tier)으로 나눈 이유는 근거의 등급이 다르기 때문이에요. T1 제도 사실은 논란이 없고, T3 관측은 아직 검증 전이라 기본 꺼짐이에요. 적용 범위(scope)도 나눠요 — 기본 바구니에서 대형주를 사건 때문에 빼면 지수 추종이 깨져요.",
+  "tiers": {
+    "T1_REGULATORY": {
+      "enabled": true,
+      "scope": ["CORE_BASKET", "EVENT_SLEEVE"],
+      "basis": "제도 사실",
+      "rules": [
+        {"code": "TRADING_HALT", "why": "거래정지 — 살 수도 팔 수도 없다. 2026-09-18 실측: 관리종목 지정 40건 중 29건이 다음 거래일 거래 없음"},
+        {"code": "ADMINISTRATIVE", "why": "관리종목 — 신용거래 금지·대용증권 제외"},
+        {"code": "LIQUIDATION", "why": "정리매매"},
+        {"code": "DELISTING_DECIDED", "why": "상장폐지 결정 — 11건 중 7건이 다음 거래일 거래 없음"}
+      ]
+    },
+    "T2_EXECUTION": {
+      "enabled": true,
+      "scope": ["EVENT_SLEEVE"],
+      "basis": "집행 제약 실측",
+      "rules": [
+        {"code": "LOW_LIQUIDITY", "min_daily_value_krw": 200000000,
+         "why": "2026-09-18 실측: 사건 종목 일 거래대금 중앙 4~8억, 최저 0.22억. 주문이 시장을 밀어버린다"},
+        {"code": "ORDER_TOO_BIG", "max_share_of_daily_value": 0.02,
+         "why": "한 종목 300만원이 거래대금의 10~14% 가 되는 종목이 있었다"}
+      ]
+    },
+    "T3_OBSERVED": {
+      "enabled": false,
+      "scope": ["EVENT_SLEEVE"],
+      "basis": "관측 — 아직 검증 전. 켜려면 사용자 승인",
+      "rules": [
+        {"code": "AFTER_RIGHTS_OFFERING", "days": 5,
+         "measured": "효과 중앙 −6.70%, 종목 p 0.049 / 시행 36번 중 하나",
+         "why": "유상증자 = 희석·매도 압력"},
+        {"code": "AFTER_WARNING_DESIGNATED", "days": 5,
+         "measured": "효과 중앙 −7.04%, 날짜 p 0.442",
+         "why": "투자경고 = 신용 금지·증거금 100%"},
+        {"code": "AFTER_WARNING_RELEASED", "days": 5,
+         "measured": "효과 중앙 −9.80%, 날짜 p 0.022 (날짜 13일 중 양 2일)",
+         "why": "해제 뒤에도 하락이 이어졌다 — 이유는 아직 모른다"},
+        {"code": "AFTER_HALT_RELEASED", "days": 5,
+         "measured": "효과 중앙 −2.42%, 날짜 p 0.169",
+         "why": "정지 동안 쌓인 매도 주문"}
+      ]
+    }
+  }
+}

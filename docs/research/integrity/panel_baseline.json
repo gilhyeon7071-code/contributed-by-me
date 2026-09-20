@@ -1,0 +1,588 @@
+{
+  "name": "panel_baseline",
+  "frozen_at": "2026-09-07 16:15:17",
+  "note": "RD_20260831_flow_h10 이 읽는 실데이터. 라운드 계약 미변경, 별도 감시",
+  "contract": "파일은 한 번 쓰이면 안 바뀐다. 새 파일 등장은 정상, 기존 파일 변경·소실은 FAIL",
+  "scope": [
+    "krx_daily_archive/*_clean.parquet",
+    "Raw/krx_daily_*.parquet"
+  ],
+  "not_a_round_baseline": "라운드 등록표(registration.md)와 frozen.json 은 건드리지 않는다. 이것은 별도 감시 장치다.",
+  "files": {
+    "krx_daily_archive/krx_daily_20150102_20191230_backfill_clean.parquet": {
+      "sha256": "76e11d29d5123fae4a9a3ec502a04cd1ce84d0f56f8a735a28fa27d299332994",
+      "size": 67835580,
+      "mtime": "2026-08-19 14:25:22"
+    },
+    "krx_daily_archive/krx_daily_20200101_20201231_clean.parquet": {
+      "sha256": "f7cbab2ec3566e1cf5442dfece89e952195de4c51264635d7bac7780099feee9",
+      "size": 5092430,
+      "mtime": "2025-12-28 11:32:32"
+    },
+    "krx_daily_archive/krx_daily_20200102_20220930_kosdaq_clean.parquet": {
+      "sha256": "bcb659160d00fe8cfdcd7f7a54f7927392fe3396f42a271086c24735de51e358",
+      "size": 25530042,
+      "mtime": "2026-08-19 13:27:36"
+    },
+    "krx_daily_archive/krx_daily_20210101_20211231_clean.parquet": {
+      "sha256": "2e78b282442272b52796694373564ff882f97809baa2c6cb3eb58ce3281f0aaf",
+      "size": 5217880,
+      "mtime": "2025-12-28 11:32:32"
+    },
+    "krx_daily_archive/krx_daily_20220101_20221231_clean.parquet": {
+      "sha256": "67ebb7f06eeaf14844852c7f78dab913f5d8716f7039ae9ec4548f19583efaf1",
+      "size": 5124296,
+      "mtime": "2025-12-28 11:32:32"
+    },
+    "krx_daily_archive/krx_daily_20230101_20231231_clean.parquet": {
+      "sha256": "8d9b8dd43150fb235d06ab9c3e43ba5cd3e6f07f79a7e032b687d3e9647e2eea",
+      "size": 5169881,
+      "mtime": "2025-12-28 11:32:32"
+    },
+    "krx_daily_archive/krx_daily_20240101_20241231_clean.parquet": {
+      "sha256": "34365e7889222fea896acac5e5d5b07b11daa46ef85973040cfbcfb69897f29d",
+      "size": 5171041,
+      "mtime": "2025-12-28 11:32:32"
+    },
+    "krx_daily_archive/krx_daily_20250101_20250819_clean.parquet": {
+      "sha256": "47180ace5578513d957a1d883d927c3e4b0b37037b300cb42b96df35c2fb677d",
+      "size": 8757150,
+      "mtime": "2026-09-06 08:32:07"
+    },
+    "krx_daily_archive/krx_daily_20250820_20251225_clean.parquet": {
+      "sha256": "fc7a47c7f88604ab11f96ecbae39c1e97cae6de5d13f2a46925f581067f0aec8",
+      "size": 5009971,
+      "mtime": "2025-12-28 11:32:32"
+    },
+    "krx_daily_archive/krx_daily_20251226_20251226_clean.parquet": {
+      "sha256": "c538eaa3c2574449aa21a0b18d522a98280fc8e46412edfa2c7c0776beeb9eb7",
+      "size": 102051,
+      "mtime": "2025-12-29 11:47:23"
+    },
+    "krx_daily_archive/krx_daily_20251227_20251229_clean.parquet": {
+      "sha256": "677f4a58f44e6ecdd00bc52a7c55747cff20bb7f7f024a4c5f10e8dfc87f0291",
+      "size": 105482,
+      "mtime": "2025-12-30 08:39:57"
+    },
+    "krx_daily_archive/krx_daily_20251230_20251230_clean.parquet": {
+      "sha256": "fdca33c4e720a999f8f4253cd39f628efaba1683f67b2cce2607bad2a9f43ea5",
+      "size": 101342,
+      "mtime": "2025-12-31 13:59:21"
+    },
+    "krx_daily_archive/krx_daily_20260102_20260112_clean.parquet": {
+      "sha256": "54290870083eff47b0734c936766ace390a0fe064f6e44561b07aa58bcf34da8",
+      "size": 829389,
+      "mtime": "2026-01-13 13:09:37"
+    },
+    "krx_daily_archive/krx_daily_20260107_20260107_clean.parquet": {
+      "sha256": "33a917463aa51d826d7b2ef95bfe4ca63d6f074b18225250554fff0cbfab45dc",
+      "size": 6065,
+      "mtime": "2026-01-08 14:35:48"
+    },
+    "krx_daily_archive/krx_daily_20260108_20260109_clean.parquet": {
+      "sha256": "dd61e90f9e965a525fc5ec1f291b2080f6f29e47bb1dbf4ac247f4a7c26dc8a3",
+      "size": 6575,
+      "mtime": "2026-01-11 21:06:55"
+    },
+    "krx_daily_archive/krx_daily_20260113_20260403_clean.parquet": {
+      "sha256": "94e4499d17a5d0457255c8e6defe91cc2a4bd4422121d83d70ad1849d1a0e05c",
+      "size": 3134088,
+      "mtime": "2026-04-03 12:59:04"
+    },
+    "krx_daily_archive/krx_daily_20260404_20260406_clean.parquet": {
+      "sha256": "6b4487d9f8b7fa83522ec7252a04cee5cfd882ec2e6e410bf29ce479634cdbdc",
+      "size": 77881,
+      "mtime": "2026-04-06 10:11:44"
+    },
+    "krx_daily_archive/krx_daily_20260407_20260407_clean.parquet": {
+      "sha256": "852afd3d5c0c2f411731438341bb527c62c1eb96d7458210ce32402bacba70fb",
+      "size": 78451,
+      "mtime": "2026-04-08 08:55:10"
+    },
+    "krx_daily_archive/krx_daily_20260408_20260408_clean.parquet": {
+      "sha256": "fd438a311681f68e878653bed285b2f6de707727c5166421bc72d8b80bea61f9",
+      "size": 78261,
+      "mtime": "2026-04-09 09:54:12"
+    },
+    "krx_daily_archive/krx_daily_20260409_20260409_clean.parquet": {
+      "sha256": "90108c69ed179683998d350f06c124ecd7586600f19176c98af53d0fbfbe3e32",
+      "size": 78022,
+      "mtime": "2026-04-09 16:35:41"
+    },
+    "krx_daily_archive/krx_daily_20260410_20260410_clean.parquet": {
+      "sha256": "15fcb986f857d07ea8c68536fa8fef7a4d7244563c421940ff1e556428df0840",
+      "size": 77926,
+      "mtime": "2026-04-10 16:45:50"
+    },
+    "krx_daily_archive/krx_daily_20260411_20260413_clean.parquet": {
+      "sha256": "9ab60a553f39100dbba00395174359627dd85c825f65fc43df80aa12c82327e0",
+      "size": 77439,
+      "mtime": "2026-04-14 08:56:35"
+    },
+    "krx_daily_archive/krx_daily_20260414_20260414_clean.parquet": {
+      "sha256": "0f1a768d59b4bc4c8fa41207116ebf328108cdb080970b957fd24bfbf9950f1e",
+      "size": 77342,
+      "mtime": "2026-04-15 09:00:51"
+    },
+    "krx_daily_archive/krx_daily_20260415_20260415_clean.parquet": {
+      "sha256": "2adad9f174c743487edefa5f4cbe66fdea0670806689dbd44343870f3ab57de5",
+      "size": 77252,
+      "mtime": "2026-04-15 16:34:12"
+    },
+    "krx_daily_archive/krx_daily_20260416_20260416_clean.parquet": {
+      "sha256": "7009875768528d1913ffbe548105c156c89afae24f9f19d2b6b6c07ab2b3bbf6",
+      "size": 77267,
+      "mtime": "2026-04-16 17:35:51"
+    },
+    "krx_daily_archive/krx_daily_20260417_20260417_clean.parquet": {
+      "sha256": "9dcc5b78f842dfc40527145eff798af627597681dadfd91ea22c9586e7ffcee3",
+      "size": 76780,
+      "mtime": "2026-04-17 15:48:22"
+    },
+    "krx_daily_archive/krx_daily_20260418_20260420_clean.parquet": {
+      "sha256": "baaa6e18db24fa9bc2ae35d5ffa7b713f238ca99d83c7a0f70e3771259269d49",
+      "size": 76893,
+      "mtime": "2026-04-21 10:38:19"
+    },
+    "krx_daily_archive/krx_daily_20260421_20260421_clean.parquet": {
+      "sha256": "6cecde0a30dcb105a07d4e653bb93bdc9f9569962439afccbac2bfa701a75fbd",
+      "size": 74725,
+      "mtime": "2026-04-21 16:09:13"
+    },
+    "krx_daily_archive/krx_daily_20260422_20260422_clean.parquet": {
+      "sha256": "1fb16e056ed0eb1942f792f2f9005fb838b1b32093f12b70a6e8a29b4b79e84a",
+      "size": 74726,
+      "mtime": "2026-04-23 12:08:24"
+    },
+    "krx_daily_archive/krx_daily_20260423_20260423_clean.parquet": {
+      "sha256": "320c5c5333d0f57103475fbdb82a1e74733f823bc6867fafaec651fd884fd979",
+      "size": 74798,
+      "mtime": "2026-04-23 20:29:46"
+    },
+    "krx_daily_archive/krx_daily_20260424_20260424_clean.parquet": {
+      "sha256": "8dbf522784e77963f30fcb5f8e39991f5eb003850466b219461c9e4b16b52ab1",
+      "size": 74152,
+      "mtime": "2026-04-24 16:40:28"
+    },
+    "krx_daily_archive/krx_daily_20260425_20260427_clean.parquet": {
+      "sha256": "6a0e5eb41ab985abf918abdef167da5c02b5f6a38c4b3c3696e25cea6ab79a6e",
+      "size": 73583,
+      "mtime": "2026-04-27 16:49:31"
+    },
+    "krx_daily_archive/krx_daily_20260428_20260428_clean.parquet": {
+      "sha256": "3d414e9e5394a7e3238b3bc503fbc7976ca277440e3ea65f71ea7a60125c9851",
+      "size": 73354,
+      "mtime": "2026-04-28 17:01:02"
+    },
+    "krx_daily_archive/krx_daily_20260429_20260429_clean.parquet": {
+      "sha256": "4a5568cc8b3b38a7c8819d81078d4d4588afa2157c48161564a7525c84955ec2",
+      "size": 72990,
+      "mtime": "2026-04-29 16:56:25"
+    },
+    "krx_daily_archive/krx_daily_20260430_20260430_clean.parquet": {
+      "sha256": "3d4c00f3cb7aa54554d8ec9b22c3e1c5f2214205aefc6b38fb50b22551b6e3ea",
+      "size": 98271,
+      "mtime": "2026-05-02 15:24:25"
+    },
+    "krx_daily_archive/krx_daily_20260501_20260504_clean.parquet": {
+      "sha256": "d18a4d3048574def3d735cc6887fe2b468515c4f64ee8217b39938c37a00e5f9",
+      "size": 103619,
+      "mtime": "2026-05-04 18:03:04"
+    },
+    "krx_daily_archive/krx_daily_20260505_20260506_clean.parquet": {
+      "sha256": "4645532d8ee6ac66c0e85f9d33f3dfc7f705a9bd930e3f51027afe04b4719859",
+      "size": 106177,
+      "mtime": "2026-05-07 08:53:48"
+    },
+    "krx_daily_archive/krx_daily_20260507_20260507_clean.parquet": {
+      "sha256": "3fa47ab80ec3aedde482b44d94e0b4c7b4dec2bdbfb566cf48f32f9268b98634",
+      "size": 106376,
+      "mtime": "2026-05-07 18:42:38"
+    },
+    "krx_daily_archive/krx_daily_20260508_20260508_clean.parquet": {
+      "sha256": "589422f873a87869258901341829aa7ae20eb3d45d0724c0b631d58a9eeabb07",
+      "size": 101773,
+      "mtime": "2026-05-08 18:48:08"
+    },
+    "krx_daily_archive/krx_daily_20260509_20260511_clean.parquet": {
+      "sha256": "9dbf2a419cf4c613a0779fe80d383c8602b01c809f2cf322e4f343107ea3d36d",
+      "size": 104225,
+      "mtime": "2026-05-11 18:09:29"
+    },
+    "krx_daily_archive/krx_daily_20260512_20260512_clean.parquet": {
+      "sha256": "86939521833bd6b6bac7947fdbaf54beaf1b11fd3ce529ed23c1551b313adb9d",
+      "size": 107081,
+      "mtime": "2026-05-13 09:34:24"
+    },
+    "krx_daily_archive/krx_daily_20260513_20260513_clean.parquet": {
+      "sha256": "3ea7ca47166d1664f90ba7ac864511b485490d6d9736a7a1e90f58f3d5af4d7a",
+      "size": 106615,
+      "mtime": "2026-05-14 09:08:55"
+    },
+    "krx_daily_archive/krx_daily_20260514_20260514_clean.parquet": {
+      "sha256": "1f0b94801926cc47e4f46ef2c8aae11c5a0e9270882aa13aaa048707536b0656",
+      "size": 107079,
+      "mtime": "2026-05-15 09:49:11"
+    },
+    "krx_daily_archive/krx_daily_20260515_20260515_clean.parquet": {
+      "sha256": "a19142e4c58874f0d4bc918a84410127b76dc45dec051e263cfbea21407a10a4",
+      "size": 107188,
+      "mtime": "2026-05-17 13:04:30"
+    },
+    "krx_daily_archive/krx_daily_20260516_20260518_clean.parquet": {
+      "sha256": "4d2050eb3ea36237be13039816c382e35d5810cf0171f07b6283b894729ffb08",
+      "size": 107110,
+      "mtime": "2026-05-19 08:48:58"
+    },
+    "krx_daily_archive/krx_daily_20260519_20260519_clean.parquet": {
+      "sha256": "67f7ca31cdf1299f69b95a6bca22bbd6a48dab886eb85d05ff1ae9d395811929",
+      "size": 109915,
+      "mtime": "2026-05-20 08:55:38"
+    },
+    "krx_daily_archive/krx_daily_20260520_20260520_clean.parquet": {
+      "sha256": "8e433f32a2b19e136bab53c91e1adc1f7be0d8abe6f2962d01909ffb72994e22",
+      "size": 109844,
+      "mtime": "2026-05-20 16:45:24"
+    },
+    "krx_daily_archive/krx_daily_20260521_20260522_clean.parquet": {
+      "sha256": "84aec434f3d4058538101b4dc208786827b0e5c2ac7153593f1aaed957751adc",
+      "size": 187360,
+      "mtime": "2026-05-25 21:34:03"
+    },
+    "krx_daily_archive/krx_daily_20260526_20260526_clean.parquet": {
+      "sha256": "99ce0f77c57fb271382df5debe776eebc51c468c5fb5fd5712a1f068976e3447",
+      "size": 113677,
+      "mtime": "2026-05-27 09:04:02"
+    },
+    "krx_daily_archive/krx_daily_20260527_20260527_clean.parquet": {
+      "sha256": "aedaf96dc61de985a64564acbf6a4bf44ef9d0680dbc0fa8a9d95b0e7f2da7bc",
+      "size": 113874,
+      "mtime": "2026-05-27 16:32:56"
+    },
+    "krx_daily_archive/krx_daily_20260528_20260528_clean.parquet": {
+      "sha256": "15d3453a74ec60f3ec5c5023219d356b303c8d9d12ac8fc757632511aa34c847",
+      "size": 114072,
+      "mtime": "2026-05-28 21:32:55"
+    },
+    "krx_daily_archive/krx_daily_20260529_20260529_clean.parquet": {
+      "sha256": "622849f00030fb7bd87adfa7ca6ae3460024f51f8c5fcc11c364935aeb118927",
+      "size": 114278,
+      "mtime": "2026-05-29 19:28:20"
+    },
+    "krx_daily_archive/krx_daily_20260601_20260601_clean.parquet": {
+      "sha256": "19e0814dca1e93fc1e58de7f284dd3ab733d5ba293b983ffd440414c10f4d7b1",
+      "size": 113867,
+      "mtime": "2026-06-01 16:01:01"
+    },
+    "krx_daily_archive/krx_daily_20260602_20260602_clean.parquet": {
+      "sha256": "598c16a67b0ff0eca5e23e893c427947cd93284f4403c76e8c7886b4665835bd",
+      "size": 113595,
+      "mtime": "2026-06-02 16:58:25"
+    },
+    "krx_daily_archive/krx_daily_20260604_20260604_clean.parquet": {
+      "sha256": "e26659ad2cc0b7295736f9f26a0321278925309dadd31040fd368748ec411d9e",
+      "size": 113579,
+      "mtime": "2026-06-05 09:01:25"
+    },
+    "krx_daily_archive/krx_daily_20260605_20260605_clean.parquet": {
+      "sha256": "dd0230e92eee1f27208c82209927acbebd6701638562cff2429437bc4416c69a",
+      "size": 113110,
+      "mtime": "2026-06-05 21:39:05"
+    },
+    "krx_daily_archive/krx_daily_20260608_20260608_clean.parquet": {
+      "sha256": "27ad6443ea3fb4ca5078382a9e836a10cbea74a9507e6084bb57aa3f70cd0bc4",
+      "size": 112407,
+      "mtime": "2026-06-08 18:44:03"
+    },
+    "krx_daily_archive/krx_daily_20260609_20260609_clean.parquet": {
+      "sha256": "47b63aa55be2fc1b609ac313fa539ed7f7c8b8b4b15d0af3fd7008a1b696aa34",
+      "size": 113168,
+      "mtime": "2026-06-09 15:49:44"
+    },
+    "krx_daily_archive/krx_daily_20260610_20260610_clean.parquet": {
+      "sha256": "56083f3f8868904a500ebfa881bd33850bea2be84c8ec98f941b9bcfa9eb4b49",
+      "size": 113175,
+      "mtime": "2026-06-11 09:48:55"
+    },
+    "krx_daily_archive/krx_daily_20260611_20260611_clean.parquet": {
+      "sha256": "14d847ba8636fdcc1a2db5c128f249e29321d60da9a45bf89fd7b1955027d6d8",
+      "size": 112926,
+      "mtime": "2026-06-11 17:29:05"
+    },
+    "krx_daily_archive/krx_daily_20260612_20260612_clean.parquet": {
+      "sha256": "699e0c127f07443703373ea9e628e5937ea3e4d2da51130f2eaea30901b443d3",
+      "size": 113263,
+      "mtime": "2026-06-13 11:21:43"
+    },
+    "krx_daily_archive/krx_daily_20260615_20260615_clean.parquet": {
+      "sha256": "0788db89563cc9df83f924d25dfb6e4b66cad6b71d1f2f9965e9d2f28a963cae",
+      "size": 113294,
+      "mtime": "2026-06-16 08:43:32"
+    },
+    "krx_daily_archive/krx_daily_20260616_20260616_clean.parquet": {
+      "sha256": "f5a50e3a1863e0a9afd01db1306daf88200b8663397a797b66974a087a33ecfe",
+      "size": 113241,
+      "mtime": "2026-06-16 21:48:26"
+    },
+    "krx_daily_archive/krx_daily_20260617_20260617_clean.parquet": {
+      "sha256": "00ec8ba2800ddff8cebad32b16084ea54e3b8ca30ad86bed7adac3bba83238f3",
+      "size": 112921,
+      "mtime": "2026-06-17 17:43:35"
+    },
+    "krx_daily_archive/krx_daily_20260618_20260618_clean.parquet": {
+      "sha256": "e5e1f092fac9bfbe4cde16004f0e205315fb5197447802868bade4d0da57589b",
+      "size": 112877,
+      "mtime": "2026-06-19 08:57:00"
+    },
+    "krx_daily_archive/krx_daily_20260619_20260619_clean.parquet": {
+      "sha256": "6d8209ee24eaa7b396a49e46a10bf3b4803ce951c2cb46659676e46dad479fb2",
+      "size": 113009,
+      "mtime": "2026-06-20 14:30:34"
+    },
+    "krx_daily_archive/krx_daily_20260622_20260622_clean.parquet": {
+      "sha256": "12fef9cf7551610b5a2bac017189184f03eddb812477071dbeebd17911c7d1f9",
+      "size": 112513,
+      "mtime": "2026-06-22 19:13:25"
+    },
+    "krx_daily_archive/krx_daily_20260623_20260623_clean.parquet": {
+      "sha256": "a27934d75faf935cd33d51e9d387292ff4016faa2c29b7f95804823c63a20765",
+      "size": 112168,
+      "mtime": "2026-06-24 09:44:54"
+    },
+    "krx_daily_archive/krx_daily_20260624_20260624_clean.parquet": {
+      "sha256": "9a475907e45c5bf4a91565e6f92c8ddfe9d7e594d91f55bccbb6639562b3061c",
+      "size": 112412,
+      "mtime": "2026-06-25 08:47:26"
+    },
+    "krx_daily_archive/krx_daily_20260625_20260625_clean.parquet": {
+      "sha256": "ee480f4de7567e9304fa4e10176097bc952c9d3df7b2a28e918c86cbf47368b9",
+      "size": 112756,
+      "mtime": "2026-06-25 16:24:40"
+    },
+    "krx_daily_archive/krx_daily_20260626_20260626_clean.parquet": {
+      "sha256": "e34003d09e226f6e111f2d5ab0aa6478448a4e70dea0456cfe17beb7ffffbc5b",
+      "size": 112908,
+      "mtime": "2026-06-29 08:54:30"
+    },
+    "krx_daily_archive/krx_daily_20260629_20260629_clean.parquet": {
+      "sha256": "20b74dd12ec24658c90b34002997ad7982acbece006cea9280c07b84eb58e461",
+      "size": 112785,
+      "mtime": "2026-06-29 19:23:48"
+    },
+    "krx_daily_archive/krx_daily_20260630_20260630_clean.parquet": {
+      "sha256": "3b195c4ecf60109493166f0d2a0a2d6cbad14969d58ffc420a60d67b36718d1c",
+      "size": 112764,
+      "mtime": "2026-07-01 08:48:37"
+    },
+    "krx_daily_archive/krx_daily_20260701_20260701_clean.parquet": {
+      "sha256": "675a8685c77d1387ed5426d8fefba3db20d6b378eca79c52763c7a6ab4f274f5",
+      "size": 112861,
+      "mtime": "2026-07-02 09:42:39"
+    },
+    "krx_daily_archive/krx_daily_20260702_20260702_clean.parquet": {
+      "sha256": "d75e4bfbc29d208880d84849c713c1d667686b001f2a7cc991b857605d47ca2a",
+      "size": 112601,
+      "mtime": "2026-07-02 18:44:15"
+    },
+    "krx_daily_archive/krx_daily_20260703_20260703_clean.parquet": {
+      "sha256": "e52bb1a3d0eddaa907ea93324a39f353bd5fdc01cc263fd921ad3e32955238b6",
+      "size": 112346,
+      "mtime": "2026-07-05 12:12:22"
+    },
+    "krx_daily_archive/krx_daily_20260706_20260706_clean.parquet": {
+      "sha256": "8f2a952c8d1f235fedfc929ac99f83ee882c84a928d6845866cf280b523770e4",
+      "size": 112080,
+      "mtime": "2026-07-06 17:01:40"
+    },
+    "krx_daily_archive/krx_daily_20260707_20260707_clean.parquet": {
+      "sha256": "7a3fc170eee7190b12123bde23d7f6b7ecfa722ed821aae27a54d4659640dcf5",
+      "size": 112013,
+      "mtime": "2026-07-07 21:32:30"
+    },
+    "krx_daily_archive/krx_daily_20260708_20260708_clean.parquet": {
+      "sha256": "a49fb5c13bec61a3847edda48acb8d66273925d40d3af84b2d308a4518d77302",
+      "size": 112005,
+      "mtime": "2026-07-09 09:42:46"
+    },
+    "krx_daily_archive/krx_daily_20260709_20260709_clean.parquet": {
+      "sha256": "10d58753b44ecd867e5a39c6cf8e35b093a43b18cbe8e451e7923ecee8ccb858",
+      "size": 112206,
+      "mtime": "2026-07-10 11:48:51"
+    },
+    "krx_daily_archive/krx_daily_20260710_20260710_clean.parquet": {
+      "sha256": "1d09f6cca586709a11a6404dc71f868b58063dbca89bd7fbf168ab64aa64978a",
+      "size": 112066,
+      "mtime": "2026-07-13 09:48:22"
+    },
+    "krx_daily_archive/krx_daily_20260713_20260713_clean.parquet": {
+      "sha256": "2a4f75362f7e200b08f46cf3cb1cd8e0830a342840a4d1a8425ca7aa20df3ccc",
+      "size": 111983,
+      "mtime": "2026-07-14 08:34:50"
+    },
+    "krx_daily_archive/krx_daily_20260714_20260714_clean.parquet": {
+      "sha256": "ad53362d5c4fdb736cfea6ca797f84f95bb670e26addf7e7064116658505e8e1",
+      "size": 112011,
+      "mtime": "2026-07-14 21:32:55"
+    },
+    "krx_daily_archive/krx_daily_20260715_20260715_clean.parquet": {
+      "sha256": "ec67aaf70526d009b7ceb4e293a80910f3a81f23618c2967e60fb59a392df9d7",
+      "size": 111842,
+      "mtime": "2026-07-15 21:43:00"
+    },
+    "krx_daily_archive/krx_daily_20260716_20260716_clean.parquet": {
+      "sha256": "a04c94afe36f0783ea2c180f63d50051f9befd042baa768cf0a8bbf0c3ae9c51",
+      "size": 111936,
+      "mtime": "2026-07-20 08:39:31"
+    },
+    "krx_daily_archive/krx_daily_20260720_20260720_clean.parquet": {
+      "sha256": "8cf725b3077432a8cca4c2c8b03fae7c8b3d5a0d7aa1f0550a026c0f4a4fcbe5",
+      "size": 111578,
+      "mtime": "2026-07-20 21:35:27"
+    },
+    "krx_daily_archive/krx_daily_20260721_20260721_clean.parquet": {
+      "sha256": "e1f9a52360a890a696d333dc3359dc5978187479371d1cc0d41a00c0233fd072",
+      "size": 111751,
+      "mtime": "2026-07-21 21:33:53"
+    },
+    "krx_daily_archive/krx_daily_20260722_20260722_clean.parquet": {
+      "sha256": "47c823622bd69b67b49c475ed4fcdef884025863f4feb24dd0ee2c2c82585d08",
+      "size": 111774,
+      "mtime": "2026-07-22 21:33:49"
+    },
+    "krx_daily_archive/krx_daily_20260723_20260723_clean.parquet": {
+      "sha256": "6c853a68d1dff92967250297ea9714b4ec975a6f3399fd2e25ff715e24bca24e",
+      "size": 111796,
+      "mtime": "2026-07-23 21:33:47"
+    },
+    "krx_daily_archive/krx_daily_20260724_20260724_clean.parquet": {
+      "sha256": "e092607fe15b08f106907a2115c862edc2533a7045075db24a09b29c18bec48b",
+      "size": 111561,
+      "mtime": "2026-07-24 21:32:26"
+    },
+    "krx_daily_archive/krx_daily_20260727_20260727_clean.parquet": {
+      "sha256": "d0aea57ec1fa13e1f3a7655a3e89c54cbd7ee8cdadea57125571d641da0f3b15",
+      "size": 111599,
+      "mtime": "2026-07-27 21:32:23"
+    },
+    "krx_daily_archive/krx_daily_20260728_20260728_clean.parquet": {
+      "sha256": "70bd9fde1651e55830d44d694b47ffcfd2a0cc8b7df18b7a9b880c11404a33ca",
+      "size": 111125,
+      "mtime": "2026-07-28 21:32:28"
+    },
+    "krx_daily_archive/krx_daily_20260729_20260729_clean.parquet": {
+      "sha256": "2786debf6d2aba0f54b11f9e76a670a97a0c81b81915fa8131a0c0bd00f86121",
+      "size": 111410,
+      "mtime": "2026-07-30 13:52:59"
+    },
+    "krx_daily_archive/krx_daily_20260730_20260805_clean.parquet": {
+      "sha256": "0fbf89c27d656a32a3c001ddc98ca36cdd0ce81b7967b8d45c6c2f266ba008f4",
+      "size": 398258,
+      "mtime": "2026-08-06 09:15:00"
+    },
+    "krx_daily_archive/krx_daily_20260806_20260806_clean.parquet": {
+      "sha256": "bc730152a250ce171804b9435e11d2241aa422e5e0e25e17196fa7fcddfe8ae0",
+      "size": 111332,
+      "mtime": "2026-08-06 16:14:37"
+    },
+    "krx_daily_archive/krx_daily_20260807_20260807_clean.parquet": {
+      "sha256": "59140386af4634a5353a6453b950b8d3a0ec40a1b305f8d05d2b035efe09aa0c",
+      "size": 110943,
+      "mtime": "2026-08-08 11:02:28"
+    },
+    "krx_daily_archive/krx_daily_20260810_20260810_clean.parquet": {
+      "sha256": "5d48de61bd8f85ab28199bbab39b768e19cc636a55c3e28b7acc731e6c83ed42",
+      "size": 110922,
+      "mtime": "2026-08-10 21:32:34"
+    },
+    "krx_daily_archive/krx_daily_20260811_20260811_clean.parquet": {
+      "sha256": "075817a22ae971e8b0b40b98a134d53571a3f2ead0d0cbe2d0741e62c4ffbe81",
+      "size": 111125,
+      "mtime": "2026-08-11 21:32:32"
+    },
+    "krx_daily_archive/krx_daily_20260812_20260812_clean.parquet": {
+      "sha256": "5f2c295485f3665a0f0d1a899577719218af0393dbc2efcc866a690360fed4d6",
+      "size": 111197,
+      "mtime": "2026-08-12 21:40:50"
+    },
+    "krx_daily_archive/krx_daily_20260813_20260813_clean.parquet": {
+      "sha256": "d40b55b2d488c31f16d06580ff49b4eaaa9c0be33f7380465a111c0dc2eef1c4",
+      "size": 111214,
+      "mtime": "2026-08-13 21:32:30"
+    },
+    "krx_daily_archive/krx_daily_20260814_20260818_clean.parquet": {
+      "sha256": "9f0a67b5499e83dfab32941c47562c90b01a778ad65ea424cfe0c62d0687b296",
+      "size": 189090,
+      "mtime": "2026-08-18 16:46:37"
+    },
+    "krx_daily_archive/krx_daily_20260819_20260819_clean.parquet": {
+      "sha256": "e70eaac8eae7131ff8475bdfb327dc8d525dab6e2c78287f766c98df4ebf6423",
+      "size": 111013,
+      "mtime": "2026-08-19 21:51:55"
+    },
+    "krx_daily_archive/krx_daily_20260820_20260820_clean.parquet": {
+      "sha256": "9aa1c0515a962d7550f8c8264d9f7c12126dd1d1e89747e18133e94aa3cfea58",
+      "size": 110899,
+      "mtime": "2026-08-20 21:32:30"
+    },
+    "krx_daily_archive/krx_daily_20260821_20260821_clean.parquet": {
+      "sha256": "b5e6903c45fc62256ff40110c57d729e702712a37d0eb2a1dc83f398f7ddbdf8",
+      "size": 110420,
+      "mtime": "2026-08-24 08:46:32"
+    },
+    "krx_daily_archive/krx_daily_20260824_20260824_clean.parquet": {
+      "sha256": "f6211b976d3913eee29d8b5af75373315914e312cc3a34245a3cc2049a75638c",
+      "size": 110434,
+      "mtime": "2026-08-24 18:21:38"
+    },
+    "krx_daily_archive/krx_daily_20260825_20260825_clean.parquet": {
+      "sha256": "c7ec4b344250a3046f44f075c8665c8d6f2814768cc3c25459545e95eace4ce1",
+      "size": 110528,
+      "mtime": "2026-08-25 18:15:32"
+    },
+    "krx_daily_archive/krx_daily_20260826_20260826_clean.parquet": {
+      "sha256": "c813b1046df4991d161abbeeee4843ec82e1e855b5678ca284f3f81c32995ba5",
+      "size": 110505,
+      "mtime": "2026-08-26 21:45:07"
+    },
+    "krx_daily_archive/krx_daily_20260827_20260827_clean.parquet": {
+      "sha256": "12af224c111b483afddd54672227336258d4d7af2dcfd2e278dce9c4cb450a33",
+      "size": 110608,
+      "mtime": "2026-08-27 21:32:30"
+    },
+    "krx_daily_archive/krx_daily_20260828_20260828_clean.parquet": {
+      "sha256": "d1f9dfc4276678889e823c6e7b02b654882ee898feecad3af0c9a4bc8798a072",
+      "size": 110674,
+      "mtime": "2026-08-28 21:33:03"
+    },
+    "krx_daily_archive/krx_daily_20260831_20260831_clean.parquet": {
+      "sha256": "aa5b8e0a36bcdb6d55b97204b7659bd7b8d545349203abc4e1b50d3e644423c3",
+      "size": 111144,
+      "mtime": "2026-08-31 21:32:34"
+    },
+    "krx_daily_archive/krx_daily_20260901_20260901_clean.parquet": {
+      "sha256": "3cdd535f3df64d286f9d8cc2c1ccf2967b1144e8455c34edc4fd3286c83d1a33",
+      "size": 110660,
+      "mtime": "2026-09-01 21:32:33"
+    },
+    "krx_daily_archive/krx_daily_20260902_20260902_clean.parquet": {
+      "sha256": "a8d4c3cc632ed1be80b245f603d69497be1b0ee108ef21b933603e5449b22429",
+      "size": 110750,
+      "mtime": "2026-09-02 21:32:32"
+    },
+    "krx_daily_archive/krx_daily_20260903_20260903_clean.parquet": {
+      "sha256": "c0ccc5d9e3a8849313e39166b128c26771938bb5840732172dd777069b3f718d",
+      "size": 110794,
+      "mtime": "2026-09-03 21:32:34"
+    },
+    "krx_daily_archive/krx_daily_20260904_20260904_clean.parquet": {
+      "sha256": "ad39b56aa732549a775980a8073d9d0d1071942def5c07cd261a848ee1db2a56",
+      "size": 110897,
+      "mtime": "2026-09-04 21:32:33"
+    },
+    "Raw/krx_daily_20221001_20251224.parquet": {
+      "sha256": "1b843cca5c99f7710b03e59685b0ea97ca3bd0ab4ff144fff49a1163f459c72e",
+      "size": 39868887,
+      "mtime": "2025-12-28 11:01:48"
+    }
+  }
+}

@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -51,7 +51,7 @@ def now_iso() -> str:
     return datetime.now().strftime(DATE_FORMAT_ISO)
 
 
-def prev_weekday(base_date: datetime.date = None) -> str:
+def prev_weekday(base_date: Optional[date] = None) -> str:
     """직전 평일(월-금)을 YYYYMMDD 형식으로 반환."""
     d = (base_date or datetime.now().date()) - timedelta(days=1)
     while d.weekday() >= 5:  # 5=Sat, 6=Sun
@@ -128,6 +128,23 @@ def norm_code(x: Any) -> str:
     return s.zfill(6)
 
 
+def is_risk_off_hard_block_reason(reason: Any) -> bool:
+    """Return True when a risk-off reason must hard block new entries."""
+    r = str(reason or "")
+    return (
+        r.startswith("cand_latest_date(")
+        or r.startswith("krx_clean_universe_degraded(")
+        or r.startswith("prices_date_max(")
+        or r.startswith("krx_clean_date_max(")
+    )
+
+
+def is_daily_loss_reason(reason: Any) -> bool:
+    """Return True when a reason indicates a kill-switch daily-loss breach."""
+    r = str(reason or "")
+    return r.startswith("DAILY_LOSS(") or r.startswith("kill_switch:DAILY_LOSS(")
+
+
 # ============================================================================
 # JSON 파일 I/O
 # ============================================================================
@@ -136,7 +153,12 @@ def read_json(path: Path) -> Optional[Dict[str, Any]]:
     try:
         if not path.exists():
             return None
-        return json.loads(path.read_text(encoding='utf-8'))
+        for enc in ("utf-8-sig", "utf-8"):
+            try:
+                return json.loads(path.read_text(encoding=enc))
+            except json.JSONDecodeError:
+                continue
+        return json.loads(path.read_text(encoding="utf-8"))
     except Exception as e:
         logger.warning(f"JSON 읽기 실패: {path} - {type(e).__name__}: {e}")
         return None

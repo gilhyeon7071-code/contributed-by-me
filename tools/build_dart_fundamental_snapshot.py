@@ -18,6 +18,7 @@ import argparse
 import io
 import json
 import os
+import sys
 import time
 import zipfile
 from datetime import datetime
@@ -28,7 +29,14 @@ import numpy as np
 import pandas as pd
 import requests
 
-BASE_DIR = Path(os.environ.get("STOC_BASE_DIR", r"E:\1_Data"))
+TOOLS_DIR = Path(__file__).resolve().parent
+if str(TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(TOOLS_DIR))
+
+from build_disclosure_risk_log import build_disclosure_risk_log
+import logging
+
+BASE_DIR = Path(os.environ.get("STOC_BASE_DIR", str(Path(__file__).resolve().parents[1])))
 CACHE_DIR = BASE_DIR / "_cache"
 LOG_DIR = BASE_DIR / "2_Logs"
 
@@ -79,6 +87,19 @@ METRIC_RULES = {
 }
 
 
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
 def _norm_code6(v: object) -> str:
     s = str(v).strip()
     s = "".join(ch for ch in s if ch.isalnum())
@@ -408,12 +429,12 @@ def main() -> int:
 
     api_key = _resolve_api_key(args.api_key, args.api_key_file)
     if not api_key:
-        print("[ERR] DART API key not found. Set DART_API_KEY or --api-key-file.")
+        _log_print("[ERR] DART API key not found. Set DART_API_KEY or --api-key-file.")
         return 2
 
     codes, code_src = _load_target_codes(args.codes_file or None)
     if not codes:
-        print("[ERR] No target codes found from codes-file/candidate/listing source.")
+        _log_print("[ERR] No target codes found from codes-file/candidate/listing source.")
         return 2
 
     if args.max_codes > 0:
@@ -441,8 +462,8 @@ def main() -> int:
         if y > 0 and y not in years:
             years.append(y)
 
-    print(f"[DART] code_source={code_src} requested={len(codes)} mapped={len(mapped_codes)} unmapped={len(unmapped)}")
-    print(f"[DART] years={years} max_codes={args.max_codes} sleep={args.sleep}")
+    _log_print(f"[DART] code_source={code_src} requested={len(codes)} mapped={len(mapped_codes)} unmapped={len(unmapped)}")
+    _log_print(f"[DART] years={years} max_codes={args.max_codes} sleep={args.sleep}")
 
     session = requests.Session()
     rows_out: list[dict] = []
@@ -471,10 +492,10 @@ def main() -> int:
                 )
         except Exception as e:
             errors += 1
-            print(f"[WARN] code={code} corp={corp_code} err={type(e).__name__}: {e}")
+            _log_print(f"[WARN] code={code} corp={corp_code} err={type(e).__name__}: {e}")
 
         if i % 20 == 0 or i == len(mapped_codes):
-            print(f"[DART] progress {i}/{len(mapped_codes)} rows={len(rows_out)} no_data={no_data} errors={errors}")
+            _log_print(f"[DART] progress {i}/{len(mapped_codes)} rows={len(rows_out)} no_data={no_data} errors={errors}")
 
     new_df = pd.DataFrame(rows_out)
     out_path = Path(args.output)
@@ -510,13 +531,31 @@ def main() -> int:
     meta_path.parent.mkdir(parents=True, exist_ok=True)
     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print(
+    disclosure_path = LOG_DIR / "disclosure_risk_latest.json"
+    try:
+        disclosure_payload = build_disclosure_risk_log(
+            input_csv=out_path,
+            meta_path=meta_path,
+            output_path=disclosure_path,
+        )
+        _log_print(
+            "[DART] disclosure_risk negative={0} neutral={1} positive={2} output={3}".format(
+                disclosure_payload.get("negative_count", 0),
+                disclosure_payload.get("neutral_count", 0),
+                disclosure_payload.get("positive_count", 0),
+                disclosure_path,
+            )
+        )
+    except Exception as e:
+        _log_print(f"[WARN] disclosure_risk_log_failed: {type(e).__name__}: {e}")
+
+    _log_print(
         "[DART] done rows_fetched={0} rows_total={1} no_data={2} errors={3}".format(
             len(new_df), len(merged), no_data, errors
         )
     )
-    print(f"[DART] output={out_path}")
-    print(f"[DART] meta={meta_path}")
+    _log_print(f"[DART] output={out_path}")
+    _log_print(f"[DART] meta={meta_path}")
     return 0
 
 

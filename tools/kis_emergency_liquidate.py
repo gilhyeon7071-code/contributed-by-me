@@ -3,6 +3,7 @@
 import argparse
 import datetime as dt
 import json
+import logging
 import time
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -16,6 +17,7 @@ from notify_channels import send_alert
 ROOT = Path(__file__).resolve().parents[1]
 PAPER_DIR = ROOT / "paper"
 LOG_DIR = ROOT / "2_Logs"
+logger = logging.getLogger("kis_emergency_liquidate")
 
 
 def _to_int(v: object, default: int = 0) -> int:
@@ -100,6 +102,9 @@ def _cancel_open_orders(client: KISOrderClient, d: str, dry: bool) -> Dict[str, 
 
 
 def main() -> int:
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+
     ap = argparse.ArgumentParser(description="Emergency full liquidation (market sell all sellable positions)")
     ap.add_argument("--mock", default="auto", choices=["auto", "true", "false"])
     ap.add_argument("--apply", action="store_true", help="Actually place sell orders")
@@ -127,7 +132,7 @@ def main() -> int:
     try:
         client = KISOrderClient.from_env(mock=mock_opt)
     except Exception as e:
-        print(f"[STOP] KIS env/config failed: {e}")
+        logger.error("[STOP] KIS env/config failed: %s", e)
         return 2
 
     mode = _mode_label(args.mock, client)
@@ -163,7 +168,7 @@ def main() -> int:
         if not bool(c.get("ok", False)) and args.apply:
             summary["error"] = f"cancel_open_first failed: {c.get('error')}"
             out_json.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-            print(f"[STOP] {summary['error']}")
+            logger.error("[STOP] %s", summary["error"])
             return 2
 
     try:
@@ -173,7 +178,7 @@ def main() -> int:
     except Exception as e:
         summary["error"] = f"balance inquiry failed: {e}"
         out_json.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"[STOP] {summary['error']}")
+        logger.error("[STOP] %s", summary["error"])
         return 2
 
     items = [{"code": c, "qty": int(q)} for c, q in sellable.items() if int(q) > 0]
@@ -243,8 +248,8 @@ def main() -> int:
 
     out_json.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print(f"[OK] out_csv={out_csv} rows={len(df)}")
-    print(f"[OK] out_json={out_json}")
+    logger.info("[OK] out_csv=%s rows=%s", out_csv, len(df))
+    logger.info("[OK] out_json=%s", out_json)
 
     if args.notify:
         lv = "info" if bool(summary["ok"]) else "error"

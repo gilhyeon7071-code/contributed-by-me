@@ -1,0 +1,51 @@
+{
+  "generated_at": "2026-08-31T10:05:37",
+  "scope": "llm_wiki_operational_classification",
+  "policy_effect": false,
+  "trading_effect": false,
+  "summary_status": "REVIEW",
+  "rows": [
+    {
+      "area": "RootA score context",
+      "status": "ACTIVE",
+      "reason": "orders_exec_exists=True, score_asof_matches_expected=True",
+      "evidence": "E:\\1_Data\\docs\\llm_wiki\\00_Current_State\\system_state_latest.md"
+    },
+    {
+      "area": "RootA order/fill/ledger/stat interpretation",
+      "status": "REVIEW",
+      "reason": "ssot=PASS, ledger_dry=PASS, ledger_repair=NOOP, reconcile_state=PASS, live_vs_bt=NA, date_note=REVIEW_STRICT_D_MISMATCH, ledger_repair_effective_clean=True",
+      "evidence": "E:\\1_Data\\2_Logs\\ssot_health_card_latest.json"
+    },
+    {
+      "area": "RootA score date strict-D note",
+      "status": "NOTE",
+      "reason": "strict_asof_matches_D=False, date_asof_interpretation_status=REVIEW_STRICT_D_MISMATCH",
+      "evidence": "E:\\1_Data\\docs\\llm_wiki\\01_Policies\\date_asof_interpretation.md"
+    },
+    {
+      "area": "RootA intraday loop summary",
+      "status": "ACTIVE",
+      "reason": "intraday_steps=1/1, intraday_effective_clean=True",
+      "evidence": "E:\\1_Data\\docs\\llm_wiki\\00_Current_State\\system_state_latest.md"
+    },
+    {
+      "area": "RootB dashboard context",
+      "status": "REVIEW",
+      "reason": "status_overall=FAIL, health_alerts_count=1",
+      "evidence": "E:\\vibe\\buffett\\docs\\llm_wiki\\00_Current_State\\dashboard_state_latest.md"
+    },
+    {
+      "area": "Slack and meeting external API",
+      "status": "DEFERRED",
+      "reason": "blockers=SLACK_TOKEN_NOT_CONFIGURED,SLACK_CHANNELS_NOT_CONFIGURED,MEETING_SOURCE_DIR_NOT_CONFIGURED",
+      "evidence": "E:\\1_Data\\docs\\llm_wiki\\05_Logs\\external_readiness_latest.json"
+    },
+    {
+      "area": "Trading logic behavior",
+      "status": "NOT_CHANGED",
+      "reason": "Wiki/reporting layer only; no Gate, STOP, LOCK, risk, score, order, fill, ledger, stats behavior changed.",
+      "evidence": "E:\\1_Data\\docs\\llm_wiki\\wiki_index_latest.md"
+    }
+  ]
+}

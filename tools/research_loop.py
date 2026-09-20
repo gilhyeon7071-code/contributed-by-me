@@ -43,7 +43,11 @@ PRICE_DIRS = [BASE_DIR / "krx_daily_archive", BASE_DIR / "_krx_manual"]
 RAW_WIDE = BASE_DIR / "Raw" / "krx_daily_20221001_20251224.parquet"
 DEFAULT_CACHE = BASE_DIR / "2_Logs" / "research_loop_panel_cache.parquet"
 
-COST_ROUNDTRIP = 0.00358      # production contract, see PLANS 2026-08-18 (2)
+# [2026-09-10] 0.00358 -> 0.00400. 2026-07-23 모델(fee 0.00004*2 + slip 0.001*2 + tax 0.0015)의
+#   역산이었는데, 2026-08-24 브로커 실측(tr_id TTTC8715R: 수수료 0 / 제세금 0.19723%)으로
+#   fee 0.0 / tax 0.002 가 확정됐다. optimize_params_v41_1.DEFAULT_FEE 와 같은 값이다.
+#   차이는 0.042%p 로 작지만, 비용 세계가 여럿이면 어느 숫자가 맞는지 알 수 없게 된다.
+COST_ROUNDTRIP = 0.00400      # production contract, see PLANS 2026-08-18 (2) / 2026-09-09 (C1)
 DAILY_LIMIT_PCT = 31.0        # KRX daily move limit; beyond this is a data error
 
 

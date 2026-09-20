@@ -5,6 +5,7 @@ import datetime as dt
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
+import logging
 
 ROOT = Path(__file__).resolve().parents[1]
 LOG_DIR = ROOT / "2_Logs"
@@ -33,6 +34,19 @@ TARGETS: Dict[str, Dict[str, Any]] = {
 }
 
 
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
 def _now() -> str:
     return dt.datetime.now().isoformat(timespec="seconds")
 
@@ -229,10 +243,10 @@ def main() -> int:
     out_latest.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8-sig")
     out_md.write_text(render_md(result), encoding="utf-8-sig")
 
-    print(f"[GATE] ok={result['ok']} pass={result['pass_n']} fail={result['fail_n']}")
-    print(f"[GATE] json={out_json}")
-    print(f"[GATE] latest={out_latest}")
-    print(f"[GATE] md={out_md}")
+    _log_print(f"[GATE] ok={result['ok']} pass={result['pass_n']} fail={result['fail_n']}")
+    _log_print(f"[GATE] json={out_json}")
+    _log_print(f"[GATE] latest={out_latest}")
+    _log_print(f"[GATE] md={out_md}")
 
     if args.warn_only:
         return 0

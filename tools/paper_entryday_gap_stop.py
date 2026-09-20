@@ -1,30 +1,29 @@
 # -*- coding: utf-8 -*-
 """
 tools/paper_entryday_gap_stop.py
+Purpose:
+- Apply entry-day STOP / STOP_GAP decisions using the entry_date OHLC row.
+- This supplements paper_engine when an entry-day intraday stop needs to be materialized.
 
-목적:
-- "진입일(=entry_date) 당일" OHLC로 손절(STOP/STOP_GAP) 여부를 판정하여,
-  다음 거래일 데이터가 없어 paper_engine가 평가를 못하는 구간에서도
-  현실적인 '진입 당일 손절' 청산을 기록한다.
+Inputs:
+- paper/paper_state.json open_positions.
+- paper/prices/ohlcv_paper.parquet with code and entry_date OHLC rows.
 
-동작:
-- paper/paper_state.json의 open_positions를 읽는다.
-- paper/prices/ohlcv_paper.parquet에서 (code, entry_date) OHLC를 찾는다.
-- 조건:
-  - 시가(open) <= stop_price  -> STOP_GAP (exit_price=open)
-  - 저가(low)  <= stop_price  -> STOP     (exit_price=stop_price)
-- 체결/거래 기록:
-  - paper/fills.csv: SELL 1건(legacy schema) 추가 (idempotent)
-  - paper/trades.csv: 1건(legacy schema) 추가 (idempotent)
-- paper_state.json:
-  - open_positions에서 청산 종목 제거
-  - next_trade_seq 증가
+Rules:
+- open <= stop_price -> STOP_GAP with exit_price=open.
+- low <= stop_price -> STOP with exit_price=stop_price.
 
-주의:
-- 이 스크립트는 "진입 당일 intraday STOP"를 보강하는 용도다.
-- 기존 paper_engine의 다음날(T+1 이후) STOP_GAP/STOP 로직과 충돌하지 않도록
-  order_id 규칙(PAPER_SELL_{code}_{exit_day}_{exit_reason})을 동일하게 사용한다.
+Outputs:
+- Append one SELL row to paper/fills.csv using legacy schema, idempotently.
+- Append one row to paper/trades.csv using legacy schema, idempotently.
+- Remove closed positions from paper_state.json open_positions.
+- Advance next_trade_seq.
+
+Notes:
+- Uses deterministic PAPER_SELL_{code}_{exit_day}_{exit_reason} order_id values.
+- Does not change trading policy thresholds.
 """
+
 
 from __future__ import annotations
 
@@ -34,12 +33,27 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import pandas as pd
+import logging
+from pricing_engine import calc_net_return
 
 
 LEGACY_FILLS_HEADER = ["datetime", "code", "side", "qty", "price", "order_id", "note"]
 LEGACY_TRADES_HEADER = ["trade_id", "code", "entry_date", "entry_price", "exit_date", "exit_price", "pnl_pct", "exit_reason", "note"]
 
 
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
 def _ymd_series(d: pd.Series) -> pd.Series:
     y = pd.to_datetime(d, errors="coerce")
     y2 = pd.to_datetime(
@@ -61,12 +75,13 @@ def _sig_float(v: Any) -> str:
 
 
 def _calc_net_ret(entry_price: float, exit_price: float, fee_pct: float, slip_pct: float) -> float:
-    if entry_price <= 0:
-        return 0.0
-    gross = (exit_price - entry_price) / entry_price
-    # paper_engine과 동일 계열(양방향 비용): (entry+exit)/entry * (fee+slip)
-    cost = ((entry_price + exit_price) / entry_price) * (fee_pct + slip_pct)
-    return gross - cost
+    return calc_net_return(
+        entry_price=entry_price,
+        exit_price=exit_price,
+        fee_pct=fee_pct,
+        slippage_pct=slip_pct,
+        sell_tax_pct=0.0,
+    )
 
 
 def _ensure_csv(path: Path, header: List[str]) -> None:
@@ -109,16 +124,16 @@ def main() -> int:
     trades_path = base / "paper" / "trades.csv"
 
     if not state_path.exists():
-        print(f"[FATAL] missing state: {state_path}")
+        _log_print(f"[FATAL] missing state: {state_path}")
         return 2
     if not prices_path.exists():
-        print(f"[FATAL] missing prices: {prices_path}")
+        _log_print(f"[FATAL] missing prices: {prices_path}")
         return 2
 
     st = json.load(state_path.open("r", encoding="utf-8"))
     open_positions = st.get("open_positions", []) or []
     if not open_positions:
-        print("open_positions=0 -> nothing to do")
+        _log_print("open_positions=0 -> nothing to do")
         return 0
 
     cfg: Dict[str, Any] = {}
@@ -128,8 +143,14 @@ def main() -> int:
         except Exception:
             cfg = {}
 
-    fee_pct = float(cfg.get("fee_pct", 0.005) or 0.005)
-    slip_pct = float(cfg.get("slippage_pct", 0.001) or 0.001)
+    # [2026-09-10] `or` 를 쓰면 0.0 이 삼켜진다. 설정의 fee_pct 는 **0.0** 이다
+    #   (브로커 실측: 수수료 0). 종전 코드는 그 0 을 0.005 로 바꿔
+    #   왕복 0.400% 대신 1.400% 를 청구했다. pricing_engine.py 와 같은 결함이었다.
+    #   [[feedback_or_falsy_trap_pattern]]
+    _fee = cfg.get("fee_pct", 0.005)
+    _slip = cfg.get("slippage_pct", 0.001)
+    fee_pct = float(0.005 if _fee is None else _fee)
+    slip_pct = float(0.001 if _slip is None else _slip)
 
     # existing ids/signatures (idempotent)
     existing_fill_ids = set()
@@ -162,13 +183,13 @@ def main() -> int:
     need_cols = {"code", "date", "open", "high", "low", "close"}
     missing = sorted(list(need_cols - set(df.columns)))
     if missing:
-        print(f"[FATAL] prices missing columns: {missing} in {prices_path}")
+        _log_print(f"[FATAL] prices missing columns: {missing} in {prices_path}")
         return 2
 
     df["code"] = df["code"].astype(str).str.replace(r"\.0$", "", regex=True).str.zfill(6)
     df["ymd"] = _ymd_series(df["date"])
     prices_date_max = df["ymd"].max()
-    print(f"prices_date_max={prices_date_max}")
+    _log_print(f"prices_date_max={prices_date_max}")
 
     # index map: (code, ymd) -> last row
     df = df.sort_values(["code", "ymd"])
@@ -217,7 +238,7 @@ def main() -> int:
         exit_reason = None
         exit_price = None
 
-        # entry_date 당일 기준: 시가 갭락(=STOP_GAP) / 장중 손절(=STOP)
+        # Entry-date stop check: open breach is STOP_GAP, low breach is STOP.
         if o <= stop_price:
             exit_reason = "STOP_GAP"
             exit_price = o
@@ -301,12 +322,12 @@ def main() -> int:
 
     state_path.write_text(json.dumps(st, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print(f"open_positions_before={len(open_positions)} open_positions_after={len(still_open)}")
-    print(f"entryday_stop_exits={len(exited)} fills_added={len(fills_new)} trades_added={len(trades_new)}")
+    _log_print(f"open_positions_before={len(open_positions)} open_positions_after={len(still_open)}")
+    _log_print(f"entryday_stop_exits={len(exited)} fills_added={len(fills_new)} trades_added={len(trades_new)}")
     if exited:
-        print("exited_codes=" + ",".join([x["code"] for x in exited]))
+        _log_print("exited_codes=" + ",".join([x["code"] for x in exited]))
         for x in exited:
-            print(
+            _log_print(
                 f"- {x['code']} {x['exit_reason']} exit={x['exit_price']} stop={round(x['stop_price'],4)} open={x['open']} low={x['low']}"
             )
 

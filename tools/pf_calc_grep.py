@@ -1,14 +1,15 @@
-# pf_calc_grep.py
+﻿# pf_calc_grep.py
 # Scan python source under ROOT for PF/OOS/sensitivity related keywords and write matches to:
 #   ROOT\_diag\pf_calc_grep_py.txt
 #
 # Usage:
-#   python tools\pf_calc_grep.py --root E:\1_Data
+#   python tools\pf_calc_grep.py --root project root
 #
 import argparse
 import os
 import re
 from pathlib import Path
+import logging
 
 DEFAULT_KEYS = [
     "oos_pf",
@@ -23,6 +24,19 @@ DEFAULT_KEYS = [
     "split_policy",
 ]
 
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
 def iter_py_files(root: Path):
     for dirpath, _, filenames in os.walk(root):
         for fn in filenames:
@@ -31,7 +45,7 @@ def iter_py_files(root: Path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--root", default=r"E:\1_Data", help="Project root (default: E:\\1_Data)")
+    ap.add_argument("--root", default=str(Path(__file__).resolve().parents[1]), help="Project root (default: E:\\1_Data)")
     ap.add_argument("--out", default=None, help="Output file path (default: <root>\\_diag\\pf_calc_grep_py.txt)")
     ap.add_argument("--keys", nargs="*", default=DEFAULT_KEYS, help="Keywords to match (case-insensitive)")
     args = ap.parse_args()
@@ -61,9 +75,11 @@ def main():
                 lines_out.append(f"{p}:{i}: {line.strip()}")
 
     out_path.write_text("\n".join(lines_out), encoding="utf-8")
-    print(f"WROTE={out_path}")
-    print(f"FILES_SCANNED={file_count}")
-    print(f"HITS={hit_count}")
+    _log_print(f"WROTE={out_path}")
+    _log_print(f"FILES_SCANNED={file_count}")
+    _log_print(f"HITS={hit_count}")
 
 if __name__ == "__main__":
     main()
+
+

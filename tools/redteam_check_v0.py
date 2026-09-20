@@ -1,20 +1,34 @@
-#!/usr/bin/env python
+﻿#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
 redteam_check_v0.py (read-only)
 Exit code: 0=PASS, 2=FAIL
-Writes: E:\1_Data\2_Logs\redteam_check_YYYYMMDD_HHMMSS.json
+Writes: 2_Logs\redteam_check_YYYYMMDD_HHMMSS.json
 """
 from __future__ import annotations
 
 import csv, json, re, datetime as dt
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+import logging
 
-ROOT = Path(r"E:\1_Data")
+ROOT = Path(__file__).resolve().parents[1]
 LOGS = ROOT / "2_Logs"
 PAPER = ROOT / "paper"
 
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
 def now_tag() -> str:
     return dt.datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -43,8 +57,10 @@ def recompute_min_dd_sum(dd_curve_csv: Path) -> Tuple[Optional[float], Optional[
             if "dd_sum" not in (rdr.fieldnames or []):
                 return None, "missing_col:dd_sum"
             for row in rdr:
-                try: vals.append(float(row["dd_sum"]))
-                except Exception: pass
+                try:
+                    vals.append(float(row["dd_sum"]))
+                except (TypeError, ValueError):
+                    continue
         if not vals: return None, "no_dd_values"
         return min(vals), None
     except Exception as e:
@@ -114,14 +130,18 @@ def main() -> int:
                 if fmt4 != float(reported_fmt4): HARD("dd_mismatch", "dd_curve fmt4 != reported_dd fmt4", reported_fmt4=reported_fmt4, dd_curve_fmt4=fmt4, path=str(dd_curve_p))
 
     out_p.write_text(json.dumps(rep, ensure_ascii=False, indent=2), encoding="utf-8")
-    print("[REDTEAM] wrote:", out_p)
-    print("[REDTEAM] HARD_FAIL:", len(rep["hard_fail"]), "WARN:", len(rep["warn"]))
+    _log_print("[REDTEAM] wrote:", out_p)
+    _log_print("[REDTEAM] HARD_FAIL:", len(rep["hard_fail"]), "WARN:", len(rep["warn"]))
     if rep["hard_fail"]:
-        for x in rep["hard_fail"][:10]: print("[HARD]", x.get("code"), "-", x.get("msg"))
+        for x in rep["hard_fail"][:10]:
+            _log_print("[HARD]", x.get("code"), "-", x.get("msg"))
         return 2
-    for x in rep["warn"][:10]: print("[WARN]", x.get("code"), "-", x.get("msg"))
-    print("[PASS] no hard fails")
+    for x in rep["warn"][:10]:
+        _log_print("[WARN]", x.get("code"), "-", x.get("msg"))
+    _log_print("[PASS] no hard fails")
     return 0
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+

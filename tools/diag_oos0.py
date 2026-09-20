@@ -22,6 +22,7 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, List, Tuple
+import logging
 
 KEYWORDS_FILES = (
     "sensitivity", "walkforward", "walk_forward", "walk-forward",
@@ -43,6 +44,19 @@ SEARCH_DIR_HINTS = (
     "data", "results", "artifacts", "_artifacts", "_reports"
 )
 
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
 def now_tag() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -322,7 +336,7 @@ def main() -> int:
         out.append(f"[CODE POINTERS] error: {e}")
 
     report_path.write_text("\n".join(out), encoding="utf-8")
-    print(str(report_path))
+    _log_print(str(report_path))
     return 0
 
 if __name__ == "__main__":

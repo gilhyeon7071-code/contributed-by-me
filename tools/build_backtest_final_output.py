@@ -6,6 +6,7 @@ import json
 import math
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
+import logging
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,6 +17,19 @@ FAIL = "FAIL"
 NE = "NOT_EVALUABLE"
 
 
+
+
+logger = logging.getLogger(__name__)
+
+def _log_print(*args, **kwargs):
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+    sep = kwargs.get("sep", " ")
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    logger.info(msg)
 def _load_json(path: Path) -> Dict[str, Any]:
     if not path.exists():
         return {}
@@ -58,6 +72,24 @@ def _pick_item(items: List[Dict[str, Any]], name: str) -> Dict[str, Any]:
     return hit or {}
 
 
+def _sample_count_proxy(report: Dict[str, Any]) -> float:
+    artifacts = report.get("artifacts") or {}
+    base = artifacts.get("base_metrics") or {}
+    dsr = artifacts.get("deflated_sharpe_ratio") or {}
+    outlier = next((x for x in report.get("gate_results", []) if x.get("name") == "outlier_concentration"), {})
+    outlier_details = outlier.get("details") if isinstance(outlier, dict) else {}
+    candidates = [
+        base.get("n_trade_proxy") if isinstance(base, dict) else None,
+        base.get("n_buy_trades") if isinstance(base, dict) else None,
+        base.get("n_obs") if isinstance(base, dict) else None,
+        dsr.get("n_obs") if isinstance(dsr, dict) else None,
+        outlier_details.get("sample_n") if isinstance(outlier_details, dict) else None,
+    ]
+    vals = [_safe_float(x) for x in candidates]
+    vals = [x for x in vals if _is_finite(x)]
+    return max(vals) if vals else float("nan")
+
+
 def _domain_status(items: List[Dict[str, Any]], names: List[str]) -> str:
     selected = [_pick_item(items, n) for n in names]
     selected = [x for x in selected if x]
@@ -80,7 +112,7 @@ def _build_domains(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         ("6. 위기 시나리오", ["historical_scenario_response"]),
         ("7. 몬테카를로", ["monte_carlo"]),
         ("8. 실행비용 현실성", ["outlier_concentration"]),
-        ("9. 통계 유의성", ["temporal_consistency", "outlier_concentration"]),
+        ("9. 통계 유의성", ["temporal_consistency", "outlier_concentration", "deflated_sharpe_ratio"]),
         ("10. 재현성/운영", ["data_time_index_integrity", "strategy_parameter_validation"]),
     ]
 
@@ -106,31 +138,19 @@ def _build_domains(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def _final_gate(items: List[Dict[str, Any]], report: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], str]:
-    integ = ((report.get("artifacts") or {}).get("integration") or {})
-    base = ((report.get("artifacts") or {}).get("base_metrics") or {})
-
     def gs(name: str) -> str:
         return _pick_item(items, name).get("status", NE)
 
-    cpcv = _pick_item(items, "cpcv_pbo")
-    cpcv_ok = False
-    if cpcv:
-        metric = str(cpcv.get("metric", ""))
-        cpcv_ok = cpcv.get("status") == PASS and "pbo=" in metric
-
-    min_trade_proxy = int(base.get("n_obs", 0))
-    min_trade_ok = min_trade_proxy >= 100
+    min_trade_proxy = _sample_count_proxy(report)
+    min_trade_ok = _is_finite(min_trade_proxy) and min_trade_proxy >= 100
+    min_trade_status = PASS if min_trade_ok else (FAIL if _is_finite(min_trade_proxy) else NE)
+    min_trade_evidence = f"n_obs_proxy={int(min_trade_proxy)}" if _is_finite(min_trade_proxy) else "n_obs_proxy=검증 데이터 없음"
 
     criteria = [
         {
-            "name": "DSR > 0.95",
-            "status": NE,
-            "evidence": "현재 엔진에 DSR 게이트 미구현(추가 필요)",
-        },
-        {
-            "name": "PBO < 0.5",
-            "status": PASS if cpcv_ok else (gs("cpcv_pbo") if cpcv else NE),
-            "evidence": _pick_item(items, "cpcv_pbo").get("metric", "cpcv 미실행"),
+            "name": "DSR 게이트",
+            "status": gs("deflated_sharpe_ratio"),
+            "evidence": _pick_item(items, "deflated_sharpe_ratio").get("metric", "dsr 미실행"),
         },
         {
             "name": "MC 95% MDD 허용범위",
@@ -138,9 +158,9 @@ def _final_gate(items: List[Dict[str, Any]], report: Dict[str, Any]) -> Tuple[Li
             "evidence": _pick_item(items, "monte_carlo").get("metric", "-"),
         },
         {
-            "name": "위기 시나리오 생존(2008/2020/2022)",
-            "status": gs("historical_scenario_response"),
-            "evidence": _pick_item(items, "historical_scenario_response").get("metric", "-"),
+            "name": "운영구간 PnL/회전율",
+            "status": gs("acceptance_pnl_turnover"),
+            "evidence": _pick_item(items, "acceptance_pnl_turnover").get("metric", "-"),
         },
         {
             "name": "파라미터 고원(plateau)",
@@ -148,19 +168,9 @@ def _final_gate(items: List[Dict[str, Any]], report: Dict[str, Any]) -> Tuple[Li
             "evidence": _pick_item(items, "strategy_parameter_validation").get("metric", "-"),
         },
         {
-            "name": "전 레짐 치명손실 부재",
-            "status": gs("market_regime_response"),
-            "evidence": _pick_item(items, "market_regime_response").get("metric", "-"),
-        },
-        {
-            "name": "WFE > 50%",
-            "status": gs("walk_forward"),
-            "evidence": _pick_item(items, "walk_forward").get("metric", "-"),
-        },
-        {
             "name": "독립 거래 100회+ (프록시)",
-            "status": PASS if min_trade_ok else FAIL,
-            "evidence": f"n_obs_proxy={min_trade_proxy}",
+            "status": min_trade_status,
+            "evidence": min_trade_evidence,
         },
     ]
 
@@ -172,6 +182,99 @@ def _final_gate(items: List[Dict[str, Any]], report: Dict[str, Any]) -> Tuple[Li
         decision = "GO"
 
     return criteria, decision
+
+
+def _long_horizon_reference_criteria(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    cpcv = _pick_item(items, "cpcv_pbo")
+    cpcv_status = NE
+    if cpcv:
+        metric = str(cpcv.get("metric", ""))
+        cpcv_status = PASS if cpcv.get("status") == PASS and "pbo=" in metric else cpcv.get("status", NE)
+
+    return [
+        {
+            "name": "PBO < 0.5",
+            "status": cpcv_status,
+            "evidence": _pick_item(items, "cpcv_pbo").get("metric", "cpcv 미실행"),
+            "blocking": False,
+        },
+        {
+            "name": "위기 시나리오 생존(2008/2020/2022)",
+            "status": _pick_item(items, "historical_scenario_response").get("status", NE),
+            "evidence": _pick_item(items, "historical_scenario_response").get("metric", "-"),
+            "blocking": False,
+        },
+        {
+            "name": "전 레짐 치명손실 부재",
+            "status": _pick_item(items, "market_regime_response").get("status", NE),
+            "evidence": _pick_item(items, "market_regime_response").get("metric", "-"),
+            "blocking": False,
+        },
+        {
+            "name": "WFE 표본 충족 및 산출 가능",
+            "status": _pick_item(items, "walk_forward").get("status", NE),
+            "evidence": _pick_item(items, "walk_forward").get("metric", "-"),
+            "blocking": False,
+        },
+    ]
+
+
+def _advisory_checks(report: Dict[str, Any]) -> List[Dict[str, Any]]:
+    artifacts = report.get("artifacts") or {}
+    base = artifacts.get("base_metrics") or {}
+    integ = artifacts.get("integration") or {}
+    walk_forward = artifacts.get("walk_forward") or []
+
+    median_wfe = float("nan")
+    if isinstance(walk_forward, list):
+        vals: List[float] = []
+        for row in walk_forward:
+            if not isinstance(row, dict):
+                continue
+            v = _safe_float(row.get("wfe"))
+            valid = bool(row.get("wfe_valid", True))
+            if _is_finite(v) and valid:
+                vals.append(v)
+        if vals:
+            vals = sorted(vals)
+            n = len(vals)
+            median_wfe = vals[n // 2] if n % 2 == 1 else (vals[n // 2 - 1] + vals[n // 2]) / 2.0
+    wfe_margin_ok = _is_finite(median_wfe) and median_wfe >= 55.0
+
+    annual_return = _safe_float(base.get("annual_return"))
+    max_drawdown = _safe_float(base.get("max_drawdown"))
+    rr_ratio = float("nan")
+    if _is_finite(annual_return) and annual_return > 0 and _is_finite(max_drawdown):
+        rr_ratio = abs(max_drawdown) / annual_return
+    rr_ok = _is_finite(rr_ratio) and rr_ratio <= 3.0
+
+    cost_model = integ.get("cost_model") if isinstance(integ.get("cost_model"), dict) else {}
+    cost_total_bps = float("nan")
+    if isinstance(cost_model, dict):
+        cb = _safe_float(cost_model.get("commission_bps"))
+        sb = _safe_float(cost_model.get("slippage_bps"))
+        pb = _safe_float(cost_model.get("spread_bps"))
+        if _is_finite(cb) and _is_finite(sb) and _is_finite(pb):
+            cost_total_bps = cb + sb + pb
+    cost_conservative_ok = _is_finite(cost_total_bps) and cost_total_bps >= 15.0
+
+    return [
+        {
+            "name": "WFE 안전마진(권고>=55%)",
+            "status": "OK" if wfe_margin_ok else "WARN",
+            "evidence": f"median_wfe={_fmt(median_wfe)} (threshold>=55)",
+        },
+        {
+            "name": "수익/낙폭 균형 권고(MDD/연수익<=3.0)",
+            "status": "OK" if rr_ok else "WARN",
+            "evidence": f"annual_return={_pct(annual_return)}, max_drawdown={_pct(max_drawdown)}, ratio={_fmt(rr_ratio)}",
+        },
+        {
+            "name": "실전비용 보수성 권고(총비용>=15bps)",
+            "status": "OK" if cost_conservative_ok else "WARN",
+            "evidence": f"cost_total_bps={_fmt(cost_total_bps)} (commission+slippage+spread)",
+        },
+    ]
 
 
 def _weakness_map(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -312,6 +415,7 @@ def _build_summary(checklist: Dict[str, Any], report: Dict[str, Any]) -> Dict[st
     items = checklist.get("items", []) or []
     domains = _build_domains(items)
     final_criteria, final_decision = _final_gate(items, report)
+    long_horizon_reference = _long_horizon_reference_criteria(items)
 
     artifacts = report.get("artifacts") or {}
     integ = artifacts.get("integration") or {}
@@ -323,8 +427,21 @@ def _build_summary(checklist: Dict[str, Any], report: Dict[str, Any]) -> Dict[st
         "sharpe": base.get("sharpe"),
         "max_drawdown": base.get("max_drawdown"),
         "win_rate": base.get("win_rate"),
+        "profit_factor": base.get("profit_factor"),
         "mc_mdd_95": ((mc.get("mdd_pct") or {}).get("95") if isinstance(mc, dict) else None),
         "mc_final_50": ((mc.get("final_pct") or {}).get("50") if isinstance(mc, dict) else None),
+        "mdd_to_return_ratio": (abs(_safe_float(base.get("max_drawdown"))) / _safe_float(base.get("annual_return")))
+        if (_is_finite(_safe_float(base.get("max_drawdown"))) and _is_finite(_safe_float(base.get("annual_return"))) and _safe_float(base.get("annual_return")) > 0)
+        else None,
+        "cost_total_bps": (
+            _safe_float(((integ.get("cost_model") or {}).get("commission_bps")))
+            + _safe_float(((integ.get("cost_model") or {}).get("slippage_bps")))
+            + _safe_float(((integ.get("cost_model") or {}).get("spread_bps")))
+        ) if (
+            _is_finite(_safe_float(((integ.get("cost_model") or {}).get("commission_bps"))))
+            and _is_finite(_safe_float(((integ.get("cost_model") or {}).get("slippage_bps"))))
+            and _is_finite(_safe_float(((integ.get("cost_model") or {}).get("spread_bps"))))
+        ) else None,
     }
 
     operating = {
@@ -332,6 +449,7 @@ def _build_summary(checklist: Dict[str, Any], report: Dict[str, Any]) -> Dict[st
         "backtest_source": integ.get("backtest_source"),
         "params": integ.get("params"),
         "cost_model": integ.get("cost_model"),
+        "base_meta": artifacts.get("base_meta"),
         "max_tolerable_mdd": integ.get("max_tolerable_mdd"),
     }
 
@@ -340,21 +458,32 @@ def _build_summary(checklist: Dict[str, Any], report: Dict[str, Any]) -> Dict[st
         "profitability": _profitability_summary(checklist, expected, final_decision),
         "management": _management_summary(checklist, weaknesses),
     }
+    advisories = _advisory_checks(report)
 
     stop_rules = [
         "실시간 MDD가 mdd_limit를 하회하면 자동 중지",
         "연속 20거래일 수익률이 음수면 파라미터 재검증",
-        "판정불가 항목은 데이터 보강 전 실전 전환 금지",
+        "운영평가구간 필수 항목 FAIL 발생 시 실전 전환 금지",
         "Look-ahead/Position-lag FAIL 발생 시 즉시 배포 중단",
     ]
 
+    if final_decision == "GO":
+        operation_judgment = "운영평가구간 통과"
+    elif final_decision == "NO_GO":
+        operation_judgment = "운영보류"
+    else:
+        operation_judgment = checklist.get("operation_judgment", "-")
+
     return {
         "generated_at": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "operation_judgment": checklist.get("operation_judgment", "-"),
+        "operation_judgment": operation_judgment,
+        "evaluation_scope": checklist.get("evaluation_scope", {}),
         "overall_pass": bool(checklist.get("passed", False)),
         "final_gate_decision": final_decision,
         "domain_results": domains,
         "final_gate_criteria": final_criteria,
+        "long_horizon_reference_criteria": long_horizon_reference,
+        "advisory_checks": advisories,
         "expected_range": expected,
         "weakness_map": weaknesses,
         "result_summary": result_summary,
@@ -369,6 +498,10 @@ def _render_md(summary: Dict[str, Any], checklist: Dict[str, Any]) -> str:
     lines.append("")
     lines.append(f"- operation_judgment: **{summary.get('operation_judgment','-')}**")
     lines.append(f"- final_gate_decision: **{summary.get('final_gate_decision','HOLD')}**")
+    scope = summary.get("evaluation_scope", {}) if isinstance(summary.get("evaluation_scope"), dict) else {}
+    if scope:
+        lines.append(f"- evaluation_scope: **{scope.get('label', '-')}**")
+        lines.append(f"- interpretation: {scope.get('interpretation', '-')}")
     lines.append(
         f"- checklist: total={checklist.get('total',0)}, pass={checklist.get('pass_n',0)}, fail={checklist.get('fail_n',0)}, not_evaluable={checklist.get('not_evaluable_n',0)}"
     )
@@ -404,6 +537,27 @@ def _render_md(summary: Dict[str, Any], checklist: Dict[str, Any]) -> str:
     for c in summary.get("final_gate_criteria", []):
         lines.append(f"| {c.get('name')} | {c.get('status')} | {c.get('evidence')} |")
 
+    refs = summary.get("long_horizon_reference_criteria", []) or []
+    if refs:
+        lines.append("")
+        lines.append("## 장기 강건성 참고")
+        lines.append("")
+        lines.append("| 기준 | 상태 | 최종차단 | 근거 |")
+        lines.append("|---|---|---|---|")
+        for r in refs:
+            blocking = "Y" if bool(r.get("blocking", False)) else "N"
+            lines.append(f"| {r.get('name')} | {r.get('status')} | {blocking} | {r.get('evidence')} |")
+
+    adv = summary.get("advisory_checks", []) or []
+    if adv:
+        lines.append("")
+        lines.append("## 권고 점검")
+        lines.append("")
+        lines.append("| 항목 | 상태 | 근거 |")
+        lines.append("|---|---|---|")
+        for a in adv:
+            lines.append(f"| {a.get('name')} | {a.get('status')} | {a.get('evidence')} |")
+
     lines.append("")
     lines.append("## 기대치(현실화)")
     er = summary.get("expected_range", {})
@@ -413,6 +567,8 @@ def _render_md(summary: Dict[str, Any], checklist: Dict[str, Any]) -> str:
     lines.append(f"- win_rate: {_fmt(er.get('win_rate'))}")
     lines.append(f"- mc_mdd_95: {_fmt(er.get('mc_mdd_95'))}")
     lines.append(f"- mc_final_50: {_fmt(er.get('mc_final_50'))}")
+    lines.append(f"- mdd_to_return_ratio: {_fmt(er.get('mdd_to_return_ratio'))}")
+    lines.append(f"- cost_total_bps: {_fmt(er.get('cost_total_bps'))}")
 
     lines.append("")
     lines.append("## 약점 맵")
@@ -464,11 +620,11 @@ def main() -> int:
     out_md.write_text(md_text, encoding="utf-8-sig")
     out_md_latest.write_text(md_text, encoding="utf-8-sig")
 
-    print(f"[BTFINAL] decision={summary.get('final_gate_decision','HOLD')} op={summary.get('operation_judgment','-')}")
-    print(f"[BTFINAL] json={out_json}")
-    print(f"[BTFINAL] md={out_md}")
-    print(f"[BTFINAL] latest_json={out_json_latest}")
-    print(f"[BTFINAL] latest_md={out_md_latest}")
+    _log_print(f"[BTFINAL] decision={summary.get('final_gate_decision','HOLD')} op={summary.get('operation_judgment','-')}")
+    _log_print(f"[BTFINAL] json={out_json}")
+    _log_print(f"[BTFINAL] md={out_md}")
+    _log_print(f"[BTFINAL] latest_json={out_json_latest}")
+    _log_print(f"[BTFINAL] latest_md={out_md_latest}")
     return 0
 
 

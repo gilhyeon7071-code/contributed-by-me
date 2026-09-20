@@ -1,0 +1,83 @@
+generate_candidates_v41_1.py:335 | if len(skipped) > 20:
+generate_candidates_v41_1.py:387 | x["require_macd_golden"] = 1.0 if fnum(x["require_macd_golden"], DEFAULT_PARAMS["require_macd_golden"]) >= 0.5 else 0.0
+generate_candidates_v41_1.py:418 | x["company_analyzer_enable"] = 1.0 if fnum(x.get("company_analyzer_enable", 1.0), 1.0) >= 0.5 else 0.0
+generate_candidates_v41_1.py:421 | x["exclude_administrative"] = 1.0 if fnum(x.get("exclude_administrative", 1.0), 1.0) >= 0.5 else 0.0
+generate_candidates_v41_1.py:422 | x["exclude_investment_warning"] = 1.0 if fnum(x.get("exclude_investment_warning", 1.0), 1.0) >= 0.5 else 0.0
+generate_candidates_v41_1.py:423 | x["exclude_investment_risk"] = 1.0 if fnum(x.get("exclude_investment_risk", 1.0), 1.0) >= 0.5 else 0.0
+generate_candidates_v41_1.py:426 | x["junk_risk_enable"] = 1.0 if fnum(x.get("junk_risk_enable", 1.0), 1.0) >= 0.5 else 0.0
+generate_candidates_v41_1.py:428 | x["junk_hard_exclude"] = 1.0 if fnum(x.get("junk_hard_exclude", 1.0), 1.0) >= 0.5 else 0.0
+generate_candidates_v41_1.py:773 | require_macd = float((p.get("require_macd_golden") if p.get("require_macd_golden") is not None else 0.0)) >= 0.5
+generate_candidates_v41_1.py:1212 | ex_admin = float((p.get("exclude_administrative") if p.get("exclude_administrative") is not None else 1.0)) >= 0.5
+generate_candidates_v41_1.py:1213 | ex_warn = float((p.get("exclude_investment_warning") if p.get("exclude_investment_warning") is not None else 1.0)) >= 0.5
+generate_candidates_v41_1.py:1214 | ex_risk = float((p.get("exclude_investment_risk") if p.get("exclude_investment_risk") is not None else 1.0)) >= 0.5
+generate_candidates_v41_1.py:1283 | if s >= 85:
+generate_candidates_v41_1.py:1285 | if s >= 70:
+generate_candidates_v41_1.py:1287 | if s >= 50:
+generate_candidates_v41_1.py:1289 | if s >= 30:
+generate_candidates_v41_1.py:1329 | enabled = float((p.get("junk_risk_enable") if p.get("junk_risk_enable") is not None else 1.0)) >= 0.5
+generate_candidates_v41_1.py:1385 | if float(liq_r.loc[idx]) >= 0.55:
+generate_candidates_v41_1.py:1387 | if float(pump_r.loc[idx]) >= 0.55:
+generate_candidates_v41_1.py:1389 | if float(young_r.loc[idx]) >= 0.60:
+generate_candidates_v41_1.py:1391 | if float(fund_r.loc[idx]) >= 0.55:
+generate_candidates_v41_1.py:1401 | if ret1 >= 29.0 or stretch >= 1.24:
+generate_candidates_v41_1.py:1407 | if market == "KOSDAQ" and 0.0 < market_cap <= 300_000_000_000.0:
+generate_candidates_v41_1.py:1417 | info["high_risk_rows"] = int((pd.to_numeric(out["junk_risk_score"], errors="coerce") >= 70.0).sum())
+generate_candidates_v41_1.py:1418 | info["extreme_risk_rows"] = int((pd.to_numeric(out["junk_risk_score"], errors="coerce") >= 85.0).sum())
+generate_candidates_v41_1.py:1434 | hard_ex = float((p.get("junk_hard_exclude") if p.get("junk_hard_exclude") is not None else 1.0)) >= 0.5
+generate_candidates_v41_1.py:1444 | hard_threshold_ser.loc[market_cap_ser >= 1_000_000_000_000.0] = np.maximum(
+generate_candidates_v41_1.py:1445 | hard_threshold_ser.loc[market_cap_ser >= 1_000_000_000_000.0],
+generate_candidates_v41_1.py:1538 | if s >= 90:
+generate_candidates_v41_1.py:1540 | if s >= 80:
+generate_candidates_v41_1.py:1542 | if s >= 65:
+generate_candidates_v41_1.py:1544 | if s >= 50:
+generate_candidates_v41_1.py:1546 | if s >= 35:
+generate_candidates_v41_1.py:1632 | use_ca = float(_ca_enable_raw if _ca_enable_raw is not None else 1.0) >= 0.5
+generate_candidates_v41_1.py:1737 | return float(ret.max()), float((ret >= 5.0).mean()), float((ret >= 10.0).mean())
+generate_candidates_v41_1.py:1749 | broad_rally = (max_ret >= 20.0 and pct_ge_5 >= 0.12) or (pct_ge_10 >= 0.10)
+generate_candidates_v41_1.py:1756 | if level_num >= 5 and broad_rally:
+generate_candidates_v41_1.py:1758 | elif level_num >= 5:
+generate_candidates_v41_1.py:1770 | top_per_sector = 3 if (broad_rally or level_num >= 5) else 2
+generate_candidates_v41_1.py:1914 | if level_num < 5:
+generate_candidates_v41_1.py:1924 | broad_rally = (max_ret >= 25.0) and (pct_ge_10 >= 0.08)
+optimize_params_v41_1.py:981 | require_macd = float(params.get("require_macd_golden", 0.0) or 0.0) >= 0.5
+optimize_params_v41_1.py:986 | use_relax_ladder = float(_urlv if _urlv is not None else 1.0) >= 0.5
+optimize_params_v41_1.py:1029 | "require_above_ma200": 1.0 if float(params.get("require_above_ma200", 0.0) or 0.0) >= 0.5 else 0.0,
+optimize_params_v41_1.py:1067 | if lvnum >= 5 and len(chosen) < 5:
+optimize_params_v41_1.py:1069 | if (_mx >= 25.0) and (_p10 >= 0.08):
+optimize_params_v41_1.py:1129 | junk_enable = float(_jre if _jre is not None else 1.0) >= 0.5
+optimize_params_v41_1.py:1137 | hard_exclude = float(_jhe if _jhe is not None else 1.0) >= 0.5
+optimize_params_v41_1.py:1476 | if n < 5 or active_days < MIN_ACTIVE_DAYS:
+optimize_params_v41_1.py:1737 | "require_macd_golden": 1.0 if _safe_float(prev_stable.get("require_macd_golden"), 0.0) >= 0.5 else 0.0,
+optimize_params_v41_1.py:1741 | "use_relax_ladder": 1.0 if _safe_float(prev_stable.get("use_relax_ladder"), 1.0) >= 0.5 else 0.0,
+optimize_params_v41_1.py:1748 | "require_above_ma200": 1.0 if _safe_float(prev_stable.get("require_above_ma200"), 1.0) >= 0.5 else 0.0,
+optimize_params_v41_1.py:1751 | "sector_rs_min": 0.05,  # rule_e: sector rs > 0.05
+paper_engine/entry.py:2643 | elif len(row) >= 11:
+paper_engine/entry.py:2655 | row[4] if len(row) > 4 else "0",
+paper_engine/entry.py:2656 | row[5] if len(row) > 5 else "0",
+paper_engine/entry.py:2657 | row[6] if len(row) > 6 else "0",
+paper_engine/entry.py:2658 | row[7] if len(row) > 7 else "0",
+paper_engine/entry.py:2659 | row[8] if len(row) > 8 else "0",
+paper_engine/entry.py:2660 | row[9] if len(row) > 9 else "0",
+paper_engine/entry.py:2661 | row[10] if len(row) > 10 else "",
+paper_engine/entry.py:2662 | row[11] if len(row) > 11 else "",
+paper_engine/entry.py:4292 | 2026-08-21 005690 실측: 758 -> 65 -> 20 -> 10 -> 2 -> 1 로 6단계에 걸쳐 깎였는데
+paper_engine/entry.py:4717 | if x.shape[0] < 5 or x.shape[1] < 2:
+paper_engine/entry.py:6461 | f"[DDM][UNFIREABLE] sector_concentration_block=true 이나 limit={sector_limit:.2f} >= 1.00 "
+paper_engine/entry.py:7901 | while seq <= 9999 and order_id in existing_fill_order_ids:
+paper_engine/exit.py:175 | if len(row) < 7 or norm_code(row[1]) != code_norm:
+paper_engine/exit.py:179 | if len(row) < 11 or norm_code(row[2]) != code_norm:
+paper_engine/exit.py:292 | if len(entry_ts14) >= 12 and "_ts14" in work.columns:
+paper_engine/exit.py:610 | ma120 = _calc_ma(hist_closes, int(ma_periods[2])) if len(ma_periods) >= 3 else None
+paper_engine/exit.py:687 | if market_risk_score >= 60 and market_tag not in executed_sell_tags:
+paper_engine/exit.py:688 | if current_profit_pct > 0 and market_risk_score >= 80:
+paper_engine/exit.py:1051 | and len(_entry_ts14) >= 12
+paper_engine/exit.py:1060 | or (len(_entry_ts14) >= 12 and _entry_ts14.endswith("152000"))
+paper_engine/exit.py:1350 | and len(hist_closes) >= 4
+paper_engine/exit.py:1351 | and len(hist_volumes) >= 4
+paper_engine/exit.py:2134 | if len(summary_digits) >= 14 and len(latest_digits) >= 14:
+paper_engine/exit.py:2644 | if 900 <= hhmm <= 1530:
+paper_engine/drawdown.py:63 | if x > 1.0 and x <= 100.0:
+paper_engine/drawdown.py:256 | if stage_idx >= 4:
+paper_engine/risk_orchestration.py:35 | if x > 1.0 and x <= 100.0:
+tools/topn_candidates.py:8 | base_value(전일까지 20일 평균 거래대금) >= 20억   포지션 1,670만 / 참여율 1% x 안전계수 2
+tools/topn_candidates.py:106 | reported = (v / 100.0) if mx > 1.5 else v

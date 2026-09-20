@@ -1,0 +1,18 @@
+﻿{
+    "generated_at":  "2026-07-29T10:08:31",
+    "task_name":  "VIBE_LLM_Wiki_Pipeline",
+    "root":  "E:\\1_Data",
+    "pipeline":  "E:\\1_Data\\run_llm_wiki_pipeline.bat",
+    "mode":  "APPLY",
+    "policy_effect":  false,
+    "trading_effect":  false,
+    "exists_before":  true,
+    "schedule":  "hourly",
+    "action":  "wscript.exe \"E:\\1_Data\\run_llm_wiki_pipeline_hidden.vbs\"",
+    "applied":  true,
+    "exists_after":  true,
+    "notes":  [
+                  "Registers only the LLM Wiki local pipeline.",
+                  "Does not call Slack, create credentials, or change Gate, STOP, LOCK, risk, score, order, fill, ledger, or stats behavior."
+              ]
+}

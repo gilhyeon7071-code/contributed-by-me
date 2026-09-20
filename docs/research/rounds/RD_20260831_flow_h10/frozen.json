@@ -1,0 +1,30 @@
+{
+  "round_id": "RD_20260831_flow_h10",
+  "frozen_at": "2026-08-31T09:32:07",
+  "registration_sha256": "a0c51170bb62fc27ba077057e7c5f1ae02eeb7608e8f9857308ba426f38575e5",
+  "MDE": 0.582,
+  "MES": 1.0,
+  "margin": 0.41800000000000004,
+  "baselines": {
+    "tools/load_merged_panel.py": "b816aa287ddebd86f4b81efe7ac4307ba7e340b2e5cfb38510059020e8a72d15",
+    "tools/fetch_investor_flow.py": "2f3c5d6e3d3986f9183e91a8a9454b11937c3d94b58e13fdc7a8948a44004ed0",
+    "2_Logs/index_daily_history.csv": {
+      "mode": "growing_csv",
+      "prefix_sha256": "c591f8d23818ca6c3039c547b677c7b6bb2a53923b63782c8eaf2d7de124297f",
+      "rows_upto": 8673,
+      "cutoff": "20260828",
+      "full_sha256_at_freeze": "d698775f7f78c6ab88a7b4f7df333f529080db5a133f5a583a49d0fe6b0c06f0",
+      "_migrated": "2026-08-31 전체 sha256 -> 과거행 내용해시로 이관. PLANS (177)",
+      "_why": "매일 자라는 파일이라 정상 수집만으로 --check 가 FAIL 했다. 변조와 구별 불가",
+      "_integrity_evidence": "이관 시점에 과거행 보존 확인: date<=20260828 행수 8673 불변, 16:05 이전에 읽어둔 앵커 3건(1001 20260828=838.41 / 20260827=837.65 / 20260821=801.94) 일치, 코드->이름 매핑 동일"
+    }
+  },
+  "draft_status_line": "- 상태: **DRAFT** (동결 전. --freeze 를 통과해야 측정을 시작할 수 있다)",
+  "_migration": {
+    "at": "2026-08-31T17:46:36",
+    "files": [
+      "2_Logs/index_daily_history.csv"
+    ],
+    "ref": "PLANS (177)"
+  }
+}
