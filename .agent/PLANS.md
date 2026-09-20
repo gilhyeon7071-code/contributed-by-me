@@ -51236,3 +51236,15 @@ account_clear_min_scale 바닥                                = 0.25    (applied
   UNKNOWN 이어도 GO 아님 / 예외 -> UNKNOWN / 낡은 계좌 산출물 -> UNKNOWN / 문턱 6,000만 경계 / 보유 있으면 FAIL /
   손계산 기록 없으면 UNKNOWN / 안 한 것은 FAIL 아닌 UNKNOWN / v41.1 보유 있으면 FAIL / 낡은 상태파일 UNKNOWN
 - exec plan 5절에 판정 명령과 첫 결과 기록. **기준 자체는 바꾸지 않았다**(09-28 이후 변경 금지 규칙 준수)
+
+## 559. 경계 감시가 매일 헛울던 것 수리 (2026-09-21)
+- 발단: 09-21 08:50 상태판 — `VIBE_Invariant_Watch_2050` rc=3. 7단계 중 **0단계 boundary_watch 만** 실패(rc0=3)
+- 실측: 09-14~09-20 로그에서 경보 6건 중 **5건이 `2_Logs/index_daily_history.csv` 해시 변경**(설계상 매일 한 줄씩 붙는 파일),
+  **4건이 `VIBE_Investor_Flow_Daily` Ready<->Running**(그 순간 돌고 있던 것). 둘 다 정상 동작
+- 왜 고쳤나: 이 가드는 `tools/load_merged_panel.py` 등 **측정 입력의 무단 변경**을 잡는 자리다.
+  매일 우는 감지기는 없는 것과 같아 (나)측정 오염 조건에 해당
+- 조치(백업 `tools/boundary_watch.py.bak_20260921_085232`):
+  ① `APPEND_ONLY` 집합 도입 — 전체 해시 대신 **앞 64KB 해시 + 크기**로 서명, 경보는 "앞부분이 바뀌었다 / 줄었다 / 사라졌다" 일 때만
+  ② 예약작업 `Running` -> `Ready` 정규화. **`Disabled` 는 그대로 경보**(진짜 경계 변화)
+- 시험 `tests/test_boundary_watch_noise.py` 11건 — 침묵 3(증가/Running/정규화) + **경보 6**(축소·앞부분변경·소멸·Disabled·시각변경·일반파일) + 서명형태 2
+- 격리 실행으로 공유 원장 mtime 불변 확인 -> `--accept` 로 새 기준 승인 -> 재실행 "변화 없음" rc=0

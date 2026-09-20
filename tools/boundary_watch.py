@@ -83,6 +83,10 @@ def _task_schedule(name: str) -> Dict[str, Any]:
         if not raw or "|" not in raw:
             return {"exists": False, "detail": (r.stderr or "").strip()[:120]}
         state, start, interval = raw.split("|")
+        # Running 은 '지금 돌고 있다' 는 순간 상태지 경계 변화가 아니다 (2026-09-21).
+        # 이것 때문에 감시가 4번 헛울었다. 다만 Disabled 는 진짜 경계 변화라 그대로 남긴다.
+        if state == "Running":
+            state = "Ready"
         return {"exists": True, "state": state,
                 "start_hhmm": start[11:16] if len(start) > 15 else start,
                 "interval": interval}
@@ -90,12 +94,36 @@ def _task_schedule(name: str) -> Dict[str, Any]:
         return {"exists": False, "detail": "%s: %s" % (type(exc).__name__, exc)}
 
 
+# 설계상 매일 줄이 붙는 파일. 전체 해시로 보면 **매일 운다** — 그러면 감시가 죽는다.
+# 여기서 볼 것은 '바뀌었나' 가 아니라 **'앞부분이 고쳐졌거나 줄었나'** 다 (2026-09-21).
+APPEND_ONLY = {"2_Logs/index_daily_history.csv"}
+_HEAD_BYTES = 65536
+
+
 def _file_sig(rel: str) -> Dict[str, Any]:
     p = ROOT / rel
     if not p.is_file():
         return {"exists": False}
     b = p.read_bytes()
+    if rel in APPEND_ONLY:
+        return {"exists": True, "append_only": True,
+                "head16": hashlib.sha256(b[:_HEAD_BYTES]).hexdigest()[:16], "bytes": len(b)}
     return {"exists": True, "sha256_16": hashlib.sha256(b).hexdigest()[:16], "bytes": len(b)}
+
+
+def _append_only_alarm(a: Dict[str, Any], c: Dict[str, Any]) -> Optional[str]:
+    """붙기만 했으면 침묵, 앞이 바뀌었거나 줄었으면 운다. 둘 다 아니면 None."""
+    if not (isinstance(a, dict) and isinstance(c, dict)):
+        return "형태가 바뀌었다"
+    if not c.get("exists"):
+        return "파일이 사라졌다"
+    if not a.get("exists"):
+        return None                                  # 없다가 생긴 것은 경보 대상이 아니다
+    if a.get("head16") != c.get("head16"):
+        return "앞부분이 바뀌었다 (덮어쓰기·재생성 의심)"
+    if int(c.get("bytes", 0)) < int(a.get("bytes", 0)):
+        return "줄었다 %d -> %d bytes" % (a.get("bytes", 0), c.get("bytes", 0))
+    return None
 
 
 def snapshot() -> Dict[str, Any]:
@@ -130,6 +158,13 @@ def diff(prev: Optional[Dict[str, Any]], cur: Dict[str, Any]) -> List[str]:
         pa, ca = prev.get(kind) or {}, cur.get(kind) or {}
         for name in sorted(set(pa) | set(ca)):
             a, c = pa.get(name), ca.get(name)
+            if kind == "files" and isinstance(a, dict) and a.get("append_only"):
+                why = _append_only_alarm(a, c)
+                if why:
+                    out.append("files %s: %s (%s -> %s)"
+                               % (name, why, json.dumps(a, ensure_ascii=False),
+                                  json.dumps(c, ensure_ascii=False)))
+                continue
             if a != c:
                 out.append("%s %s: %s -> %s"
                            % (kind, name,
