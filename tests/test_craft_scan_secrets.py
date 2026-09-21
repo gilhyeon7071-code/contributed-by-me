@@ -77,3 +77,35 @@ def test_scan_reports_the_new_key(tmp_path, monkeypatch):
     monkeypatch.setattr(C, "ROOT", tmp_path)
     monkeypatch.setattr(C, "_files", lambda: [tmp_path / "tools" / "a.py"])
     assert "plaintext_secrets" in C.scan()
+
+
+# ---------------------------------------------------------------- [8] 왕복 비용 상수 불일치 (2026-09-21)
+def _drift(tmp_path, monkeypatch, body, name="x.py"):
+    p = tmp_path / "tools" / name
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(body, encoding="utf-8")
+    monkeypatch.setattr(C, "ROOT", tmp_path)
+    return C._cost_constant_drift([p])
+
+
+def test_drift_catches_stale_assignment(tmp_path, monkeypatch):
+    """쓰는 값이 지금 모델과 다르면 잡는다 (0.358 계열 -> 0.400)."""
+    hits = _drift(tmp_path, monkeypatch, "COST_ROUND_TRIP = 0.00358\n")
+    assert len(hits) == 1 and "0.358%" in hits[0]["text"]
+
+
+def test_drift_is_silent_when_matching(tmp_path, monkeypatch):
+    assert _drift(tmp_path, monkeypatch, "cost = 0.004\n") == []
+
+
+def test_drift_ignores_prose(tmp_path, monkeypatch):
+    """과거 사건을 적은 주석은 잡지 않는다 — 첫 구현이 이걸 37건 냈고 전부 오탐이었다.
+    오탐이 남으면 스캔 전체가 무시된다."""
+    body = ("# 엔진은 왕복 1.400% 를 청구하고 있었다 (2026-07 사고)\n"
+            '"""기존 프로파일 backtest 2/3/2   왕복 0.120%"""\n'
+            "x = 1\n")
+    assert _drift(tmp_path, monkeypatch, body) == []
+
+
+def test_drift_ignores_trailing_comment_on_code(tmp_path, monkeypatch):
+    assert _drift(tmp_path, monkeypatch, "cost = 0.004   # 예전엔 0.00358 이었다\n") == []

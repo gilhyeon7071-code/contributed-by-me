@@ -196,6 +196,58 @@ def _plaintext_secrets(files: List[Path]) -> List[Dict[str, Any]]:
     return out
 
 
+# [2026-09-21] 왕복 비용 상수가 코드마다 갈렸다 — 0.358%(12개 파일) vs 0.400%(8개 파일).
+#   09-10 에 브로커 실측으로 갱신했는데 전수 반영이 안 됐다. 비용은 모든 손익 판정이 서는 값이라
+#   갈라지면 결론이 갈린다. 지금 값(tools/cost_model.py 재계산)과 **다른 리터럴**만 잡는다.
+# 서술과 상수를 가른다. 첫 구현은 "왕복" 이 들어간 **모든 줄**을 봐서 37건을 냈는데
+#   전부 과거 사건을 적은 주석이었다("엔진은 왕복 1.400% 를 청구하고 있었다").
+#   오탐이 남으면 스캔 전체가 무시된다 — **실행되는 대입/기본값만** 본다.
+_COST_ASSIGN = re.compile(
+    r"(?:^|[^#\w])(?:cost|COST|round_trip|ROUND_TRIP|fee_total|비용)\w*\s*=\s*(0\.0\d{1,4})\b"
+    r"|default\s*=\s*(0\.0\d{1,4})\s*,\s*help\s*=\s*[\"'][^\"']*왕복")
+
+
+def _cost_constant_drift(files: List[Path]) -> List[Dict[str, Any]]:
+    """코드가 **실제로 쓰는** 왕복 비용이 지금 모델과 다른가.
+
+    주석·문서의 서술은 잡지 않는다(과거 기록은 그대로 둬야 한다).
+    """
+    try:
+        sys.path.insert(0, str(ROOT / "tools"))
+        from cost_model import model_round_trip
+        m = model_round_trip()
+        if not m.get("ok"):
+            return [{"file": "-", "line": 0, "text": "비용 모델을 못 읽음: %s" % m.get("reason")}]
+        cur = round(m["round_trip"], 5)
+    except Exception as e:
+        return [{"file": "-", "line": 0, "text": "비용 모델 로드 실패: %s" % type(e).__name__}]
+    out: List[Dict[str, Any]] = []
+    for p in files:
+        rel = str(p.relative_to(ROOT)).replace("\\", "/")
+        # tests/ 는 고정값을 일부러 쓴다 — 여기 오탐이 남으면 스캔 전체가 무시된다
+        if (rel.startswith("backup/") or "/backup" in rel or rel.startswith("tests/")
+                or rel in ("tools/cost_model.py", "tools/craft_scan.py")):
+            continue
+        if p.suffix != ".py":
+            continue
+        try:
+            s = io.open(str(p), encoding="utf-8", errors="ignore").read()
+        except Exception:
+            continue
+        for i, line in enumerate(s.splitlines(), 1):
+            code = line.split("#", 1)[0]
+            if not code.strip():
+                continue
+            mm = _COST_ASSIGN.search(code)
+            if not mm:
+                continue
+            val = float(mm.group(1) or mm.group(2))
+            if 0.001 <= val <= 0.02 and round(val, 5) != cur:
+                out.append({"file": rel, "line": i,
+                            "text": "쓰는 값 %.3f%% (지금 모델 %.3f%%)" % (100 * val, 100 * cur)})
+    return out
+
+
 def scan() -> Dict[str, Any]:
     ctrl: List[Dict[str, Any]] = []
     ortrap: List[Dict[str, Any]] = []
@@ -250,6 +302,7 @@ def scan() -> Dict[str, Any]:
         "bat_arrow_redirects": _bat_arrow_redirects(files),
         "bat_bom": _bat_bom(files),
         "plaintext_secrets": _plaintext_secrets(files),
+        "cost_constant_drift": _cost_constant_drift(files),
     }
 
 
@@ -299,7 +352,11 @@ def main() -> int:
     print("  [7] 코드에 박힌 자격증명              %d건" % n7)
     for x in rep["plaintext_secrets"][:5]:
         print("        %s:%s  %s" % (x["file"], x["line"], x["text"]))
-    total = n1 + n2 + n3 + n4 + n5 + n6 + n7
+    n8 = len(rep["cost_constant_drift"])
+    print("  [8] 왕복 비용 상수 불일치            %d건" % n8)
+    for x in rep["cost_constant_drift"][:5]:
+        print("        %s:%s  %s" % (x["file"], x["line"], x["text"]))
+    total = n1 + n2 + n3 + n4 + n5 + n6 + n7 + n8
     print("-" * 74)
     if total == 0:
         print("  없음")

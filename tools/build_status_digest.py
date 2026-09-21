@@ -425,16 +425,16 @@ def section_tasks() -> list[str]:
 
 
 def section_costs() -> list[str]:
-    f = ROOT / "paper" / "trade_costs.csv"
-    if not f.exists():
-        return []
-    with f.open(encoding="utf-8-sig") as fh:
-        rows = list(csv.DictReader(fh))
-    if not rows:
-        return []
-    r = rows[-1]
-    return ["비용    최근 청산 %s %s  왕복 %.3f%%  (원장 %d건)"
-            % (r.get("exit_date"), r.get("code"), 100 * float(r.get("total_cost_pct") or 0), len(rows))]
+    """[2026-09-21] 종전에는 `trade_costs.csv` 의 **마지막 행**(개별 체결 1건)을 "왕복" 이라 띄웠다.
+    그 값 0.398% 는 68건 중 **최솟값**이었다(평균 0.720% / 중앙 0.576% / 최대 2.729%).
+    모델값(모든 검증이 서는 상수)과 실현값(지나간 체결)이 같은 글자를 쓰고 있었다.
+    게다가 '마지막 행' 은 '최근 청산' 이 아니다 — 파일 순서였다.
+    단일 출처 `tools/cost_model.py` 가 **재현해서** 둘을 따로 낸다."""
+    try:
+        from cost_model import summary_lines
+        return summary_lines()
+    except Exception as exc:
+        return ["비용    모름 — cost_model 실패: %s: %s" % (type(exc).__name__, exc)]
 
 
 def main() -> int:
