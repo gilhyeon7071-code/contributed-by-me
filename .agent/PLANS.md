@@ -51288,3 +51288,21 @@ account_clear_min_scale 바닥                                = 0.25    (applied
 - 기록 파일이 `.gitignore` 에 걸려 커밋이 거부됐다(**검증 도구가 막았다** — 4개만 담기고 조용히 넘어갈 뻔).
   손계산 기록은 런타임 데이터가 아니라 증거이므로 `handcalc_*.json` 만 부정 규칙으로 연다.
   실측 확인: handcalc 는 추적 가능, `daily_log.jsonl`·`input_*.csv`·`target_portfolio_*.csv` 는 그대로 제외
+
+## 562. 가부 기준 8 — 미리 만들 수 있는 증거 2개 생성, 판정기를 증거 4개로 분해 (2026-09-21)
+- 사용자 "8도 미리 만들어둘 수 있나". exec plan 의 증거 4개 중 **1·4 는 지금 가능**, 2·3 은 시각을 기다려야 한다
+- **증거 4 신설** `src/morning_branch_rehearsal.py` — 아침 배치 분기 예행.
+  시험 27건은 `morning()` **함수**를 부른다. 배치가 죽은 이력은 함수가 아니라 **배선**이었다(09-04 "실측 PASS" 가 09-07 까지 미검증).
+  그래서 `daily_ops.main()` 을 **CLI 인자로** 부른다. 설정은 진짜 `config/daily_ops_v1.json`(auto_submit=false)
+  시나리오 **4종**: 없음 / 노출 변경 / **래치 발동 당일(멈춰야 함)** / **래치 다음 거래일(팔아야 함)**
+  — 래치를 한 경우만 보면 "STOP 이 정상인지 고장인지" 를 못 가린다. 결과 PASS, 발주 0건
+- **내가 낸 사고 1건(확인 완료):** 처음에 `import kis_adapter` 를 바꿔치기했는데 daily_ops 는
+  `paper.strategies...src.kis_adapter` 로 import 해서 **다른 모듈 객체**였다 → 예행이 **실계좌 클라이언트로 돌았다.**
+  발주 여부 실측: 오늘 계좌 주문 **2건뿐이고 둘 다 09:20:26/29 카나리아**. 예행(12시대)은 0건.
+  **막아준 것은 내 패치가 아니라 `auto_submit=false` 였다.** `K = D.K` 로 수정 + 패치 확인 assert 추가
+- **판정기 c8 을 증거 4개로 분해.** 종전은 "작업 3종이 기록에 있나" 정도라 기준보다 느슨했다 —
+  느슨한 판정기는 통과를 만들어낼 뿐이다. 각 증거를 따로 PASS/FAIL/UNKNOWN 으로 낸다.
+  **STANDBY 저녁은 증거가 아니다**(휴장이라 안 한 것)
+- 실측: `8 = UNKNOWN` — 1_fixture=PASS(27) / 2_self_run=UNKNOWN(afternoon 아직) / 3_real_evening=UNKNOWN / 4_rehearsal=PASS(4종)
+- 시험 7건 추가(c8 6 + 모듈 객체 함정 1). `.gitignore` 에 `data/evidence/*.json` 부정 규칙
+- 가부 현황 **PASS 4 / FAIL 0 / UNKNOWN 5** (8 은 오늘 15:25·20:20 뒤 재판정)

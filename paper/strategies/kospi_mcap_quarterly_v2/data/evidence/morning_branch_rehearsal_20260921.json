@@ -1,0 +1,81 @@
+{
+  "generated_at": "2026-09-21T11:49:06",
+  "for_date": "20260921",
+  "entry_point": "daily_ops.main() — CLI 인자 경로 (함수 직접 호출 아님)",
+  "ops_config": "E:\\1_Data\\paper\\strategies\\kospi_mcap_quarterly_v2\\config\\daily_ops_v1.json",
+  "client": "SimKIS (가짜). 실계좌 경로는 증거 2(예약 작업 자체 실행)가 덮는다",
+  "not_covered": [
+    "kis_adapter.make_client() 자체",
+    "실제 호가·잔고"
+  ],
+  "scenarios": [
+    {
+      "next_action": "NONE",
+      "label": "할 일 없음",
+      "rc": 0,
+      "status": "OK",
+      "action_taken": "NONE",
+      "reasons": [],
+      "planned_sell": null,
+      "planned_buy": null,
+      "submitted_to_broker": 0,
+      "branch_ok": true,
+      "expected": "OK",
+      "outcome_ok": true,
+      "no_submit_ok": true
+    },
+    {
+      "next_action": "SCALE",
+      "label": "노출 변경",
+      "rc": 0,
+      "status": "OK",
+      "action_taken": "SCALE",
+      "reasons": [
+        "NO_SUBMIT_SHADOW"
+      ],
+      "planned_sell": 0,
+      "planned_buy": 5,
+      "submitted_to_broker": 0,
+      "branch_ok": true,
+      "expected": "OK",
+      "outcome_ok": true,
+      "no_submit_ok": true
+    },
+    {
+      "next_action": "LIQUIDATE",
+      "label": "래치 — 발동 당일(멈춰야 한다)",
+      "rc": 3,
+      "status": "STOP",
+      "action_taken": "LIQUIDATE",
+      "reasons": [
+        "LIQUIDATE_FROM_NEXT_TRADING_DAY:20260921",
+        "NO_SUBMIT_SHADOW"
+      ],
+      "planned_sell": null,
+      "planned_buy": null,
+      "submitted_to_broker": 0,
+      "branch_ok": true,
+      "expected": "STOP",
+      "outcome_ok": true,
+      "no_submit_ok": true
+    },
+    {
+      "next_action": "LIQUIDATE",
+      "label": "래치 — 다음 거래일(팔아야 한다)",
+      "rc": 0,
+      "status": "OK",
+      "action_taken": "LIQUIDATE",
+      "reasons": [
+        "NO_SUBMIT_SHADOW"
+      ],
+      "planned_sell": null,
+      "planned_buy": null,
+      "submitted_to_broker": 0,
+      "branch_ok": true,
+      "expected": "OK",
+      "outcome_ok": true,
+      "no_submit_ok": true
+    }
+  ],
+  "verdict": "PASS"
+}

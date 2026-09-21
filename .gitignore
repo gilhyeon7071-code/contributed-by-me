@@ -66,6 +66,10 @@ paper/strategies/kospi_mcap_quarterly_v2/data/plan_runs/*
 !paper/strategies/kospi_mcap_quarterly_v2/data/plan_runs/*/
 paper/strategies/kospi_mcap_quarterly_v2/data/plan_runs/*/*
 !paper/strategies/kospi_mcap_quarterly_v2/data/plan_runs/*/handcalc_*.json
+# 예행 증거도 같은 이유로 연다 (가부 기준 8 증거 4)
+!paper/strategies/kospi_mcap_quarterly_v2/data/evidence/
+paper/strategies/kospi_mcap_quarterly_v2/data/evidence/*
+!paper/strategies/kospi_mcap_quarterly_v2/data/evidence/*.json
 runs/
 0/
 

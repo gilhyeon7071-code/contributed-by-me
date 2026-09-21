@@ -196,3 +196,56 @@ def test_v41_stale_status_file_is_unknown(tmp_path, monkeypatch):
     r = G.Result(9, "t")
     G.c9_v41_exit_only(NOW, r)
     assert r.status == G.UNKNOWN and "낡" in r.detail
+
+
+# ---------------------------------------------------------------- 기준 8: 증거 4개를 각각 본다 (2026-09-21)
+def _c8(tmp_path, monkeypatch, *, jobs=(), evening_status=None, rehearsal=None, fixture=G.PASS):
+    st = tmp_path / "data" / "state"
+    rows = [{"job": j, "date": "20260921", "run_at": "2026-09-21T10:00:00", "status": "OK"} for j in jobs]
+    if evening_status:
+        rows.append({"job": "evening", "date": "20260921", "run_at": "2026-09-21T20:20:00",
+                     "status": evening_status})
+    st.mkdir(parents=True, exist_ok=True)
+    (st / "daily_log.jsonl").write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+    if rehearsal is not None:
+        _write(tmp_path / "data" / "evidence" / "morning_branch_rehearsal_20260921.json", rehearsal, age_days=0.1)
+    monkeypatch.setattr(G, "_pytest", lambda expr, label: (fixture, f"{label}: 가짜"))
+    return _one(8, tmp_path, monkeypatch)
+
+
+_REH_OK = {"verdict": "PASS", "scenarios": [{"label": "x", "branch_ok": True, "outcome_ok": True,
+                                             "no_submit_ok": True}]}
+
+
+def test_c8_all_four_evidences_pass(tmp_path, monkeypatch):
+    r = _c8(tmp_path, monkeypatch, jobs=("morning", "afternoon"), evening_status="OK", rehearsal=_REH_OK)
+    assert r.status == G.PASS
+
+
+def test_c8_standby_evening_is_not_evidence(tmp_path, monkeypatch):
+    """휴장이라 안 한 것(STANDBY)은 '실제 계좌로 한 번 돌았다' 가 아니다."""
+    r = _c8(tmp_path, monkeypatch, jobs=("morning", "afternoon"), evening_status="STANDBY", rehearsal=_REH_OK)
+    assert r.status == G.UNKNOWN and "3_real_evening_ok=UNKNOWN" in r.detail
+
+
+def test_c8_missing_afternoon_run_is_unknown(tmp_path, monkeypatch):
+    r = _c8(tmp_path, monkeypatch, jobs=("morning",), evening_status="OK", rehearsal=_REH_OK)
+    assert r.status == G.UNKNOWN and "afternoon" in r.detail
+
+
+def test_c8_missing_rehearsal_is_unknown(tmp_path, monkeypatch):
+    r = _c8(tmp_path, monkeypatch, jobs=("morning", "afternoon"), evening_status="OK", rehearsal=None)
+    assert r.status == G.UNKNOWN and "4_branch_rehearsal=UNKNOWN" in r.detail
+
+
+def test_c8_failed_rehearsal_is_fail(tmp_path, monkeypatch):
+    bad = {"verdict": "FAIL", "scenarios": [{"label": "래치", "branch_ok": True, "outcome_ok": False,
+                                             "no_submit_ok": True}]}
+    r = _c8(tmp_path, monkeypatch, jobs=("morning", "afternoon"), evening_status="OK", rehearsal=bad)
+    assert r.status == G.FAIL and "래치" in r.detail
+
+
+def test_c8_fixture_test_failure_is_fail(tmp_path, monkeypatch):
+    r = _c8(tmp_path, monkeypatch, jobs=("morning", "afternoon"), evening_status="OK",
+            rehearsal=_REH_OK, fixture=G.FAIL)
+    assert r.status == G.FAIL

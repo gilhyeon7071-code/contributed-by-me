@@ -276,3 +276,20 @@ def test_afternoon_without_pending_does_nothing(tmp_path):
     rep = D.afternoon(kis, state_dir=st, cfg=CFG, clock=clk, is_market_open=OPEN, next_trading_day=HOL.get,
                       alert=lambda t, lv: None)
     assert rep["action"] == "NONE" and kis.orders == [] and kis.cancels == []
+
+
+def test_rehearsal_patches_the_module_daily_ops_actually_uses():
+    """2026-09-21 실측 함정: `import kis_adapter` 와 daily_ops 의
+    `paper.strategies...src.kis_adapter` 는 **다른 모듈 객체**다.
+    앞엣것을 바꿔치기하면 예행이 조용히 **실계좌 클라이언트**로 돈다(그날 실제로 그랬다).
+    막아준 것은 패치가 아니라 `auto_submit=false` 였다."""
+    import importlib
+    import sys as _sys
+    from pathlib import Path as _P
+    _sys.path.insert(0, str(_P(__file__).resolve().parents[1] / "paper" / "strategies" /
+                             "kospi_mcap_quarterly_v2" / "src"))
+    flat = importlib.import_module("kis_adapter")
+    assert D.K is not flat, "모듈 객체가 같아졌다면 이 함정은 사라진 것 — 시험을 지워도 된다"
+
+    reh = importlib.import_module("morning_branch_rehearsal")
+    assert reh.K is D.K, "예행은 daily_ops 가 들고 있는 모듈을 패치해야 한다"

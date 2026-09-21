@@ -204,19 +204,54 @@ def c7_buying_power(now, r):
 
 # ---------------------------------------------------------------- 기준 8 일일 운용
 def c8_daily_ops(now, r):
+    """[2026-09-21] exec plan 이 적은 증거 **4개를 각각** 본다. 종전 구현은 '작업 3종이 기록에 있나'
+    정도라 기준보다 느슨했다 — 느슨한 판정기는 통과를 만들어낼 뿐이다."""
     log = STATE / "daily_log.jsonl"
+    ev = {}
+    sources = []
+
+    # 증거 1 — 판정기 fixture 시험
+    st1, d1 = _pytest("daily_ops", "판정기 시험")
+    ev["1_fixture_tests"] = (st1, d1)
+
+    # 증거 2 — 예약 작업이 **스스로** 한 번 이상 돈 기록 (세 작업 각각)
     if not log.exists():
-        return r.set(UNKNOWN, f"일일 기록이 없다: {log}")
-    rows = [json.loads(ln) for ln in log.read_text(encoding="utf-8").splitlines() if ln.strip()]
-    jobs = {x.get("job") for x in rows}
-    self_run = [x for x in rows if x.get("run_at")]
-    missing = {"evening", "morning", "afternoon"} - jobs
-    st_test, d_test = _pytest("daily_ops", "판정기 시험")
-    parts = [f"기록 {len(rows)}건", f"직업 {sorted(jobs)}", d_test]
-    if missing or st_test != PASS or not self_run:
-        return r.set(UNKNOWN if missing else (FAIL if st_test == FAIL else UNKNOWN),
-                     f"증거 4개 중 부족: 없는 작업={sorted(missing) or '없음'} / {' / '.join(parts)}", log)
-    return r.set(PASS, " / ".join(parts), log)
+        ev["2_self_run"] = (UNKNOWN, f"일일 기록이 없다: {log}")
+        rows = []
+    else:
+        sources.append(log)
+        rows = [json.loads(ln) for ln in log.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        ran = {x.get("job") for x in rows if x.get("run_at")}
+        missing = {"evening", "morning", "afternoon"} - ran
+        ev["2_self_run"] = ((PASS, f"자체 실행 {sorted(ran)}") if not missing
+                            else (UNKNOWN, f"아직 안 돈 작업 {sorted(missing)}"))
+
+    # 증거 3 — 실제 계좌로 저녁 배치 1회 status OK (STANDBY 는 '휴장이라 안 함' 이라 증거가 아니다)
+    ok_eve = [x for x in rows if x.get("job") == "evening" and x.get("status") == "OK"]
+    ev["3_real_evening_ok"] = ((PASS, f"저녁 OK {ok_eve[-1].get('date')}") if ok_eve
+                               else (UNKNOWN, "저녁 배치 status=OK 기록이 아직 없다"))
+
+    # 증거 4 — 아침 배치 분기 예행(발주 없음)
+    reh = _newest(V2 / "data" / "evidence", "morning_branch_rehearsal_*.json")
+    if not reh:
+        ev["4_branch_rehearsal"] = (UNKNOWN, "분기 예행 증거가 없다")
+    else:
+        sources.append(reh)
+        j = _load(reh)
+        v, age = j.get("verdict"), _age_days(reh, now)
+        if v not in ("PASS", "FAIL"):
+            ev["4_branch_rehearsal"] = (UNKNOWN, "예행 기록에 verdict 가 없다")
+        elif age > 30:
+            ev["4_branch_rehearsal"] = (UNKNOWN, f"예행이 {age:.0f}일 낡았다")
+        else:
+            bad = [s.get("label") for s in j.get("scenarios", [])
+                   if not (s.get("branch_ok") and s.get("outcome_ok") and s.get("no_submit_ok"))]
+            ev["4_branch_rehearsal"] = ((PASS, f"분기 {len(j.get('scenarios', []))}종 통과") if v == "PASS" and not bad
+                                        else (FAIL, f"실패 분기 {bad}"))
+
+    sts = [s for s, _ in ev.values()]
+    overall = FAIL if FAIL in sts else (UNKNOWN if UNKNOWN in sts else PASS)
+    return r.set(overall, " | ".join(f"{k}={s}:{d}" for k, (s, d) in ev.items()), *sources)
 
 
 # ---------------------------------------------------------------- 기준 9 v41.1 청산 전용
