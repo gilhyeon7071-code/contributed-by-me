@@ -51355,3 +51355,27 @@ account_clear_min_scale 바닥                                = 0.25    (applied
 - **남은 것(고치지 않음, 결정 필요):** `rebalance_backtest_sim.py:57`·`rebalance_paper_fill.py:114` 가 편도 **0.179%**(옛 0.358 계열),
   `run_frozen_positive_...:34`·`run_general_stock_...:31` 이 **0.200%**. 바꾸면 **과거 결론의 숫자가 바뀐다** — 임의로 안 바꾼다.
   ③ 의 수수료 실측은 **09-22 실발주 시험**에 이미 일정이 있다(수수료율 실측 -> `fee_pct` 반영)
+
+## 566. 긴급 전량 청산 실배선 — 요청과 집행을 분리 (2026-09-21)
+- 사용자 "진행해". 화면 버튼은 오전에 "하지 않는다" 로만 고쳐뒀던 것을 실제 경로에 연결
+- **설계 원칙: 화면은 주문하지 않는다.** 버튼은 요청 파일만 남기고 집행은 전용 경로가 한다.
+  브라우저에 실주문 권한을 주면 오조작·원격 접근이 곧바로 주문이 된다
+- **기존 청산 경로를 수정하지 않았다.** `run_execution_day.liquidate_after_latch` 는 래치 전용이고
+  **발동 다음 거래일부터**만 파는데, 수동 긴급은 사유도 다르고 즉시여야 한다.
+  게다가 그 함수는 09-22 실발주 시험·09-28 가부의 **검증 대상 코드**다. 대신 같은 모듈(execution·fills·kis_adapter)과
+  같은 주문 ID 계약을 **재사용**한다(import 만 한다)
+- 신설 `src/kill_switch.py` — `request` / `status` / `execute`
+  - **무장 스위치** `daily_ops_v1.json.kill_switch_armed`(기본 **false**). 꺼져 있으면 계획만 하고 보내지 않는다
+  - **멱등** — 요청 하나당 한 번. 두 번 눌러도 주문이 두 번 나가지 않는다
+  - **사유 태그 분리** `rebalance_id = <전략>|KILL|<요청ID>` — 래치 청산·분기 재구성과 원장에서 안 섞인다
+  - 종목마다 **원장과 계좌 중 적은 쪽**만 판다(래치 청산과 같은 규칙), 어긋나면 STOP 으로 크게 남긴다
+- 화면: `POST /api/kill-request` 신설(요청만) + 사이드바 버튼 연결. 문구는 **"아직 매도되지 않았습니다"**,
+  실패 시 **"아무것도 청산되지 않았습니다"**. 라벨 `전량 청산 요청 (무장 시 집행)`
+- **실측 확인:** 개발서버로 실제 POST -> `request_id=KILL-20260921-133059` 기록됨.
+  무장 꺼진 상태 execute -> `status=OK / NOT_ARMED_SHADOW / 보낸 주문 0`
+- **내가 낸 것 2건(처리):** ① 시험 POST 가 **운영 상태 폴더에 진짜 요청 파일을 남겼다** -> 삭제 확인
+  ② Node->Python stdout 이 cp949 라 한글 사유가 깨져 보였다(파일 저장값은 정상). `PYTHONUTF8/PYTHONIOENCODING` 추가 — **개발서버 재기동 후 적용**
+- 시험 `tests/test_kospi_mcap_quarterly_v2_kill_switch.py` 13건 — 무장 전 미발송 / 무장+no-submit / 무장 발송 /
+  멱등 / KILL 태그 / min(원장,계좌) / 청산할 것 없음 / 요청 파일 깨짐 -> STOP / **배포 설정이 꺼짐인지**
+- 전수 **805 passed**, vibe 51 passed, 화면 단정 검사 전부 통과
+- **남은 승인 사항:** `kill_switch_armed=true` 무장. `auto_submit` 과 같은 급이다

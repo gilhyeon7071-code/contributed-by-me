@@ -1,8 +1,9 @@
 {
   "version": "1.0.0",
   "written_at": "2026-09-19",
-  "note": "Daily operation (exec plan 4-2). auto_submit=false = shadow: morning/afternoon plan and log but send no orders. Arming (true) is a user approval item, needed before the 2026-10-01 evening run. sell_wait/poll are Claude proposals: wait up to 180s for SELL orders to finish before planning BUY.",
+  "note": "Daily operation (exec plan 4-2). auto_submit=false = shadow: morning/afternoon plan and log but send no orders. Arming (true) is a user approval item, needed before the 2026-10-01 evening run. sell_wait/poll are Claude proposals: wait up to 180s for SELL orders to finish before planning BUY. kill_switch_armed=false = requests are recorded and planned but no sell orders are sent; arming is a separate user approval (2026-09-21).",
   "auto_submit": false,
   "sell_wait_seconds": 180,
-  "sell_poll_seconds": 10
+  "sell_poll_seconds": 10,
+  "kill_switch_armed": false
 }
