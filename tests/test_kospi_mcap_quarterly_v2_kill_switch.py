@@ -155,3 +155,31 @@ def test_config_default_is_disarmed(armed):
 def test_shipped_config_is_disarmed():
     p = (ROOT / "paper" / "strategies" / "kospi_mcap_quarterly_v2" / "config" / "daily_ops_v1.json")
     assert json.loads(p.read_text(encoding="utf-8")).get("kill_switch_armed") is False
+
+
+# ---------------------------------------------------------------- 인코딩 (2026-09-21)
+def test_reason_b64_survives_the_command_line(tmp_path, capsys):
+    """한글 사유가 Node->Python 명령줄에서 깨졌다(파일 저장값까지 깨짐 = 인자 층).
+    base64 로 받아 인코딩 층을 통째로 건너뛴다."""
+    import base64
+    st = tmp_path / "state"
+    st.mkdir(parents=True)
+    b64 = base64.b64encode("인코딩 확인".encode("utf-8")).decode()
+    rc = KS.main(["request", "--state-dir", str(st), "--reason-b64", b64, "--by", "t"])
+    assert rc == 0
+    assert KS.read_request(st)["reason"] == "인코딩 확인"
+
+
+def test_plain_reason_still_works(tmp_path):
+    st = tmp_path / "state"
+    st.mkdir(parents=True)
+    assert KS.main(["request", "--state-dir", str(st), "--reason", "plain", "--by", "t"]) == 0
+    assert KS.read_request(st)["reason"] == "plain"
+
+
+def test_missing_reason_is_error_not_empty_request(tmp_path):
+    """사유 없이 요청을 남기지 않는다 — 나중에 왜 눌렀는지 알 수 없게 된다."""
+    st = tmp_path / "state"
+    st.mkdir(parents=True)
+    assert KS.main(["request", "--state-dir", str(st), "--by", "t"]) == 2
+    assert not (st / KS.REQUEST).exists()

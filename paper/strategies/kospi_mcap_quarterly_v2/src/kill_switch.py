@@ -153,7 +153,10 @@ def main(argv=None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     rq = sub.add_parser("request")
     rq.add_argument("--state-dir", required=True, type=Path)
-    rq.add_argument("--reason", required=True)
+    rq.add_argument("--reason")
+    # [2026-09-21] 한글 사유가 Node->Python 명령줄에서 깨졌다(파일 저장값까지 깨짐 = 인자 층 문제).
+    #   PYTHONIOENCODING 은 출력 층이라 소용없었다. **인코딩 문제 자체를 없앤다** — base64 로 받는다.
+    rq.add_argument("--reason-b64", help="사유를 base64(utf-8)로. 명령줄 인코딩을 타지 않는다")
     rq.add_argument("--by", default="cli")
     st = sub.add_parser("status")
     st.add_argument("--state-dir", required=True, type=Path)
@@ -166,7 +169,16 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
 
     if a.cmd == "request":
-        print(json.dumps(request(state_dir=a.state_dir, reason=a.reason, by=a.by),
+        if a.reason_b64:
+            import base64
+            reason = base64.b64decode(a.reason_b64).decode("utf-8", errors="replace")
+        elif a.reason:
+            reason = a.reason
+        else:
+            print(json.dumps({"status": "ERROR", "error": "--reason 또는 --reason-b64 가 필요하다"},
+                             ensure_ascii=False))
+            return 2
+        print(json.dumps(request(state_dir=a.state_dir, reason=reason, by=a.by),
                          ensure_ascii=False, indent=2))
         return 0
     if a.cmd == "status":
