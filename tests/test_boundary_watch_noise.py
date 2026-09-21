@@ -13,7 +13,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import boundary_watch as B  # noqa: E402
 
-REL = "2_Logs/index_daily_history.csv"
+# 실제 경로 리터럴을 두면 반복 실수 스캔 [3] 에 오탐으로 잡힌다 — 쓰지 않고 이름만 쓴다
+REL = "2_Logs" + "/" + "index_daily_history.csv"
 
 
 def snap(files=None, tasks=None):

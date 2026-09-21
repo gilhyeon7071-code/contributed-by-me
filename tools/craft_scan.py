@@ -162,6 +162,40 @@ def _bat_bom(files: List[Path]) -> List[Dict[str, Any]]:
     return out
 
 
+# [2026-09-21] 코드에 박힌 자격증명. 2026-06-27 에 들어간 텔레그램 봇 토큰이 **석 달 뒤**
+#   "전수 시험 돌려봐" 요청에서야 나왔다. 추적 중이었고 이 저장소에는 GitHub 원격이 붙어 있다 —
+#   push 한 번이면 공개된다. '누가 보면 걸린다' 에 맡기지 않고 매일 도는 스캔에 넣는다.
+_SECRET_PATTERNS = (
+    (re.compile(r"\b\d{9,10}:AA[A-Za-z0-9_-]{30,}"), "텔레그램 봇 토큰"),
+    (re.compile(r"""(?i)\bapp_?secret\s*[:=]\s*["'][A-Za-z0-9+/=]{30,}"""), "API 시크릿"),
+    (re.compile(r"""(?i)\bapp_?key\s*[:=]\s*["'][A-Za-z0-9]{24,}"""), "API 키"),
+    (re.compile(r"""(?i)\bpassword\s*=\s*["'][^"']{6,}"""), "평문 비밀번호"),
+)
+# 설명·예시는 잡지 않는다. 오탐이 남으면 스캔 전체가 무시된다
+_SECRET_ALLOW = re.compile(r"(?i)dummy|example|sample|your_|xxxx|placeholder|<[a-z_]+>|_SECRET_PATTERNS")
+
+
+def _plaintext_secrets(files: List[Path]) -> List[Dict[str, Any]]:
+    """`.secrets/` 와 백업은 대상이 아니다 — 거기가 정식 보관처다."""
+    out: List[Dict[str, Any]] = []
+    for p in files:
+        rel = str(p.relative_to(ROOT)).replace("\\", "/")
+        if rel.startswith(".secrets/") or rel.startswith("backup/") or "/backup" in rel:
+            continue
+        try:
+            s = io.open(str(p), encoding="utf-8", errors="ignore").read()
+        except Exception:
+            continue
+        for i, line in enumerate(s.splitlines(), 1):
+            if _SECRET_ALLOW.search(line):
+                continue
+            for rx, label in _SECRET_PATTERNS:
+                if rx.search(line):
+                    out.append({"file": rel, "line": i, "text": label})
+                    break
+    return out
+
+
 def scan() -> Dict[str, Any]:
     ctrl: List[Dict[str, Any]] = []
     ortrap: List[Dict[str, Any]] = []
@@ -215,6 +249,7 @@ def scan() -> Dict[str, Any]:
         "dead_package_refs": _dead_pkg_refs(files),
         "bat_arrow_redirects": _bat_arrow_redirects(files),
         "bat_bom": _bat_bom(files),
+        "plaintext_secrets": _plaintext_secrets(files),
     }
 
 
@@ -260,7 +295,11 @@ def main() -> int:
     print("  [6] bat 맨 앞 BOM                     %d건" % n6)
     for x in rep["bat_bom"][:5]:
         print("        %s  %s" % (x["file"], x["text"]))
-    total = n1 + n2 + n3 + n4 + n5 + n6
+    n7 = len(rep["plaintext_secrets"])
+    print("  [7] 코드에 박힌 자격증명              %d건" % n7)
+    for x in rep["plaintext_secrets"][:5]:
+        print("        %s:%s  %s" % (x["file"], x["line"], x["text"]))
+    total = n1 + n2 + n3 + n4 + n5 + n6 + n7
     print("-" * 74)
     if total == 0:
         print("  없음")
