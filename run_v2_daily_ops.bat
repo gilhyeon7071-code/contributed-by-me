@@ -1,14 +1,14 @@
 @echo off
 REM KOSPI_MCAP_QUARTERLY_V2 daily operation (exec plan 4-2, 2026-09-19).
-REM   usage: run_v2_daily_ops.bat evening|morning|afternoon
-REM   evening 20:20 / morning 10:00 / afternoon 15:25, Mon-Fri. Holidays end as STANDBY inside python.
+REM   usage: run_v2_daily_ops.bat evening|morning|afternoon|retry
+REM   evening 20:20 / morning 10:00 / retry 10:30~14:30 (30min) / afternoon 15:25, Mon-Fri. Holidays end as STANDBY inside python.
 REM   Orders are sent only if config\daily_ops_v1.json auto_submit=true (user approval item). Default false = shadow.
 REM   rc: 0 OK/STANDBY, 3 STOP (python already sent the alert), other = crash -> task_fail_alert here.
 REM   Not using run_tool_with_alert.bat: it maps rc=3 to 0, which would hide STOP from the scheduler.
 setlocal
 set "JOB=%~1"
 if "%JOB%"=="" (
-  echo [USAGE] run_v2_daily_ops.bat evening^|morning^|afternoon
+  echo [USAGE] run_v2_daily_ops.bat evening^|morning^|afternoon^|retry
   exit /b 2
 )
 set PYTHONIOENCODING=utf-8

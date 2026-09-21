@@ -338,6 +338,95 @@ def _replay(client: Any, *, state_dir: Path, cfg: Dict[str, Any], today: str, cl
     return out
 
 
+# [2026-09-21] **한 번 막히면 하루를 버리던 것.**
+#   사용자 지적: "매수면 바로바로 가능한 것인데 왜 기다려서 확인하는가 / 그렇게 간 시간이 1년이다".
+#   topn 때 이미 적어둔 교훈을 새 로직이 안 따르고 있었다 —
+#   *"내가 '10:00 발주' 를 제안했던 것도 틀렸다. 발주 시각은 시계가 아니라 **조건**이 정한다"* (PLANS 29274).
+#
+#   주문 생성이 멈추는 사유 셋 중 **둘은 시간이 지나면 풀린다**:
+#     FAIL_EXECUTION_COVERAGE  호가를 못 받은 비중이 한도 초과   -> 호가는 들어온다
+#     BUY_CASH_SHORT           매도 체결이 늦어 현금이 아직 없다  -> 체결되면 생긴다
+#     TARGET_EXPOSURE_MISMATCH 목표 파일이 잘못됐다              -> 재시도해도 같다(영구)
+#
+#   그런데 10:00 에 한 번 막히면 그날은 끝이고 C9 의 "다음 거래일 1회 재주문" 으로 넘어갔다.
+#   10-01 첫 재구성이 이걸로 막히면 **50종목 전량 매수가 하루 날아간다.**
+#
+#   C9 는 그대로 둔다 — 그건 "**체결 안 된 주문**" 이야기다.
+#   여기서 새로 다루는 것은 "**주문을 한 건도 못 보낸 채** 일시적 사유로 멈춘" 경우다. 둘은 다른 상태다.
+TRANSIENT_STOPS = ("FAIL_EXECUTION_COVERAGE", "BUY_CASH_SHORT", "QUOTE_", "WINDOW_CLOSED_MID_RUN")
+PERMANENT_STOPS = ("TARGET_EXPOSURE_MISMATCH", "STALE_ACTION_NOT_EXECUTED",
+                   "LEDGER_EXCEEDS_BROKER_HOLDING", "NOT_MOCK_ACCOUNT")
+
+
+def classify_stop(reasons) -> str:
+    """영구 사유가 하나라도 있으면 재시도하지 않는다 — 같은 실패를 반복하는 것은 소음이다."""
+    rs = [str(x) for x in (reasons or [])]
+    if any(any(k in r for k in PERMANENT_STOPS) for r in rs):
+        return "PERMANENT"
+    if any(any(k in r for k in TRANSIENT_STOPS) for r in rs):
+        return "TRANSIENT"
+    return "UNKNOWN"          # 모르는 사유는 재시도하지 않는다. 사람이 본다
+
+
+def retry(client, *, state_dir: Path, cfg: Dict[str, Any], ops: Dict[str, Any],
+          clock: Callable[[], datetime] = datetime.now, **kw) -> Dict[str, Any]:
+    """아침 작업이 **아무 주문도 못 보낸 채** 일시적 사유로 멈췄으면 같은 날 다시 시도한다.
+
+    안전 장치:
+      - `pending_target.json` 이 있으면 **주문이 이미 나갔다는 뜻**이라 재시도하지 않는다(오후 작업 몫)
+      - 영구·미상 사유는 재시도하지 않는다
+      - 하루 최대 횟수와 마감 시각을 넘지 않는다
+    """
+    now = clock()
+    today = now.strftime("%Y%m%d")
+    state_dir = Path(state_dir)
+    rep: Dict[str, Any] = {"job": "morning_retry", "date": today,
+                           "run_at": now.isoformat(timespec="seconds"),
+                           "status": "STANDBY", "reasons": []}
+
+    rows = [r for r in _log_rows(state_dir) if r.get("date") == today]
+    morning_rows = [r for r in rows if r.get("job") in ("morning", "morning_retry")]
+    if not morning_rows:
+        rep["reasons"] = ["NO_MORNING_RUN_TODAY"]
+        _log(state_dir, rep)
+        return rep
+    last = morning_rows[-1]
+    if last.get("status") != "STOP":
+        rep["reasons"] = [f"NOTHING_TO_RETRY:last={last.get('status')}"]
+        _log(state_dir, rep)
+        return rep
+    if (state_dir / PENDING).exists():
+        rep["reasons"] = ["ORDERS_ALREADY_PLACED"]      # 오후 작업이 마무리한다
+        _log(state_dir, rep)
+        return rep
+
+    kind = classify_stop(last.get("reasons"))
+    rep["stop_kind"] = kind
+    if kind != "TRANSIENT":
+        rep["reasons"] = [f"NOT_RETRYABLE:{kind}:{last.get('reasons')}"]
+        _log(state_dir, rep)
+        return rep
+
+    tried = len([r for r in rows if r.get("job") == "morning_retry" and r.get("retried")])
+    max_tries = int(ops.get("retry_max", 4) or 4)
+    if tried >= max_tries:
+        rep["reasons"] = [f"MAX_RETRIES:{tried}>={max_tries}"]
+        _log(state_dir, rep)
+        return rep
+    until = str(ops.get("retry_until", "14:30"))
+    if now.strftime("%H:%M") > until:
+        rep["reasons"] = [f"AFTER_DEADLINE:{now:%H:%M}>{until}"]
+        _log(state_dir, rep)
+        return rep
+
+    rep["retried"] = True
+    rep["attempt"] = tried + 1
+    rep["reasons"] = [f"RETRY_AFTER_TRANSIENT_STOP:{last.get('reasons')}"]
+    _log(state_dir, rep)
+    res = morning(client, state_dir=state_dir, cfg=cfg, ops=ops, clock=clock, **kw)
+    return {**rep, "status": res["status"], "result": {k: res.get(k) for k in ("status", "reasons", "action")}}
+
+
 def afternoon(client: Any, *, state_dir: Path, cfg: Dict[str, Any], clock: Callable[[], datetime] = datetime.now,
               is_market_open: Callable[[str], bool], next_trading_day: Callable[[str], str],
               alert: Callable[[str, str], None] = _send_alert) -> Dict[str, Any]:
@@ -423,7 +512,7 @@ def set_current(*, state_dir: Path, target_csv: Path, summary_json: Path, clock=
 def main() -> int:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("evening", "morning", "afternoon"):
+    for name in ("evening", "morning", "afternoon", "retry"):
         p = sub.add_parser(name)
         p.add_argument("--state-dir", required=True, type=Path)
     sc = sub.add_parser("set-current")
@@ -457,6 +546,10 @@ def main() -> int:
         import time
         res = morning(client, state_dir=args.state_dir, cfg=cfg, ops=ops, sleep=time.sleep,
                       is_market_open=h.is_market_open, next_trading_day=ntd)
+    elif args.cmd == "retry":
+        import time
+        res = retry(client, state_dir=args.state_dir, cfg=cfg, ops=ops, sleep=time.sleep,
+                    is_market_open=h.is_market_open, next_trading_day=ntd)
     else:
         res = afternoon(client, state_dir=args.state_dir, cfg=cfg, is_market_open=h.is_market_open,
                         next_trading_day=ntd)
