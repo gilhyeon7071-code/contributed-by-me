@@ -1,0 +1,29 @@
+{
+  "_note": "왕복 비용 상수를 **일부러 옛 값으로 둔** 자리. craft_scan [8] 이 여기 적힌 값과 같으면 조용하고, 코드가 바뀌면 다시 운다.",
+  "_why": "이 도구들이 낸 결론의 숫자가 그 비용 위에 서 있다. 상수만 바꾸면 결론과 코드가 어긋난다 — 다시 돌려 결론을 갱신해야 한다. 그건 별도 작업이다.",
+  "_rule": "① 항목마다 `pinned`(현재 코드 값)·`why`·`before_reuse` 가 있어야 인정된다. ② 코드 값이 `pinned` 와 달라지면 예외가 깨지고 다시 경보한다. ③ **이 도구를 다시 쓰기 전에는 비용을 갱신해야 한다** — 낡은 비용은 결과를 낙관적으로 만든다.",
+  "_measured_2026-09-21": "넷 다 배치 배선 0곳, 최근 산출물 2026-07-16 / 2026-07-23, 둘은 산출물 없음 = 잠든 수동 연구 도구",
+  "_updated": "2026-09-22",
+  "exceptions": {
+    "tools/rebalance_backtest_sim.py:57": {
+      "pinned": 0.00179,
+      "why": "11.4년 리밸런싱 백테스트. 편도 0.179%(= 옛 왕복 0.358%/2). 결론 '리밸런싱 vs 지수 CAGR 4.56%' 가 이 값 위에 있다",
+      "before_reuse": "다시 돌리기 전에 왕복을 tools/cost_model.py 재계산값으로 갱신하고 결론도 다시 낸다"
+    },
+    "tools/rebalance_paper_fill.py:114": {
+      "pinned": 0.00179,
+      "why": "위 백테스트의 가상 체결기. 같은 편도 값을 쓴다 — 둘이 어긋나면 백테스트가 자기모순이 된다",
+      "before_reuse": "rebalance_backtest_sim 과 **같이** 갱신한다"
+    },
+    "tools/run_frozen_positive_next_open_cost_validation.py:34": {
+      "pinned": 0.002,
+      "why": "동결 조합의 연구 전용 비용 검증(read-only). 최근 산출물 2026-07-16",
+      "before_reuse": "연구 라운드를 다시 열 때 비용을 먼저 갱신한다"
+    },
+    "tools/run_general_stock_s20_trend_execution_diagnostic.py:31": {
+      "pinned": 0.002,
+      "why": "S20 추세 코호트 진단(read-only). 최근 산출물 2026-07-23",
+      "before_reuse": "같음"
+    }
+  }
+}

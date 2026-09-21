@@ -207,6 +207,25 @@ _COST_ASSIGN = re.compile(
     r"|default\s*=\s*(0\.0\d{1,4})\s*,\s*help\s*=\s*[\"'][^\"']*왕복")
 
 
+COST_EXCEPTIONS = ROOT / "docs" / "references" / "cost_constant_exceptions.json"
+
+
+def _cost_exception(key: str):
+    """`파일:줄` 로 등록된 예외. 없거나 근거가 없으면 None — **모름을 예외로 바꾸지 않는다.**"""
+    if not COST_EXCEPTIONS.is_file():
+        return None
+    try:
+        doc = json.loads(COST_EXCEPTIONS.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return None
+    e = (doc.get("exceptions") or {}).get(key)
+    if not isinstance(e, dict):
+        return None
+    if e.get("pinned") is None or not e.get("why") or not e.get("before_reuse"):
+        return None
+    return e
+
+
 def _cost_constant_drift(files: List[Path]) -> List[Dict[str, Any]]:
     """코드가 **실제로 쓰는** 왕복 비용이 지금 모델과 다른가.
 
@@ -242,9 +261,15 @@ def _cost_constant_drift(files: List[Path]) -> List[Dict[str, Any]]:
             if not mm:
                 continue
             val = float(mm.group(1) or mm.group(2))
-            if 0.001 <= val <= 0.02 and round(val, 5) != cur:
-                out.append({"file": rel, "line": i,
-                            "text": "쓰는 값 %.3f%% (지금 모델 %.3f%%)" % (100 * val, 100 * cur)})
+            if not (0.001 <= val <= 0.02) or round(val, 5) == cur:
+                continue
+            # [2026-09-22] 일부러 옛 값을 둔 자리는 **값을 고정 등록**해 조용히 둔다.
+            #   등록값과 달라지면 예외가 깨지고 다시 운다 — 진짜 드리프트는 계속 잡힌다.
+            ex = _cost_exception(f"{rel}:{i}")
+            if ex is not None and round(float(ex.get("pinned", -1)), 5) == round(val, 5):
+                continue
+            out.append({"file": rel, "line": i,
+                        "text": "쓰는 값 %.3f%% (지금 모델 %.3f%%)" % (100 * val, 100 * cur)})
     return out
 
 

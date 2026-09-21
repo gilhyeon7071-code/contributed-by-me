@@ -5,6 +5,7 @@
 그래서 여기서 볼 것은 "조용한가" 가 아니라 **"넣으면 잡는가"** 다."""
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -109,3 +110,49 @@ def test_drift_ignores_prose(tmp_path, monkeypatch):
 
 def test_drift_ignores_trailing_comment_on_code(tmp_path, monkeypatch):
     assert _drift(tmp_path, monkeypatch, "cost = 0.004   # 예전엔 0.00358 이었다\n") == []
+
+
+# ---------------------------------------------------------------- 비용 상수 예외 등록 (2026-09-22)
+def _exceptions(tmp_path, monkeypatch, doc):
+    p = tmp_path / "cost_constant_exceptions.json"
+    if doc is not None:
+        p.write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(C, "COST_EXCEPTIONS", p)
+
+
+_FULL = {"pinned": 0.00179, "why": "결론이 이 값 위에 있다", "before_reuse": "다시 쓰기 전 갱신"}
+
+
+def test_pinned_exception_is_silent(tmp_path, monkeypatch):
+    _exceptions(tmp_path, monkeypatch, {"exceptions": {"tools/x.py:1": _FULL}})
+    assert _drift(tmp_path, monkeypatch, "cost = 0.00179\n") == []
+
+
+def test_value_change_breaks_the_exception(tmp_path, monkeypatch):
+    """등록값과 달라지면 **다시 운다** — 예외가 드리프트를 영구히 가리면 안 된다."""
+    _exceptions(tmp_path, monkeypatch, {"exceptions": {"tools/x.py:1": _FULL}})
+    hits = _drift(tmp_path, monkeypatch, "cost = 0.0025\n")
+    assert len(hits) == 1
+
+
+def test_exception_without_evidence_is_ignored(tmp_path, monkeypatch):
+    """pinned·why·before_reuse 가 다 있어야 인정된다 — '그냥 빼기' 를 막는다."""
+    for missing in ("pinned", "why", "before_reuse"):
+        doc = {k: v for k, v in _FULL.items() if k != missing}
+        _exceptions(tmp_path, monkeypatch, {"exceptions": {"tools/x.py:1": doc}})
+        assert len(_drift(tmp_path, monkeypatch, "cost = 0.00179\n")) == 1, missing
+
+
+def test_missing_or_broken_registry_does_not_silence(tmp_path, monkeypatch):
+    _exceptions(tmp_path, monkeypatch, None)
+    assert len(_drift(tmp_path, monkeypatch, "cost = 0.00179\n")) == 1
+    (tmp_path / "cost_constant_exceptions.json").write_text("{깨진", encoding="utf-8")
+    assert len(_drift(tmp_path, monkeypatch, "cost = 0.00179\n")) == 1
+
+
+def test_shipped_exceptions_all_have_evidence():
+    p = Path(r"E:\1_Data\docs\references\cost_constant_exceptions.json")
+    doc = json.loads(p.read_text(encoding="utf-8-sig"))
+    assert doc["exceptions"]
+    for k, e in doc["exceptions"].items():
+        assert e.get("pinned") is not None and e.get("why") and e.get("before_reuse"), k

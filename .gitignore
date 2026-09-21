@@ -233,3 +233,6 @@ live/
 state/
 
 virtual_ledger.csv
+
+# [2026-09-22] 매일 갱신되는 롤링 산출물 — 추적하면 매일 저장소가 더러워진다(신선도 감시가 읽을 뿐)
+docs/research/integrity/panel_baseline_check_latest.json
