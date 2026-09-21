@@ -51248,3 +51248,18 @@ account_clear_min_scale 바닥                                = 0.25    (applied
   ② 예약작업 `Running` -> `Ready` 정규화. **`Disabled` 는 그대로 경보**(진짜 경계 변화)
 - 시험 `tests/test_boundary_watch_noise.py` 11건 — 침묵 3(증가/Running/정규화) + **경보 6**(축소·앞부분변경·소멸·Disabled·시각변경·일반파일) + 서명형태 2
 - 격리 실행으로 공유 원장 mtime 불변 확인 -> `--accept` 로 새 기준 승인 -> 재실행 "변화 없음" rc=0
+
+## 560. 전수 시험 요청에서 나온 것 — 평문 봇 토큰 + 수집 지뢰 (2026-09-21)
+- 사용자 "1_Data 시험도 전수 돌려봐" -> `pytest tests/` 743 passed. **그런데 그건 전수가 아니었다**:
+  `tests/` 밖에 `test_*.py` 7개(루트 4 + `tools/` 3). 전부 **pytest 시험이 아니라 이름만 test_ 인 일회용 스크립트**다
+- **결함 1 (심각): 평문 텔레그램 봇 토큰**
+  `tools/test_tg.py:5`, `tools/get_chat_id.py:5` 에 토큰·chat_id 가 박혀 있었다. 둘 다 **git 추적 중**(da30b288, 09-20 내 커밋)
+  이 저장소에는 원격이 있다 — `github.com/gilhyeon7071-code/contributed-by-me.git`
+  **확인: 원격에는 없다**(`origin/main`·`origin/codex/...` 양쪽에서 파일도 토큰 문자열도 0). 현재 브랜치가 원격보다 **71 앞섬** -> push 하면 공개된다
+  조치: `scripts/manual/telegram_secret.py` 신설(환경변수 -> `.secrets/*.txt` 순, 없으면 FAIL). 두 파일이 그것만 읽게 치환. 코드에서 토큰 제거
+  **남은 것(사용자 조치 필요): 봇 토큰 재발급.** 로컬 커밋 이력에는 아직 남아 있고, 06-27 이후 평문으로 디스크에 있었다
+- **결함 2: 수집 지뢰.** 루트에서 인자 없이 `pytest` 를 치면 그 7개가 수집돼 **모듈 수준 코드가 실행된다** —
+  `test_tg.py` 는 실제로 메시지를 발송하고, `test_auto_release.py` 는 장중 루프를 import 한다
+  조치: `pytest.ini` 신설, `testpaths = tests`. 실측: 인자 없이 수집 = 743건, 루트/tools 스크립트 0건
+- **내 이전 주장 정정:** 09-20 "비밀정보 추적 = 0" 은 **파일 이름 패턴만 본 것**이라 틀렸다(내용을 안 봤다).
+  [[feedback_scan_scope_before_claiming_all]] 의 그 자리다

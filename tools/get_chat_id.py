@@ -1,8 +1,12 @@
 import urllib.request
 import json
 import sys
+from pathlib import Path
 
-TOKEN = "8931399277:AAGXaRL1meuMtgS5SC3kajES374xJ8WY-nY"
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "manual"))
+from telegram_secret import bot_token, chat_id  # noqa: E402
+
+TOKEN = bot_token()
 URL = f"https://api.telegram.org/bot{TOKEN}/getUpdates"
 
 try:
