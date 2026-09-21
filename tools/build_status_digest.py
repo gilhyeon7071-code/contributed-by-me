@@ -190,6 +190,18 @@ def section_topn() -> list[str]:
         return []
     out = []
 
+    # [2026-09-21] **종결된 라운드를 진행 중처럼 보이면 안 된다.**
+    #   09-16 종결 / 09-17 보유 전량 청산인데 이 화면은 09-15 자 낡은 산출물을 읽어
+    #   오늘 아침에도 "보유 6/6" 을 띄웠다. 브로커 보유 0 이 정본이다.
+    #   같은 마커를 artifact_freshness_guard 와 broker_ledger_reconcile 은 09-19 에 읽게 고쳤는데
+    #   **이 화면만 빠져 있었다** — 같은 결함의 세 번째 복사본.
+    closed = _json(tp / "ROUND_CLOSED.json")
+    if closed:
+        out.append("하네스  [종결] %s  %s" % (closed.get("round_id", "?"),
+                                              str(closed.get("why") or "")[:60]))
+        out.append("        산출물은 더 갱신되지 않는다(설계된 상태). 브로커 보유 0 이 정본")
+        return out
+
     # 후보 전진 - 이게 멈추면 하네스가 죽은 것이다
     led = tp / "forward_ledger.csv"
     last_sig, ndays = "", 0

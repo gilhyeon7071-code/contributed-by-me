@@ -51306,3 +51306,19 @@ account_clear_min_scale 바닥                                = 0.25    (applied
 - 실측: `8 = UNKNOWN` — 1_fixture=PASS(27) / 2_self_run=UNKNOWN(afternoon 아직) / 3_real_evening=UNKNOWN / 4_rehearsal=PASS(4종)
 - 시험 7건 추가(c8 6 + 모듈 객체 함정 1). `.gitignore` 에 `data/evidence/*.json` 부정 규칙
 - 가부 현황 **PASS 4 / FAIL 0 / UNKNOWN 5** (8 은 오늘 15:25·20:20 뒤 재판정)
+
+## 563. topn 종결이 화면 두 곳에 반영 안 돼 있던 것 (2026-09-21)
+- 사용자 "topn 임시검증로직은 어떻게 되는거지" -> 종결 상태를 대조해 보니 **화면 둘이 진행 중처럼 보이고 있었다**
+- 종결 사실(기록 대조): 09-16 사용자 결정으로 라운드 종결 / 09-17 보유 6종목 전량 청산(101,374,643원) /
+  예약 작업 3개 Disabled / 마커 `2_Logs/topn/ROUND_CLOSED.json`(09-19 작성) — **브로커 보유 0 이 정본**,
+  `topn/positions.csv` 는 09-15 상태로 멈춰 있다
+- **마커를 읽는 곳**: `artifact_freshness_guard.py`, `broker_ledger_reconcile.py` (09-19 수리) — **여기까지였다**
+- **안 읽던 곳 2개(수리):**
+  - `tools/build_status_digest.py` `section_topn` -> 아침 상태판에 오늘도 **"보유 6/6"**. 종결이면 `[종결]` 한 줄 + 정본 안내로 바꾸고 배치 로그 경보도 내린다
+  - `E:\vibe\buffett\tools\build_dashboard_state.py` `_harness_section` -> 현황판 HARNESS 패널의 원천. 종결이면 숫자·경보를 내지 않고 종결 정보만 낸다
+- **화면 자체(사용자 지적 "대시보드 화면에서도 없애야지"):** `E:\vibe\control_center_v2\src\views\LiveStatusView.tsx`
+  `{harness && harness.present && !harness.closed && ...}` — 종결이면 패널을 그리지 않는다. 타입 `HarnessState.closed` 추가.
+  `npx tsc -b` rc=0. 서빙은 `npm run dev`(vite)라 빌드 불필요, 다음 기동/새로고침에 반영
+- 실측: 상태판 `[종결] RD_20260901_topn` / 대시보드 상태 `harness.closed=true`, 경보 3건 유지(topn 관련 0건)
+- 시험 `tests/test_status_digest_topn_closed.py` 5건 — 종결 시 숫자 숨김·배치 경보 없음 + **미종결 시 종전대로 숫자·경보**(감시를 죽이지 않았는지)
+- 교훈: **마커 하나를 읽는 소비처를 전수로 찾아야 한다.** 09-19 에 두 곳만 고치고 닫았고, 화면 두 곳이 이틀 더 거짓을 띄웠다
