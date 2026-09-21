@@ -110,3 +110,50 @@ def test_fixed_watch_skips_not_started_yet(tmp_path, monkeypatch):
     monkeypatch.setattr(G, "evaluate_rolling", lambda cal: [])
     out = G.evaluate({}, Cal())
     assert not any(r["artifact"] == "daily_log.jsonl" for r in out["rows"])
+
+
+# ---------------- 종결 등록부: 근거 있는 것만 내린다 (2026-09-21)
+def _registry(tmp_path, monkeypatch, body):
+    p = tmp_path / "retired_artifacts.json"
+    if body is not None:
+        p.write_text(body, encoding="utf-8")
+    monkeypatch.setattr(G, "RETIRED_REGISTRY", p)
+    return p
+
+
+def test_registered_artifact_is_retired(tmp_path, monkeypatch):
+    _registry(tmp_path, monkeypatch,
+              json.dumps({"artifacts": {"x_latest.json": {"why": "트랙 종결", "retired_at": "2026-09-21"}}}))
+    e = G.retired_entry("x_latest.json")
+    assert e and e["why"] == "트랙 종결"
+
+
+def test_unregistered_artifact_is_not_retired(tmp_path, monkeypatch):
+    _registry(tmp_path, monkeypatch, json.dumps({"artifacts": {"x_latest.json": {"why": "종결"}}}))
+    assert G.retired_entry("other_latest.json") is None
+
+
+def test_missing_registry_does_not_retire_anything(tmp_path, monkeypatch):
+    """등록부가 없다고 전부 종결로 바꾸면 감시가 사라진다."""
+    _registry(tmp_path, monkeypatch, None)
+    assert G.retired_entry("x_latest.json") is None
+
+
+def test_unreadable_registry_does_not_retire(tmp_path, monkeypatch):
+    _registry(tmp_path, monkeypatch, "{깨진")
+    assert G.retired_entry("x_latest.json") is None
+
+
+def test_entry_without_reason_is_ignored(tmp_path, monkeypatch):
+    """근거 없이 이름만 올려두는 것으로는 안 내린다 — '안 쓰는 것 같다' 를 막는다."""
+    _registry(tmp_path, monkeypatch, json.dumps({"artifacts": {"x_latest.json": {"retired_at": "2026-09-21"}}}))
+    assert G.retired_entry("x_latest.json") is None
+
+
+def test_shipped_registry_entries_all_have_evidence():
+    """실제 등록부의 모든 항목에 근거와 되살리는 조건이 적혀 있어야 한다."""
+    p = Path(r"E:\1_Data\docs\references\retired_artifacts.json")
+    doc = json.loads(p.read_text(encoding="utf-8-sig"))
+    assert doc["artifacts"], "빈 등록부"
+    for name, e in doc["artifacts"].items():
+        assert e.get("why") and e.get("evidence") and e.get("revive_if"), f"{name} 근거 부족"

@@ -190,6 +190,29 @@ MAX_AGE_TRADING_DAYS: Dict[str, int] = {
 #   설계된 상태를 매일 경보하면 그 경보는 무시되고, 10-01 부터 나올 진짜 경보가 같이 묻힌다
 #   (topn ROUND_CLOSED 와 같은 형태). 면제는 **증거가 최신일 때만** — 스위치가 풀리면 다시 STALE 로 돌아간다.
 EXIT_ONLY_EXEMPT = {"adaptive_entry_condition_policy_design_latest.json"}
+
+# [2026-09-21] 종결된 트랙의 산출물 등록부. 한 파일이 진실이고 감시·화면이 같이 읽는다.
+# 로그가 아니라 **판단 근거 문서**라 docs/references 에 둔다(2_Logs 는 git 제외 + 보존정책 대상).
+RETIRED_REGISTRY = ROOT / "docs" / "references" / "retired_artifacts.json"
+
+
+def retired_entry(name: str):
+    """등록부에 있으면 그 항목을, 없거나 못 읽으면 None.
+
+    **못 읽었다고 '종결' 로 바꾸지 않는다** — 모름을 설계된 상태로 만들면 감시가 죽는다.
+    """
+    p = RETIRED_REGISTRY
+    if not p.is_file():
+        return None
+    try:
+        doc = json.loads(p.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return None
+    arts = doc.get("artifacts") if isinstance(doc, dict) else None
+    if not isinstance(arts, dict):
+        return None
+    e = arts.get(name)
+    return e if isinstance(e, dict) and e.get("why") else None
 EXIT_ONLY_EVIDENCE = LOG_DIR / "intraday_loop_status_latest.json"
 EXIT_ONLY_EVIDENCE_MAX_TD = 5
 
@@ -560,6 +583,15 @@ def evaluate(refs: Dict[str, Dict[str, Any]], cal) -> Dict[str, Any]:
         else:
             row["status"] = "FRESH"
             row["reason"] = ""
+        # [2026-09-21] 종결된 트랙의 산출물은 갱신되지 않는 것이 정상이다.
+        #   근거는 `2_Logs/retired_artifacts.json` 한 파일에 두고 감시·화면이 같이 읽는다
+        #   (topn ROUND_CLOSED.json 과 같은 형태). 근거 없이 조용히 빼지 않는다.
+        if row["status"] == "STALE":
+            ret = retired_entry(name)
+            if ret:
+                row["status"] = "RETIRED"
+                row["retired_why"] = ret.get("why")
+                row["reason"] = f"종결된 트랙의 산출물이라 갱신되지 않는다(설계된 상태). {ret.get('why', '')}"
         if row["status"] == "STALE" and name in EXIT_ONLY_EXEMPT:
             active, why = exit_only_state(cal, today)
             row["exit_only_check"] = why
@@ -618,8 +650,10 @@ def evaluate(refs: Dict[str, Dict[str, Any]], cal) -> Dict[str, Any]:
             "unspecified_and_old": len(unspec_old),
             "no_calendar": len(pick("NO_CALENDAR")),
             "expected_stale": len(pick("EXPECTED_STALE")),
+            "retired": len(pick("RETIRED")),
         },
         "expected_stale": pick("EXPECTED_STALE"),
+        "retired": pick("RETIRED"),
         "series_counts": {
             "total": len(series_rows),
             "fresh": len(spick("FRESH")),

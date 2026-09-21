@@ -1,0 +1,20 @@
+{
+  "_note": "종결된 트랙의 산출물 등록부. **파일 하나가 진실이고 여러 도구가 그걸 읽는다** — 2026-09-19 topn ROUND_CLOSED.json 과 같은 형태.",
+  "_why": "종결된 트랙의 산출물은 갱신되지 않는 것이 정상인데, 신선도 감시와 화면이 그걸 매일 STALE 로 띄웠다. 매일 우는 경보는 없는 것과 같고, 그 사이 진짜 낡은 것이 묻힌다.",
+  "_rule": "여기 넣으려면 **종결 근거**가 있어야 한다. '안 쓰는 것 같다' 로는 넣지 않는다. 트랙이 되살아나면 여기서 뺀다.",
+  "_updated": "2026-09-21",
+  "artifacts": {
+    "kis_order_dispatch_slicing_preview_latest.json": {
+      "retired_at": "2026-09-21",
+      "why": "생산자 tools/kis_order_dispatch_from_exec.py 는 새 로직에 **가져오면 안 되는 것**으로 분류됐다(주문->체결 순서 역전, 09-16 시험). 부품 대장 C 표.",
+      "evidence": "docs/references/SURGE_NORMAL_PARTS_FOR_NEW_LOGIC_20260919.md C 표 / 소비자는 생산자 자신뿐(전수 grep)",
+      "revive_if": "v41.1 발주 경로를 다시 쓰기로 결정하면"
+    },
+    "surge_event_money_pullback_combined_observation_layer_latest.json": {
+      "retired_at": "2026-09-21",
+      "why": "급등 아이디어가 H009 에서 NOT_SUPPORTED 로 기각됐고 v41.1 은 청산 전용이라 관측층이 갱신되지 않는다.",
+      "evidence": "docs/research/hypotheses/H009_*.md 판정 NOT_SUPPORTED / 2026-09-19 부품 대장 A1 '효과는 작다'",
+      "revive_if": "급등을 새 가설로 다시 등록하면"
+    }
+  }
+}

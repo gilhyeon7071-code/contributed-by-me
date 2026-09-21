@@ -51379,3 +51379,19 @@ account_clear_min_scale 바닥                                = 0.25    (applied
   멱등 / KILL 태그 / min(원장,계좌) / 청산할 것 없음 / 요청 파일 깨짐 -> STOP / **배포 설정이 꺼짐인지**
 - 전수 **805 passed**, vibe 51 passed, 화면 단정 검사 전부 통과
 - **남은 승인 사항:** `kill_switch_armed=true` 무장. `auto_submit` 과 같은 급이다
+
+## 567. 낡은 표시 산출물 — 종결 등록부로 근본 처리 (2026-09-21)
+- 표시경로 STALE 6건의 원인을 갈랐다. **낡은 게 문제가 아니라 생산자가 배치에 없는 것**이 문제였다(배선 0곳 4건)
+- 그중 **둘은 트랙이 이미 종결**된 것이라 갱신되지 않는 게 정상이다:
+  - `kis_order_dispatch_slicing_preview_latest.json` — 생산자 `kis_order_dispatch_from_exec.py` 가
+    부품 대장 C 표의 **"가져오면 안 되는 것"**(주문->체결 순서 역전, 09-16 시험). 소비자는 생산자 자신뿐(전수 grep)
+  - `surge_event_money_pullback_combined_observation_layer_latest.json` — 급등이 **H009 NOT_SUPPORTED 로 기각**
+- **조치:** `docs/references/retired_artifacts.json` 신설(처음 2_Logs 에 뒀다가 옮겼다 — **로그가 아니라 판단 근거 문서**이고 2_Logs 는 git 제외·보존정책 대상이라 사라진다) — topn `ROUND_CLOSED.json` 과 같은 형태로
+  **파일 하나가 진실, 감시·화면이 같이 읽는다.** 신선도 감시가 `RETIRED` 로 분류(위반에서 빠짐)
+- **근거 없이는 못 넣는다:** 항목마다 `why`·`evidence`·`revive_if` 가 있어야 인정된다(시험으로 고정).
+  등록부가 없거나 깨져도 **아무것도 종결로 바꾸지 않는다** — 모름을 설계된 상태로 만들면 감시가 죽는다
+- 실측: 표시경로 STALE **6 -> 4**, `counts.retired=2`. 화면은 감시 산출물을 읽으므로 자동 반영
+- **남은 2건은 근거가 부족해 그대로 둔다(진짜 경보):**
+  `ledger_live_fill_sync`(50일, 생산자는 vibe 수동 도구), `sector_system_diagnostics`(100일, 입력 `sector_ssot` 254일).
+  종결인지 방치인지 **아직 모른다** — 모르는 것을 종결로 적지 않는다
+- 시험 6건 추가(등록 / 미등록 / 등록부 없음 / 깨짐 / 근거 없는 항목 / 배포 등록부 전 항목 근거 확인). 전수 **811 passed**
