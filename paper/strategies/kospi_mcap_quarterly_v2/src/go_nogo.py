@@ -183,9 +183,15 @@ def c5_no_topn_holdings(now, r):
     if not f:
         return r.set(UNKNOWN, why)
     s = _load(f)
+    # [2026-09-21] **실제 산출물로 한 번도 안 돌려보고 만든 키였다.**
+    #   진짜 보고서는 `broker.holdings` / `buying_power.nrcvb_buy_amt` 로 **중첩**돼 있다.
+    #   오늘 처음 실행해 드러났다 — 09-28 까지 몰랐으면 엉뚱한 이유로 NO-GO 가 났을 것이다.
+    #   (fail-closed 라 통과로 새지는 않았다. 그것만은 설계대로였다.)
     holdings = s.get("holdings")
     if holdings is None:
-        return r.set(UNKNOWN, "holdings 키가 없다", f)
+        holdings = (s.get("broker") or {}).get("holdings")
+    if holdings is None:
+        return r.set(UNKNOWN, f"holdings 를 못 찾았다(최상위·broker 둘 다). 키: {list(s)[:6]}", f)
     return r.set(PASS if len(holdings) == 0 else FAIL, f"모의계좌 보유 {len(holdings)}종목", f)
 
 
@@ -194,9 +200,12 @@ def c7_buying_power(now, r):
     if not f:
         return r.set(UNKNOWN, why)
     s = _load(f)
-    v = s.get("nrcvb_buy_amt", s.get("account", {}).get("nrcvb_buy_amt"))
+    v = s.get("nrcvb_buy_amt")
+    for holder in ("buying_power", "account", "broker"):       # 실제 보고서는 buying_power 아래다
+        if v is None:
+            v = (s.get(holder) or {}).get("nrcvb_buy_amt")
     if v is None:
-        return r.set(UNKNOWN, "nrcvb_buy_amt 키가 없다", f)
+        return r.set(UNKNOWN, f"nrcvb_buy_amt 를 못 찾았다. 키: {list(s)[:6]}", f)
     v = float(v)
     return r.set(PASS if v >= STRATEGY_CAPITAL else FAIL,
                  f"nrcvb_buy_amt={v:,.0f} vs 전략자본 {STRATEGY_CAPITAL:,}", f)

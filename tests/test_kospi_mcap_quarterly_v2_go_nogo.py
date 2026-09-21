@@ -249,3 +249,47 @@ def test_c8_fixture_test_failure_is_fail(tmp_path, monkeypatch):
     r = _c8(tmp_path, monkeypatch, jobs=("morning", "afternoon"), evening_status="OK",
             rehearsal=_REH_OK, fixture=G.FAIL)
     assert r.status == G.FAIL
+
+
+# ---------------------------------------------------------------- 실제 산출물 모양 (2026-09-21)
+# 판정기를 **실제 보고서로 한 번도 안 돌려보고** 만들었더니 키가 틀렸다.
+#   진짜 보고서: {"broker": {"holdings": {...}}, "buying_power": {"nrcvb_buy_amt": ...}}
+#   판정기: 최상위에서 찾음 -> 09-28 까지 몰랐으면 엉뚱한 이유로 NO-GO 였다.
+REAL_SHAPE = {
+    "checked_at": "2026-09-21T16:17:58",
+    "broker": {"holdings": {}, "dnca_tot_amt": 104505086, "prvs_rcdl_excc_amt": 104505086},
+    "buying_power": {"nrcvb_buy_amt": 104490256, "ruse_psbl_amt": 0},
+    "status": "OK", "findings": [],
+}
+
+
+def test_real_report_shape_is_read(tmp_path, monkeypatch):
+    monkeypatch.setattr(G, "V2", tmp_path)
+    monkeypatch.setattr(G, "ROOT", tmp_path / "root")
+    _write(tmp_path / "data" / "check_account_20260921_161758.json", REAL_SHAPE, age_days=0.1)
+    r5, r7 = G.Result(5, "t"), G.Result(7, "t")
+    dict((c[0], c[2]) for c in G.CRITERIA)[5](NOW, r5)
+    dict((c[0], c[2]) for c in G.CRITERIA)[7](NOW, r7)
+    assert r5.status == G.PASS and "0종목" in r5.detail
+    assert r7.status == G.PASS and "104,490,256" in r7.detail
+
+
+def test_real_shape_with_holdings_fails(tmp_path, monkeypatch):
+    monkeypatch.setattr(G, "V2", tmp_path)
+    monkeypatch.setattr(G, "ROOT", tmp_path / "root")
+    doc = {**REAL_SHAPE, "broker": {**REAL_SHAPE["broker"], "holdings": {"005930": 5}}}
+    _write(tmp_path / "data" / "check_account_x.json", doc, age_days=0.1)
+    r = G.Result(5, "t")
+    dict((c[0], c[2]) for c in G.CRITERIA)[5](NOW, r)
+    assert r.status == G.FAIL and "1종목" in r.detail
+
+
+def test_unknown_shape_is_unknown_not_pass(tmp_path, monkeypatch):
+    """키를 못 찾으면 **통과가 아니라 모름**이어야 한다 — 그게 오늘 구해준 설계다."""
+    monkeypatch.setattr(G, "V2", tmp_path)
+    monkeypatch.setattr(G, "ROOT", tmp_path / "root")
+    _write(tmp_path / "data" / "check_account_x.json", {"status": "OK", "뭔가": 1}, age_days=0.1)
+    for n in (5, 7):
+        r = G.Result(n, "t")
+        dict((c[0], c[2]) for c in G.CRITERIA)[n](NOW, r)
+        assert r.status == G.UNKNOWN and "못 찾았다" in r.detail
