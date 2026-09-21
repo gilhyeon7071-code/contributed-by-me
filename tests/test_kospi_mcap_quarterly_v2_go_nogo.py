@@ -118,13 +118,35 @@ def test_handcalc_without_record_is_unknown(tmp_path, monkeypatch):
 
 
 def test_handcalc_record_decides(tmp_path, monkeypatch):
+    """[2026-09-21] 판정기가 키를 다시 맞추지 않고 **손계산 도구의 verdict 를 읽는다.**
+    다시 맞추던 종전 구현은 기대값이 요약의 d7 하위에 있는 걸 몰라 10건 전부 불일치로 냈다."""
     run = tmp_path / "data" / "plan_runs" / "20260917_full"
-    _write(run / "target_20260917_summary.json", {"status": "OK", "invest_amount": 28_232_400})
-    _write(run / "handcalc_20260917.json", {"expected": {"invest_amount": 28_232_400}})
+    _write(run / "target_20260917_summary.json", {"status": "OK"}, age_days=0.2)
+    _write(run / "handcalc_20260917.json",
+           {"verdict": "MATCH", "method": "독립 재계산", "mismatches": []})
     assert _one(2, tmp_path, monkeypatch).status == G.PASS
-    _write(run / "handcalc_20260917.json", {"expected": {"invest_amount": 30_000_000}})
+
+    _write(run / "handcalc_20260917.json",
+           {"verdict": "MISMATCH", "method": "독립 재계산",
+            "mismatches": [{"what": "target_qty", "code": "005930", "prod": 47, "hand": 46}]})
     r = _one(2, tmp_path, monkeypatch)
-    assert r.status == G.FAIL and "invest_amount" in r.detail
+    assert r.status == G.FAIL and "005930" in r.detail
+
+
+def test_handcalc_without_verdict_is_unknown(tmp_path, monkeypatch):
+    run = tmp_path / "data" / "plan_runs" / "20260917_full"
+    _write(run / "target_20260917_summary.json", {"status": "OK"}, age_days=0.2)
+    _write(run / "handcalc_20260917.json", {"expected": {"invested": 1}})   # 옛 형태
+    assert _one(2, tmp_path, monkeypatch).status == G.UNKNOWN
+
+
+def test_handcalc_older_than_artifact_is_unknown(tmp_path, monkeypatch):
+    """산출물이 다시 만들어졌는데 대조를 안 했으면, 그 기록은 지금 것이 아니다."""
+    run = tmp_path / "data" / "plan_runs" / "20260917_full"
+    _write(run / "handcalc_20260917.json", {"verdict": "MATCH", "mismatches": []}, age_days=3)
+    _write(run / "target_20260917_summary.json", {"status": "OK"}, age_days=0.1)
+    r = _one(2, tmp_path, monkeypatch)
+    assert r.status == G.UNKNOWN and "오래됐다" in r.detail
 
 
 # ---------------------------------------------------------------- 없는 증거

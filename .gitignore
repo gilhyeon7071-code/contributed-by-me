@@ -56,6 +56,16 @@ paper/strategies/kospi_mcap_quarterly_v2/*
 !paper/strategies/kospi_mcap_quarterly_v2/spec/
 !paper/strategies/kospi_mcap_quarterly_v2/README.md
 paper/strategies/kospi_mcap_quarterly_v2/src/__pycache__/
+# [2026-09-21] 손계산 대조 기록은 런타임 데이터가 아니라 **가부 판정의 증거**다.
+#   기준 2 를 기계가 판정하려면 이 파일이 있어야 하고, 사라지면 UNKNOWN 이 된다.
+#   (디렉터리를 먼저 열어야 부정 규칙이 먹는다)
+!paper/strategies/kospi_mcap_quarterly_v2/data/
+paper/strategies/kospi_mcap_quarterly_v2/data/*
+!paper/strategies/kospi_mcap_quarterly_v2/data/plan_runs/
+paper/strategies/kospi_mcap_quarterly_v2/data/plan_runs/*
+!paper/strategies/kospi_mcap_quarterly_v2/data/plan_runs/*/
+paper/strategies/kospi_mcap_quarterly_v2/data/plan_runs/*/*
+!paper/strategies/kospi_mcap_quarterly_v2/data/plan_runs/*/handcalc_*.json
 runs/
 0/
 

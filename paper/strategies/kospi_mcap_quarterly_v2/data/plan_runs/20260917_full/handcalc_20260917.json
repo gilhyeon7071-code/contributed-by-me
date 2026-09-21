@@ -1,0 +1,26 @@
+{
+  "selection_date": "20260917",
+  "generated_at": "2026-09-21T11:37:12",
+  "method": "spec/D7_target_portfolio.md 의 글만 보고 원자료 input_<날짜>.csv 에서 독립 재계산. src/targets.py 를 import 하지 않는다(순환 방지).",
+  "inputs": {
+    "capital": 60000000.0,
+    "exposure": 1.0,
+    "cost_reserve": 0.005,
+    "cap": 0.2,
+    "n_names": 50
+  },
+  "expected": {
+    "n_names": 50,
+    "cap_rounds": 1,
+    "capped_names": 2,
+    "basket_weight_sum": 1.0,
+    "allocable": 59700000.0,
+    "invested": 57075650.0,
+    "floor_qty_total": 255,
+    "added_qty_total": 17,
+    "top1_code": "005930",
+    "top1_weight": 0.2
+  },
+  "mismatches": [],
+  "verdict": "MATCH"
+}

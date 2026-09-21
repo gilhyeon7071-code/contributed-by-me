@@ -93,10 +93,20 @@ def c2_handcalc(now, r):
         # 기계가 읽을 손계산 대조 기록이 없다. 사람이 맞다고 말한 것은 증거가 아니다
         return r.set(UNKNOWN, f"D7 status={s.get('status')} 이지만 **손계산 대조 기록 파일이 없다** "
                               f"(handcalc_*.json). 사람의 확인은 여기서 증거가 되지 않는다", summ)
+    # [2026-09-21] 대조는 `handcalc_d6_d7.py` 가 이미 했다(원자료에서 독립 재계산 -> CSV·요약 둘 다 대조).
+    #   판정기가 키를 다시 맞춰보면 **여기서만 틀린다** — 실제로 그렇게 틀려서 10건 전부 불일치로 나왔다
+    #   (기대값은 요약의 `d7` 하위에 있는데 최상위에서 찾았다). 그래서 그 도구의 판정을 읽는다.
     h = _load(hand)
-    diffs = [k for k, v in h.get("expected", {}).items() if s.get(k) != v]
-    return r.set(PASS if not diffs else FAIL,
-                 "손계산과 일치" if not diffs else f"불일치 {diffs}", summ, hand)
+    verdict = h.get("verdict")
+    if verdict not in ("MATCH", "MISMATCH"):
+        return r.set(UNKNOWN, f"손계산 기록에 verdict 가 없다: {h.get('__unreadable__') or list(h)[:5]}", hand)
+    # 생산 산출물이 기록보다 새로우면 그 대조는 낡은 것이다
+    if hand.stat().st_mtime + 1 < summ.stat().st_mtime:
+        return r.set(UNKNOWN, "손계산 기록이 D7 산출물보다 오래됐다 — 다시 대조해야 한다", summ, hand)
+    if verdict == "MISMATCH":
+        ms = h.get("mismatches") or []
+        return r.set(FAIL, f"불일치 {len(ms)}건: {json.dumps(ms[:3], ensure_ascii=False)}", summ, hand)
+    return r.set(PASS, f"독립 재계산과 일치 (방법: {str(h.get('method'))[:60]}...)", summ, hand)
 
 
 # ---------------------------------------------------------------- 기준 3·6 실발주 시험
