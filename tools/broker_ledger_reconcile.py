@@ -68,7 +68,13 @@ ERROR_IF_GAP_CODES = 1
 #   -> feedback_reconstruct_arithmetic_not_labels: 라벨을 믿지 말고 근거로 가라.
 EXIT_OWNERS: Dict[str, Dict[str, Any]] = {
     "topn_stage1": {
-        "exit_rule": "보유 13거래일 경과분 전량 매도 (일 1회, 종가 기준)",
+        # [2026-09-21] 라운드 종결됨. 표를 지우지 않는 이유: 과거 귀속을 읽을 때 필요하고,
+        #   포지션이 다시 나타나면(오귀속·수동 매수) 그때 누가 청산하는지가 다시 질문이 된다.
+        #   다만 **지금 살아 있는 것처럼 읽히면 안 된다** — 상태를 명시한다.
+        "closed": True,
+        "closed_note": "2026-09-16 종결 / 09-17 보유 전량 청산 / 예약 3개 Disabled. "
+                       "마커 2_Logs/topn/ROUND_CLOSED.json. 브로커 보유 0 이 정본",
+        "exit_rule": "보유 13거래일 경과분 전량 매도 (일 1회, 종가 기준) — 종결되어 더는 돌지 않는다",
         "stop_loss": False,
         "trailing": False,
         "intraday_watch": False,

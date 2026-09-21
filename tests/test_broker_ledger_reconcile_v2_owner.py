@@ -77,3 +77,25 @@ def test_v2_and_v41_claim_same_code_is_ambiguous(world):
 def test_corrupt_v2_ledger_is_reported_not_silent(world):
     (world["tmp"] / "fills.jsonl").write_text("{not json\n", encoding="utf-8")
     assert B.read_v2_positions()["ok"] is False
+
+
+def test_topn_owner_is_marked_closed():
+    """[2026-09-21] 종결된 라운드가 소유자 표에서 살아 있는 것처럼 읽히면 안 된다.
+    표는 지우지 않는다 — 과거 귀속과 '포지션이 다시 나타나면' 을 위해 남긴다."""
+    e = B.EXIT_OWNERS["topn_stage1"]
+    assert e.get("closed") is True and "ROUND_CLOSED" in e.get("closed_note", "")
+    # 살아 있는 소유자는 표시가 없어야 한다
+    assert not B.EXIT_OWNERS["kospi_mcap_quarterly_v2"].get("closed")
+    assert not B.EXIT_OWNERS["paper_engine_v41_1"].get("closed")
+
+
+def test_closed_round_is_excluded_from_reconcile(tmp_path, monkeypatch):
+    """마커가 있으면 멈춘 positions.csv 를 대조하지 않는다 — '원장에만 6종목' 이 매일 뜨던 자리."""
+    d = tmp_path / "topn"
+    d.mkdir()
+    (d / "positions.csv").write_text("code,qty\n005930,5\n", encoding="utf-8")
+    monkeypatch.setattr(B, "TOPN_POSITIONS", d / "positions.csv")
+    assert B.read_topn_positions()["positions"] == {"005930": 5}      # 마커 없으면 대조한다
+    (d / "ROUND_CLOSED.json").write_text("{}", encoding="utf-8")
+    out = B.read_topn_positions()
+    assert out["positions"] == {} and out.get("closed") is True
