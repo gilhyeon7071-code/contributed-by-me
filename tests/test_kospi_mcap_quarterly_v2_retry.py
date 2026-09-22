@@ -149,3 +149,32 @@ def test_shipped_config_has_bounds():
     p = ROOT / "paper" / "strategies" / "kospi_mcap_quarterly_v2" / "config" / "daily_ops_v1.json"
     d = json.loads(p.read_text(encoding="utf-8"))
     assert d["retry_max"] >= 1 and ":" in str(d["retry_until"])
+
+
+# ------------------------------------------------ 재시도 연쇄의 기록 (2026-09-22 실측)
+def test_retry_chain_judges_the_morning_row_not_its_own(tmp_path):
+    """아침 STOP -> 재시도 한도 소진 뒤에도 사유가 **아침 결과**를 가리켜야 한다.
+
+    종전: morning_retry 줄까지 섞어 마지막 줄로 판정해 'NOTHING_TO_RETRY:last=STANDBY'
+    가 나왔다. 아침은 STOP 이었는데 기록은 STANDBY 였다고 말한 것이다."""
+    rows = [_morning_row(reasons=["BUY_CASH_SHORT:x"])]
+    rows += [{**_morning_row(job="morning_retry", status="RETRYING"), "retried": True} for _ in range(4)]
+    rows.append({**_morning_row(job="morning_retry"), "reasons": ["MAX_RETRIES:4>=4"]})
+    st = _state(tmp_path, rows)
+    called = []
+    rep = _retry(st, called=called)
+    assert rep["reasons"][0].startswith("MAX_RETRIES"), rep["reasons"]
+    assert called == []
+
+
+def test_fired_retry_is_not_recorded_as_standby(tmp_path):
+    """발사한 재시도와 건너뛴 재시도가 기록에서 구분돼야 한다."""
+    st = _state(tmp_path, [_morning_row(reasons=["FAIL_EXECUTION_COVERAGE:0.2"])])
+    _retry(st)
+    fired = D._log_rows(st)[-1]
+    assert fired["status"] == "RETRYING" and fired["retried"] is True
+
+    st2 = _state(tmp_path / "b", [_morning_row(status="OK")])
+    _retry(st2)
+    skipped = D._log_rows(st2)[-1]
+    assert skipped["status"] == "STANDBY" and not skipped.get("retried")

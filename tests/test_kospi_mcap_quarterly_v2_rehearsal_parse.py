@@ -1,0 +1,41 @@
+"""예행의 **판정 경로**가 stdout 잡소리에 무너지지 않는지 (2026-09-22 실측).
+
+배경: 2026-09-22 11:19 에 예행이 FAIL 로 났는데 상태 로그 4개는 전부 정답이었다.
+원인은 분기가 아니라 **판정 방법**이었다 — `json.loads(stdout 전체)` 라서
+stdout 에 한 줄만 섞이면 네 분기가 전부 JSONDecodeError 로 실패했다.
+33회 재실행이 전부 PASS 라 재현이 안 됐다(기계 단위 일회성 출력으로 보인다).
+그래서 여기서는 **잡소리를 직접 넣어** 판정이 버티는지 고정한다.
+"""
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+V2 = Path(__file__).resolve().parents[1] / "paper" / "strategies" / "kospi_mcap_quarterly_v2"
+sys.path.insert(0, str(V2 / "src"))
+import morning_branch_rehearsal as R  # noqa: E402
+
+REP = {"job": "morning", "status": "OK", "action": "NONE", "reasons": []}
+PRETTY = json.dumps(REP, ensure_ascii=False, indent=2)
+
+
+def test_clean_stdout_uses_the_primary_path(tmp_path):
+    rep, note = R._parse_report(PRETTY, tmp_path)
+    assert rep == REP and note is None          # 대체 경로를 조용히 타면 주 경로가 죽은 것이다
+
+
+def test_noise_before_the_report_is_survived(tmp_path):
+    rep, note = R._parse_report("[경고] 캐시를 만들었다\n" + PRETTY, tmp_path)
+    assert rep == REP and "잡소리" in note
+
+
+def test_falls_back_to_daily_log_when_stdout_is_unusable(tmp_path):
+    (tmp_path / "daily_log.jsonl").write_text(json.dumps(REP) + "\n", encoding="utf-8")
+    rep, note = R._parse_report("아무 JSON 도 없다", tmp_path)
+    assert rep == REP and "daily_log" in note
+
+
+def test_no_source_is_reported_not_guessed(tmp_path):
+    rep, note = R._parse_report("", tmp_path)
+    assert rep == {} and "둘 다 못 읽었다" in note

@@ -385,7 +385,10 @@ def retry(client, *, state_dir: Path, cfg: Dict[str, Any], ops: Dict[str, Any],
                            "status": "STANDBY", "reasons": []}
 
     rows = [r for r in _log_rows(state_dir) if r.get("date") == today]
-    morning_rows = [r for r in rows if r.get("job") in ("morning", "morning_retry")]
+    # [2026-09-22 실측] 판정 대상은 **아침 작업의 결과**다. 재시도 자신의 줄을 섞으면
+    #   사유 문장이 "NOTHING_TO_RETRY:last=STANDBY" 로 나와 아침이 STANDBY 였던 것처럼 읽힌다
+    #   (실제 아침은 STOP 이었다). 동작은 같았지만 **기록이 사실과 달랐다.**
+    morning_rows = [r for r in rows if r.get("job") == "morning"]
     if not morning_rows:
         rep["reasons"] = ["NO_MORNING_RUN_TODAY"]
         _log(state_dir, rep)
@@ -421,6 +424,9 @@ def retry(client, *, state_dir: Path, cfg: Dict[str, Any], ops: Dict[str, Any],
 
     rep["retried"] = True
     rep["attempt"] = tried + 1
+    # 결과를 아직 모르는 시점이다. STANDBY(아무것도 안 함)로 적으면 **발사한 재시도와
+    #   건너뛴 재시도가 기록에서 같은 글자**가 된다. 결과는 바로 뒤 morning 줄에 남는다.
+    rep["status"] = "RETRYING"
     rep["reasons"] = [f"RETRY_AFTER_TRANSIENT_STOP:{last.get('reasons')}"]
     _log(state_dir, rep)
     res = morning(client, state_dir=state_dir, cfg=cfg, ops=ops, clock=clock, **kw)

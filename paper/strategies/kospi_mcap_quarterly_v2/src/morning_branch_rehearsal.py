@@ -79,6 +79,36 @@ def _seed(base: Path, action: str, regime, for_date: str, latch_when=None, tag="
     return st
 
 
+def _parse_report(text: str, state_dir: Path) -> tuple:
+    """`main()` 이 찍은 보고서를 꺼낸다. **stdout 전체를 통째로 파싱하지 않는다.**
+
+    [2026-09-22 실측] 종전에는 `json.loads(stdout)` 이었다. 잡소리 한 줄만 섞이면
+      네 분기가 전부 `JSONDecodeError` 로 FAIL 이 됐다 — 실제로 한 번 그렇게 났고
+      상태 로그 4개는 전부 정상이었다(= 분기는 옳았는데 판정이 틀렸다).
+      stdout 은 우리 것만 나오는 통로가 아니다. 그래서 두 겹으로 읽는다.
+    """
+    text = text or ""
+    try:
+        return json.loads(text), None                    # 잡소리가 없으면 이게 정상 경로다
+    except ValueError:
+        pass
+    lines = text.splitlines()                            # 보고서는 여러 줄로 예쁘게 찍힌다.
+    for i in range(len(lines) - 1, -1, -1):              # 마지막 '{' 부터 끝까지 다시 붙여 본다
+        if lines[i].lstrip().startswith("{"):
+            try:
+                return json.loads("\n".join(lines[i:])), "stdout 앞에 잡소리가 섞였다"
+            except ValueError:
+                continue
+    try:                                                 # 그래도 못 읽으면 배치가 남긴 기록에서
+        rows = [json.loads(x) for x in (state_dir / "daily_log.jsonl").read_text(
+            encoding="utf-8").splitlines() if x.strip()]
+        if rows:
+            return rows[-1], "stdout 파싱 실패 — daily_log 마지막 줄로 대체"
+    except OSError:
+        pass
+    return {}, "stdout·daily_log 둘 다 못 읽었다"
+
+
 def _prev_ymd(ymd: str) -> str:
     d = dt.datetime.strptime(ymd, "%Y%m%d") - dt.timedelta(days=1)
     while d.weekday() >= 5:
@@ -100,17 +130,14 @@ def run(out_dir: Path, for_date: str) -> dict:
         argv = sys.argv
         sys.argv = ["daily_ops.py", "morning", "--state-dir", str(st)]
         buf = io.StringIO()
-        rc, rep = None, {}
+        rc, rep, note = None, {}, None
         try:
             with redirect_stdout(buf):
                 rc = D.main()
-            rep = json.loads(buf.getvalue() or "{}")
+            rep, note = _parse_report(buf.getvalue(), st)
         except SystemExit as e:                         # main() 이 SystemExit 로 끝나는 경우
             rc = int(getattr(e, "code", 1) or 0)
-            try:
-                rep = json.loads(buf.getvalue() or "{}")
-            except Exception:
-                rep = {}
+            rep, note = _parse_report(buf.getvalue(), st)
         except Exception as e:                          # 터지면 통과가 아니다
             rep = {"status": "EXCEPTION", "reasons": [f"{type(e).__name__}: {e}"]}
         finally:
@@ -132,6 +159,10 @@ def run(out_dir: Path, for_date: str) -> dict:
             "outcome_ok": (rep.get("status") == "STOP") if want_stop else (rep.get("status") in ("OK", "STANDBY")),
             "no_submit_ok": submitted == 0,
         })
+        if note:                                        # 대체 경로를 썼으면 감추지 않는다
+            results[-1]["report_note"] = note
+        if not results[-1]["branch_ok"] or not results[-1]["outcome_ok"]:
+            results[-1]["stdout_raw"] = buf.getvalue()[-2000:]   # 실패는 진단 가능해야 한다
 
     ok = all(r["branch_ok"] and r["no_submit_ok"] and r["outcome_ok"] for r in results)
     return {
