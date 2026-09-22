@@ -161,6 +161,11 @@ def run(out_dir: Path, for_date: str) -> dict:
         })
         if note:                                        # 대체 경로를 썼으면 감추지 않는다
             results[-1]["report_note"] = note
+            # [2026-09-22] 잡소리는 40회에 1회쯤 나는데 **무엇이 찍었는지는 안 남아** 원인을
+            #   계속 못 본다. 노트만으로는 다음에도 모른다 — 앞머리를 그대로 남긴다.
+            _lines = buf.getvalue().splitlines()
+            _cut = next((k for k, l in enumerate(_lines) if l.lstrip().startswith("{")), len(_lines))
+            results[-1]["stdout_junk"] = _lines[:_cut][-10:]
         if not results[-1]["branch_ok"] or not results[-1]["outcome_ok"]:
             results[-1]["stdout_raw"] = buf.getvalue()[-2000:]   # 실패는 진단 가능해야 한다
 

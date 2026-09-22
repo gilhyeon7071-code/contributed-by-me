@@ -39,3 +39,18 @@ def test_falls_back_to_daily_log_when_stdout_is_unusable(tmp_path):
 def test_no_source_is_reported_not_guessed(tmp_path):
     rep, note = R._parse_report("", tmp_path)
     assert rep == {} and "둘 다 못 읽었다" in note
+
+
+def test_junk_is_recorded_so_the_cause_can_be_found(tmp_path, monkeypatch):
+    """잡소리가 섞이면 **무엇이 찍었는지**를 남긴다.
+
+    [2026-09-22] 노트만 남기던 판으로는 원인을 못 찾았다 — 40회에 1회쯤 나는데
+    그때마다 '섞였다' 만 알고 무엇이 섞였는지는 몰랐다."""
+    import daily_ops as D
+    real = D.main
+    monkeypatch.setattr(D, "main", lambda: (print("[표식] 이 줄이 범인이다"), real())[1])
+    rec = R.run(tmp_path, "20260922")
+    noisy = [s for s in rec["scenarios"] if s.get("report_note")]
+    assert noisy, "잡소리를 넣었는데 알아채지 못했다"
+    assert any("[표식] 이 줄이 범인이다" in j for s in noisy for j in s.get("stdout_junk", []))
+    assert rec["verdict"] == "PASS"          # 잡소리가 판정을 뒤집지 않는다
