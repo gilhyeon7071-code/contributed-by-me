@@ -95,8 +95,16 @@ def test_drift_catches_stale_assignment(tmp_path, monkeypatch):
     assert len(hits) == 1 and "0.358%" in hits[0]["text"]
 
 
+def _current_model():
+    """[2026-09-22] 모델값을 시험에 **박아 쓰면** 기준이 바뀔 때 시험이 깨진다.
+    실제로 비용 기준이 0.400% -> 0.421% 로 바뀌자 이 시험 둘이 깨졌다. 지금 값을 물어본다."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+    from cost_model import model_round_trip
+    return model_round_trip()["round_trip"]
+
+
 def test_drift_is_silent_when_matching(tmp_path, monkeypatch):
-    assert _drift(tmp_path, monkeypatch, "cost = 0.004\n") == []
+    assert _drift(tmp_path, monkeypatch, "cost = %s\n" % _current_model()) == []
 
 
 def test_drift_ignores_prose(tmp_path, monkeypatch):
@@ -109,7 +117,7 @@ def test_drift_ignores_prose(tmp_path, monkeypatch):
 
 
 def test_drift_ignores_trailing_comment_on_code(tmp_path, monkeypatch):
-    assert _drift(tmp_path, monkeypatch, "cost = 0.004   # 예전엔 0.00358 이었다\n") == []
+    assert _drift(tmp_path, monkeypatch, "cost = %s   # 예전엔 0.00358 이었다\n" % _current_model()) == []
 
 
 # ---------------------------------------------------------------- 비용 상수 예외 등록 (2026-09-22)
