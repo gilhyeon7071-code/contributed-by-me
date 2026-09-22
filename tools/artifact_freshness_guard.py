@@ -661,6 +661,9 @@ def evaluate(refs: Dict[str, Dict[str, Any]], cal) -> Dict[str, Any]:
             "missing": len(spick("MISSING")),
             "unspecified": len(spick("UNSPECIFIED")),
             "no_calendar": len(spick("NO_CALENDAR")),
+            # [2026-09-22] 종결은 어느 칸에도 안 들어가 total=1 fresh=0 으로 보였다.
+            #   "하나도 신선하지 않다" 로 읽힌다 — 종결은 종결 칸에 센다.
+            "closed": len(spick("CLOSED")),
         },
         "series_violations": spick("STALE", "MISSING", "NO_CALENDAR"),
         "series_rows": series_rows,
@@ -749,12 +752,17 @@ def main() -> int:
           f"missing={c['missing']} unspecified={c['unspecified']} no_calendar={c['no_calendar']}")
     sc = out["series_counts"]
     print(f"[FRESH_GUARD] 사전등록 시리즈 total={sc['total']} fresh={sc['fresh']} stale={sc['stale']} "
-          f"missing={sc['missing']} unspecified={sc['unspecified']}")
+          f"missing={sc['missing']} unspecified={sc['unspecified']} closed={sc.get('closed', 0)}")
     for r in out["series_rows"]:
-        mark = "OK " if r["status"] == "FRESH" else "!! "
-        extra = (f"latest={r.get('latest_ymd')} ref={r.get('reference_ymd')} lag={r.get('lag_td')} "
-                 f"limit={r.get('limit_td')}" if r.get("kind") == "series"
-                 else f"age_td={r.get('age_trading_days')} limit={r.get('limit_td')}")
+        # **설계된 상태는 경보하지 않는다.** 종결은 `!!` 가 아니라 `-- ` 로 내고 이유를 같이 적는다
+        #   (종전엔 `!! ... CLOSED latest=None ref=None` 이라 이유 없는 경고로 보였다).
+        mark = "OK " if r["status"] == "FRESH" else ("-- " if r["status"] == "CLOSED" else "!! ")
+        if r["status"] == "CLOSED":
+            extra = r.get("reason") or "종결"
+        else:
+            extra = (f"latest={r.get('latest_ymd')} ref={r.get('reference_ymd')} lag={r.get('lag_td')} "
+                     f"limit={r.get('limit_td')}" if r.get("kind") == "series"
+                     else f"age_td={r.get('age_trading_days')} limit={r.get('limit_td')}")
         print(f"  {mark}[사전등록] {r['series']:<40} {r['status']:<12} {extra}")
     for r in out["decision_path_violations"]:
         print(f"  [결정] {r['artifact']:<52} {r['status']:<11} {r['reason']}")

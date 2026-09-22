@@ -164,3 +164,43 @@ def test_shipped_exceptions_all_have_evidence():
     assert doc["exceptions"]
     for k, e in doc["exceptions"].items():
         assert e.get("pinned") is not None and e.get("why") and e.get("before_reuse"), k
+
+
+# ---------------------------------------------------------------- [4] 죽은 패키지 참조 (2026-09-22)
+def test_dead_ref_check_runs_in_script_mode(tmp_path):
+    """`python tools/craft_scan.py` 로 부를 때 **검사가 실제로 돈다.**
+
+    [2026-09-22 실측] sys.path[0] 이 스크립트 폴더(tools/)라 저장소 루트가 경로에 없었고,
+    이 검사는 매번 'paper_engine import 실패 - 확인불가' 로 끝났다(rc=1).
+    embed 실행 때만 통과한 것을 '0건' 으로 읽은 것이 지난 검증의 오류다."""
+    import subprocess
+    root = Path(__file__).resolve().parents[1]
+    probe = tmp_path / "probe.py"
+    probe.write_text(
+        "import sys\n"
+        "sys.path.insert(0, r'%s')\n" % (root / "tools") +
+        "import craft_scan as C\n"
+        "hits = C._dead_pkg_refs([])\n"
+        "print('CONFIRMED' if not hits else hits[0]['text'])\n", encoding="utf-8")
+    out = subprocess.run([sys.executable, str(probe)], cwd=str(tmp_path),
+                         capture_output=True, text=True, encoding="utf-8")
+    assert "CONFIRMED" in out.stdout, out.stdout + out.stderr
+
+
+def _dead(tmp_path, monkeypatch, body):
+    p = tmp_path / "x.py"
+    p.write_text(body, encoding="utf-8")
+    monkeypatch.setattr(C, "ROOT", tmp_path)
+    return C._dead_pkg_refs([p])
+
+
+def test_dead_ref_is_caught(tmp_path, monkeypatch):
+    # 스캐너가 **이 파일 자신을 잡지 않도록** 죽은 이름을 리터럴로 두지 않고 조립한다
+    # (자격증명 시험과 같은 이유 — 오탐이 남으면 스캔 전체가 무시된다).
+    gone = "없는" + "이름"
+    assert len(_dead(tmp_path, monkeypatch, "import paper_engine as pe\ny = pe.%s\n" % gone)) == 1
+    assert len(_dead(tmp_path, monkeypatch, "from paper_engine import %s\n" % gone)) == 1
+
+
+def test_live_ref_is_silent(tmp_path, monkeypatch):
+    assert _dead(tmp_path, monkeypatch, "import paper_engine as pe\nx = pe.config\n") == []

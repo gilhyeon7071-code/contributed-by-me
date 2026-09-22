@@ -85,6 +85,11 @@ def _dead_pkg_refs(files: List[Path]) -> List[Dict[str, Any]]:
     **패키지를 못 불러오면 통과로 접지 않는다.** 확인 못 한 것을 '없음' 으로
     적으면 이 검사가 있는 것이 없는 것보다 나쁘다.
     """
+    # [2026-09-22 실측] 스크립트로 부르면 sys.path[0] 이 **이 파일의 폴더(tools/)** 라
+    #   저장소 루트가 경로에 없다. 그래서 이 검사는 `python tools/craft_scan.py` 로는
+    #   한 번도 돌지 않고 매번 '확인불가' 였다(embed 실행 때만 통과한 것을 '0건' 으로 착각했다).
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
     try:
         import paper_engine as _pe
     except Exception as exc:
