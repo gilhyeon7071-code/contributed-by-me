@@ -2,7 +2,7 @@
   "_note": "종결된 트랙의 산출물 등록부. **파일 하나가 진실이고 여러 도구가 그걸 읽는다** — 2026-09-19 topn ROUND_CLOSED.json 과 같은 형태.",
   "_why": "종결된 트랙의 산출물은 갱신되지 않는 것이 정상인데, 신선도 감시와 화면이 그걸 매일 STALE 로 띄웠다. 매일 우는 경보는 없는 것과 같고, 그 사이 진짜 낡은 것이 묻힌다.",
   "_rule": "여기 넣으려면 **종결 근거**가 있어야 한다. '안 쓰는 것 같다' 로는 넣지 않는다. 트랙이 되살아나면 여기서 뺀다.",
-  "_updated": "2026-09-21",
+  "_updated": "2026-09-22",
   "artifacts": {
     "kis_order_dispatch_slicing_preview_latest.json": {
       "retired_at": "2026-09-21",
@@ -15,6 +15,30 @@
       "why": "급등 아이디어가 H009 에서 NOT_SUPPORTED 로 기각됐고 v41.1 은 청산 전용이라 관측층이 갱신되지 않는다.",
       "evidence": "docs/research/hypotheses/H009_*.md 판정 NOT_SUPPORTED / 2026-09-19 부품 대장 A1 '효과는 작다'",
       "revive_if": "급등을 새 가설로 다시 등록하면"
+    },
+    "ledger_live_fill_sync_latest.json": {
+      "retired_at": "2026-09-22",
+      "why": "v41.1 시대의 '원장에 빠진 실체결 채우기' 도구. 그 역할은 tools/broker_ledger_reconcile.py 가 이어받았다(V2 fills.jsonl 을 원장으로 읽고 소유자까지 판정). v41.1 은 청산 전용이라 새 체결도 없다.",
+      "evidence": "산출물 2026-07-09(396B) / 생산자 sync_ledger_missing_live_fills.py 2026-05-26 / **배치·예약 배선 0곳**(전수 grep) / 2026-09-21 대조 status=MATCH 격차 0",
+      "revive_if": "v41.1 진입을 다시 켜거나, reconcile 이 못 덮는 원장 결손이 나오면"
+    },
+    "sector_system_diagnostics_latest.json": {
+      "retired_at": "2026-09-22",
+      "why": "섹터 진단. 새 로직 V2 의 선정(D6)은 시가총액 순서만 쓰고 섹터를 읽지 않는다. 입력 sector_ssot.csv 도 254일 낡았다.",
+      "evidence": "산출물 2026-04-24 / 생산자 sector_system_diagnostics.py 2026-04-24 / **배선 0곳** / spec/D6_selection.md 에 sector 언급 0건 / V2 에서 sector 를 쓰는 유일한 파일 build_control_set.py 는 H1 연구용이고 다른 모듈이 import 하지 않음",
+      "revive_if": "판단 층이 섹터 축을 쓰기로 하면(그때는 sector_ssot 갱신이 먼저다)"
+    },
+    "pending_entry_status_shadow_latest.json": {
+      "retired_at": "2026-09-22",
+      "why": "**생산자가 없다.** 이 이름을 참조하는 .py 가 신선도 감시 자신 하나뿐이다(정본 pending_entry_status_latest 는 160곳이 쓴다 — 이름이 비슷해 혼동했었다). 갱신 주체가 없는 산출물을 매일 STALE 로 띄우는 것은 경보가 아니라 소음이다.",
+      "evidence": "산출물 2026-08-20 / `grep -rl pending_entry_status_shadow_latest --include=*.py` = 1건(artifact_freshness_guard.py) / 같은 조건으로 정본은 160건",
+      "revive_if": "그림자 진입 상태를 다시 만들기로 하면(그때 생산자부터 만든다)"
+    },
+    "preopen_5min_check_latest.json": {
+      "retired_at": "2026-09-22",
+      "why": "생산자 build_surge_timephase_validation_matrix.py 는 급등 시간대 검증이고, 급등 아이디어는 H009 에서 NOT_SUPPORTED 로 기각됐다. 진입점 run_preopen_5min_check.bat 은 있으나 **예약 작업 0건·배치 배선 0곳** — 한 번도 자동으로 돈 적이 없다.",
+      "evidence": "산출물 2026-08-07 / run_preopen_5min_check.bat 2026-08-24 존재하나 예약 작업 없음 / 배치 배선 0곳(전수 grep)",
+      "revive_if": "개장 전 점검을 새 로직용으로 다시 정의하면(V2 는 일일 운용 3작업이 그 자리다)"
     }
   }
 }

@@ -51456,3 +51456,19 @@ account_clear_min_scale 바닥                                = 0.25    (applied
 - **저장소 정리 2건:** `config/notification_config.json` 은 화면이 LF 로 다시 써서 줄바꿈만 다름(값은 유지) /
   `docs/research/integrity/panel_baseline_check_latest.json` 은 **매일 갱신되는 롤링 산출물**인데 추적 중이라 추적 해제 + ignore(파일 918B 그대로)
 - **[실측] 가부 PASS 7 / FAIL 0 / UNKNOWN 2** — 남은 3·6 은 오늘 실발주 시험
+
+## 571. 개장전 게이트 40일 만에 첫 통과 — 원인은 "생산자가 없는 산출물" (2026-09-22 09:2x)
+- **[실측] 어제 수리 효과 확인:** 게이트 `manual_required 1 -> 0`, blockers 3 -> 2.
+  남은 2 는 `dashboard_overall_pass`(hard) 하나에서 파생 — 대시보드 `status_overall=WARN`
+- **원인은 게이트가 아니라 산출물 4건이었다.** 표시경로 STALE 을 하나씩 추적:
+  - `ledger_live_fill_sync`(2026-07-09) — 역할을 `broker_ledger_reconcile` 이 이어받음(V2 fills 를 원장으로 읽음), v41.1 청산전용이라 새 체결도 없음. 배선 0곳
+  - `sector_system_diagnostics`(2026-04-24) — V2 의 D6 선정은 시총만 쓰고 섹터를 안 읽음(spec 에 sector 0건). 배선 0곳
+  - `pending_entry_status_shadow`(2026-08-20) — **생산자가 없다.** 참조 .py 가 감시 자신 1개뿐
+    (**내가 어제 "배선 72곳" 이라 한 건 `_shadow` 없는 정본을 센 것**이었다. 정본은 160곳, 그림자는 1곳)
+  - `preopen_5min_check`(2026-08-07) — 생산자가 급등 시간대 검증(H009 기각). 진입점 .bat 은 있으나 **예약 0·배선 0**
+- 넷 다 `docs/references/retired_artifacts.json` 에 **근거 3필드**와 함께 등록(총 6건)
+- **[실측] 결과 사슬:** 신선도 STALE 6 -> **0** / 대시보드 `overall=PASS, 경보 0`(처음) /
+  헬스체크 `PASS hard=0` / 자동수리 `PASS` / **게이트 `READY blockers=0 rc=0`** — 2026-08-11 이후 첫 통과
+- **주의:** 게이트가 읽는 것은 08:40/08:50 산출물이라, 고친 뒤에는 **헬스체크 -> 자동수리 -> 게이트 순서로 다시 돌려야** 값이 반영된다
+- **[실측] 오늘 카나리아 09:20 rc=0 `ORDER_OK`** (005930 하한가 1주 접수·취소) — 오늘 실발주 시험의 전제 확인
+- **내가 낸 오독 1건:** 09:19 에 "카나리아가 안 돌았다" 고 볼 뻔했다. `next=09:20`, `missed=0` 이었다. **오늘만 두 번째 시계 오독**
