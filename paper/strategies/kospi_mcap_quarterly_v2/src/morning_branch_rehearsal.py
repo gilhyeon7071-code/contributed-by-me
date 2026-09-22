@@ -19,6 +19,7 @@ import argparse
 import datetime as dt
 import io
 import json
+import os
 import sys
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -117,6 +118,21 @@ def _prev_ymd(ymd: str) -> str:
 
 
 def run(out_dir: Path, for_date: str) -> dict:
+    # [2026-09-22] 예행이 **진짜 경보를 쐈다.** 가짜 래치 시나리오의
+    #   "[V2 아침] LIQUIDATE status=STOP" 이 사용자 휴대폰에 도착했다 — 진짜 청산으로 읽힌다.
+    #   확인하는 행위가 사람을 깨우면 안 된다. 끝나면 **원래대로 되돌린다**(실경보를 막으면 안 된다).
+    _prev_suppress = os.environ.get("V2_SUPPRESS_ALERT")
+    os.environ["V2_SUPPRESS_ALERT"] = "1"
+    try:
+        return _run_scenarios(out_dir, for_date)
+    finally:
+        if _prev_suppress is None:
+            os.environ.pop("V2_SUPPRESS_ALERT", None)
+        else:
+            os.environ["V2_SUPPRESS_ALERT"] = _prev_suppress
+
+
+def _run_scenarios(out_dir: Path, for_date: str) -> dict:
     results = []
     for action, label, regime, latch_when in SCENARIOS:
         tag = f"_{latch_when}" if latch_when else ""
@@ -176,6 +192,7 @@ def run(out_dir: Path, for_date: str) -> dict:
         "entry_point": "daily_ops.main() — CLI 인자 경로 (함수 직접 호출 아님)",
         "ops_config": str(D.DEFAULT_OPS_CFG),
         "client": "SimKIS (가짜). 실계좌 경로는 증거 2(예약 작업 자체 실행)가 덮는다",
+        "alerts_suppressed": True,   # 예행이 사용자에게 가짜 경보를 보내지 않았다는 사실을 남긴다
         "not_covered": ["kis_adapter.make_client() 자체", "실제 호가·잔고"],
         "scenarios": results,
         "verdict": "PASS" if ok else "FAIL",

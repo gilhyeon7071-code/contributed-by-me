@@ -15,8 +15,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import verify_v2_battery as B  # noqa: E402
 
 
-def _stub(monkeypatch, rc: int, out: str):
-    monkeypatch.setattr(B, "_run", lambda *a, **k: (rc, out))
+def _stub(monkeypatch, rc: int, out: str, so: str = None):
+    """_run 은 rc·합친출력·stdout 셋을 낸다(2026-09-22). stdout 을 따로 줄 수 있다."""
+    monkeypatch.setattr(B, "_run", lambda *a, **k: (rc, out, out if so is None else so))
 
 
 def _check(monkeypatch, fn, rc, out):
@@ -67,8 +68,8 @@ def test_timeout_is_not_swallowed(monkeypatch):
         import subprocess
         raise subprocess.TimeoutExpired(cmd, kw.get("timeout", 0))
     monkeypatch.setattr(B.subprocess, "run", fake)
-    rc, out = B._run(["x"], Path("."), 5)
-    assert rc == 124 and "TIMEOUT" in out
+    rc, out, so = B._run(["x"], Path("."), 5)
+    assert rc == 124 and "TIMEOUT" in out and so == ""
 
 
 def test_go_nogo_unknown_is_not_a_pass(monkeypatch):
@@ -106,7 +107,7 @@ def test_schedule_catches_no_next_run(monkeypatch):
 
 def test_skipped_items_are_unknown_not_pass(monkeypatch, tmp_path, capsys):
     """--quick 은 '빨리 통과' 가 아니라 '확인 안 함' 이다."""
-    monkeypatch.setattr(B, "_run", lambda *a, **k: (0, "PASS 9 / FAIL 0 / UNKNOWN 0"))
+    monkeypatch.setattr(B, "_run", lambda *a, **k: (0, "PASS 9 / FAIL 0 / UNKNOWN 0", ""))
     rc = B.main(["--quick", "--only", "pytest", "--json", str(tmp_path / "o.json")])
     out = capsys.readouterr().out
     assert rc == 1 and "UNKNOWN 1" in out and "건너뜀" in out
@@ -117,7 +118,7 @@ def test_runner_missing_is_unknown_not_fail(monkeypatch):
 
     [2026-09-22] `npx` 를 셸 없이 부르지 못해 FileNotFoundError 가 났고
     배터리가 그걸 FAIL 로 적었다 — 타입 오류가 있는 것처럼 읽힌다."""
-    monkeypatch.setattr(B, "_run", lambda *a, **k: (-1, "FileNotFoundError: 없다"))
+    monkeypatch.setattr(B, "_run", lambda *a, **k: (-1, "FileNotFoundError: 없다", ""))
     monkeypatch.setattr(Path, "is_file", lambda self: True)
     it = B.Item("k", "t"); B.c_dashboard_types(it)
     assert it.status == B.UNKNOWN and "돌리지 못했다" in it.detail
@@ -187,3 +188,16 @@ def test_reconcile_no_broker_is_unknown(monkeypatch):
 def test_reconcile_ok_is_pass(monkeypatch):
     monkeypatch.setattr(Path, "is_file", lambda self: True)
     assert _check(monkeypatch, B.c_ledger, 0, "[RECON] status=OK 계좌=mock").status == B.PASS
+
+
+def test_rehearsal_parse_ignores_stderr(monkeypatch):
+    """**배터리도 같은 함정에 빠져 있었다.**
+
+    stdout+stderr 를 합쳐서 JSON 으로 파싱해, 진단 한 줄이 stderr 로 나오자
+    '예행 결과를 못 읽었다' 가 됐다. 보고서를 읽는 쪽은 stdout 만 본다."""
+    import json as _j
+    rec = {"verdict": "PASS", "scenarios": [{"label": "a"}]}
+    body = _j.dumps(rec, ensure_ascii=False, indent=2)
+    _stub(monkeypatch, 0, body + "\n[V2][ALERT_SUPPRESSED] level=error ...", so=body)
+    it = B.Item("k", "t"); B.c_rehearsal(it)
+    assert it.status == B.PASS and "PASS" in it.detail

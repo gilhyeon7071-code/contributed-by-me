@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -50,6 +51,15 @@ def _read(path: Path) -> Optional[Dict[str, Any]]:
 
 def _send_alert(text: str, level: str = "error") -> None:
     """알림 실패가 작업 결과를 바꾸면 안 된다 — 전부 삼킨다."""
+    # [2026-09-22] **예행·검증이 진짜 경보를 쐈다.** 예행의 가짜 래치 시나리오가
+    #   "[V2 아침] LIQUIDATE status=STOP" 을 사용자 휴대폰으로 보냈다 — 진짜 청산으로 읽힌다.
+    #   토큰이 깨져 있던 34시간 동안 404 라 안 보이다가 토큰을 고치자 드러났다.
+    #   기본은 **보낸다**. 끄려면 부르는 쪽이 명시적으로 켠다 — 실경보가 조용해지면 안 된다.
+    #   호출 시점에 읽는다: `alert=` 기본 인자는 정의 시점에 묶여 바꿔치기가 안 먹는다.
+    if str(os.environ.get("V2_SUPPRESS_ALERT", "")).strip() in ("1", "true", "TRUE"):
+        print("[V2][ALERT_SUPPRESSED] level=%s %s" % (level, text.splitlines()[0][:70]),
+              file=sys.stderr)
+        return
     try:
         tools = str(Path(__file__).resolve().parents[4] / "tools")
         if tools not in sys.path:
@@ -58,10 +68,12 @@ def _send_alert(text: str, level: str = "error") -> None:
         res = send_alert(text, level=level, cooldown_sec=600.0)
         if not (res or {}).get("ok"):
             # [2026-09-20] 알림 실패를 조용히 넘기지 않는다. 경보가 3.5개월간 안 간 이력이 있다.
-            #   배치가 stdout 을 2_Logs/v2_daily_*_last.txt 로 받으므로 여기 남기면 남는다.
-            print(f"[V2][ALERT_FAILED] level={level} res={res}")
+            # [2026-09-22] **stderr 로 보낸다.** stdout 은 이 배치의 보고서(JSON) 통로다 —
+            #   여기 섞이면 보고서를 읽는 쪽이 깨진다(예행이 실제로 그렇게 FAIL 났다).
+            #   배치는 `> LOG 2>&1` 이라 stderr 도 같은 로그에 남는다.
+            print(f"[V2][ALERT_FAILED] level={level} res={res}", file=sys.stderr)
     except Exception as exc:
-        print(f"[V2][ALERT_FAILED] level={level} {type(exc).__name__}: {exc}")
+        print(f"[V2][ALERT_FAILED] level={level} {type(exc).__name__}: {exc}", file=sys.stderr)
 
 
 # ---------------------------------------------------------------- 판정 (순수)

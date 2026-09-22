@@ -44,20 +44,29 @@ class Item:
 
 
 def _run(cmd: List[str], cwd: Path, timeout: int = 3000) -> tuple:
-    """rc·출력을 같이 낸다. **타임아웃을 rc 0 으로 접지 않는다.**"""
+    """rc·합친출력·stdout 셋을 낸다. **타임아웃을 rc 0 으로 접지 않는다.**
+
+    [2026-09-22] 종전에는 stdout+stderr 를 합쳐서만 냈다. 그걸 JSON 으로 파싱하던
+      항목이 stderr 가 비어 있을 때만 통했고, 진단 한 줄이 stderr 로 나오자 깨졌다 —
+      예행이 09-22 에 FAIL 났던 것과 **똑같은 결함**을 배터리가 갖고 있었다.
+      보고서를 읽는 쪽은 stdout 만 본다.
+    """
     try:
         p = subprocess.run(cmd, cwd=str(cwd), capture_output=True, timeout=timeout,
                            encoding="utf-8", errors="replace")
-        return p.returncode, (p.stdout or "") + (p.stderr or "")
+        so, se = p.stdout or "", p.stderr or ""
+        return p.returncode, so + se, so
     except subprocess.TimeoutExpired:
-        return 124, "TIMEOUT %ds — 원인이 지워졌다. 따로 다시 돌린다" % timeout
+        m = "TIMEOUT %ds — 원인이 지워졌다. 따로 다시 돌린다" % timeout
+        return 124, m, ""
     except OSError as exc:
-        return -1, "%s: %s" % (type(exc).__name__, exc)
+        m = "%s: %s" % (type(exc).__name__, exc)
+        return -1, m, ""
 
 
 # ---------------------------------------------------------------- 항목들
 def c_pytest(it: Item) -> None:
-    rc, out = _run([PY, "-m", "pytest", "tests", "-q"], ROOT)
+    rc, out, so = _run([PY, "-m", "pytest", "tests", "-q"], ROOT)
     m = re.search(r"(\d+) passed", out)
     fails = re.search(r"(\d+) failed", out)
     if rc == 0 and m and not fails:
@@ -70,7 +79,7 @@ def c_pytest(it: Item) -> None:
 
 def c_craft_scan(it: Item) -> None:
     """**스크립트 모드로 부른다.** embed 로 부르면 [4] 가 통과처럼 보인다(09-22 실측)."""
-    rc, out = _run([PY, str(ROOT / "tools" / "craft_scan.py")], ROOT, 900)
+    rc, out, so = _run([PY, str(ROOT / "tools" / "craft_scan.py")], ROOT, 900)
     hits = re.findall(r"\[(\d)\][^\n]*?(\d+)건", out)
     total = sum(int(n) for _, n in hits)
     if rc == 0 and hits and total == 0:
@@ -83,7 +92,7 @@ def c_craft_scan(it: Item) -> None:
 
 
 def c_freshness(it: Item) -> None:
-    rc, out = _run([PY, str(ROOT / "tools" / "artifact_freshness_guard.py")], ROOT, 900)
+    rc, out, so = _run([PY, str(ROOT / "tools" / "artifact_freshness_guard.py")], ROOT, 900)
     m = re.search(r"total=(\d+) fresh=(\d+) stale=(\d+) missing=(\d+)", out)
     if not m:
         it.status, it.detail = UNKNOWN, "집계 줄을 못 읽었다 rc=%s" % rc
@@ -95,10 +104,10 @@ def c_freshness(it: Item) -> None:
 
 def c_rehearsal(it: Item) -> None:
     out_dir = ROOT / "2_Logs" / "v2_verify_battery" / "rehearsal"
-    rc, out = _run([PY, str(V2 / "src" / "morning_branch_rehearsal.py"),
+    rc, out, so = _run([PY, str(V2 / "src" / "morning_branch_rehearsal.py"),
                     "--out-dir", str(out_dir)], ROOT, 900)
     try:
-        rec = json.loads(out[out.index("{"):])
+        rec = json.loads(so[so.index("{"):])      # **stdout 만** 본다
     except (ValueError, json.JSONDecodeError):
         it.status, it.detail = UNKNOWN, "예행 결과를 못 읽었다 rc=%s" % rc
         return
@@ -110,7 +119,7 @@ def c_rehearsal(it: Item) -> None:
 
 
 def c_go_nogo(it: Item) -> None:
-    rc, out = _run([PY, str(V2 / "src" / "go_nogo.py")], ROOT, 900)
+    rc, out, so = _run([PY, str(V2 / "src" / "go_nogo.py")], ROOT, 900)
     m = re.search(r"PASS (\d+) / FAIL (\d+) / UNKNOWN (\d+)", out)
     if not m:
         it.status, it.detail = UNKNOWN, "판정 줄을 못 읽었다 rc=%s" % rc
@@ -121,7 +130,7 @@ def c_go_nogo(it: Item) -> None:
 
 
 def c_boundary(it: Item) -> None:
-    rc, out = _run([PY, str(ROOT / "tools" / "boundary_watch.py")], ROOT, 900)
+    rc, out, so = _run([PY, str(ROOT / "tools" / "boundary_watch.py")], ROOT, 900)
     it.status = PASS if rc == 0 else FAIL
     it.detail = ("변화 없음" if "변화 없음" in out else out.strip().splitlines()[-1][:90]) if out else "rc=%s" % rc
 
@@ -132,7 +141,7 @@ def c_claims_fire(it: Item) -> None:
     if not script.is_file():
         it.status, it.detail = UNKNOWN, "반증 도구가 없다: %s" % script
         return
-    rc, out = _run(["node", str(script)], VIBE, 1800)
+    rc, out, so = _run(["node", str(script)], VIBE, 1800)
     m = re.search(r"전체 (\d+)건 중 안 우는 것 (\d+)건", out)
     if not m:
         it.status, it.detail = UNKNOWN, "결과 줄을 못 읽었다 rc=%s" % rc
@@ -150,7 +159,7 @@ def c_dashboard_types(it: Item) -> None:
     if not (VIBE / "tsconfig.json").is_file() or not tsc.is_file():
         it.status, it.detail = UNKNOWN, "tsconfig 나 tsc 를 못 찾았다 — 확인 못 함"
         return
-    rc, out = _run(["node", str(tsc), "--noEmit", "-p", "tsconfig.json"], VIBE, 900)
+    rc, out, so = _run(["node", str(tsc), "--noEmit", "-p", "tsconfig.json"], VIBE, 900)
     if rc < 0:                     # 실행 자체가 안 됐다 = 확인 못 한 것이지 고장이 아니다
         it.status, it.detail = UNKNOWN, "돌리지 못했다: %s" % out.strip()[:90]
         return
@@ -164,7 +173,7 @@ def c_schedule(it: Item) -> None:
     ps = (r"Get-ScheduledTask | Where-Object {$_.TaskName -match 'VIBE_V2'} | "
           r"ForEach-Object { $i=$_|Get-ScheduledTaskInfo; "
           r"'{0}|{1}|{2}|{3}' -f $_.TaskName,$_.State,$i.NextRunTime,$_.Actions[0].Arguments }")
-    rc, out = _run(["powershell", "-NoProfile", "-Command", ps], ROOT, 300)
+    rc, out, so = _run(["powershell", "-NoProfile", "-Command", ps], ROOT, 300)
     rows = [l.strip() for l in out.splitlines() if l.strip().startswith("VIBE_V2")]
     if not rows:
         it.status, it.detail = UNKNOWN, "예약 작업을 못 읽었다 rc=%s" % rc
@@ -190,7 +199,7 @@ def c_ledger(it: Item) -> None:
         return
     # [2026-09-22] `--no-alert` 없이 부르면 **검증이 경보를 쏜다.** 확인하는 행위가
     #   사용자를 깨우면 안 되고, 경보 이력도 오염된다.
-    rc, out = _run([PY, str(tool), "--no-alert"], ROOT, 900)
+    rc, out, so = _run([PY, str(tool), "--no-alert"], ROOT, 900)
     m = re.search(r"status=(\w+)", out)
     st = m.group(1) if m else ""
     if rc != 0:
@@ -243,7 +252,7 @@ def c_alert_channel(it: Item) -> None:
 
 def c_cost(it: Item) -> None:
     """판정이 아니라 **표시**. 기준이 바뀌면 배터리에 보여야 한다."""
-    rc, out = _run([PY, str(ROOT / "tools" / "cost_model.py")], ROOT, 300)
+    rc, out, so = _run([PY, str(ROOT / "tools" / "cost_model.py")], ROOT, 300)
     line = next((l for l in out.splitlines() if "왕복(모델)" in l), "")
     it.status = PASS if (rc == 0 and line) else UNKNOWN
     it.detail = line.strip()[:110] or "비용 줄을 못 읽었다"
