@@ -124,9 +124,23 @@ def c3_order_roundtrip(now, r):
     run, rep = _test_run_report(now)
     if not rep:
         return r.set(UNKNOWN, f"실발주 시험 산출물이 없다 (09-22 예정): {TEST_RUNS}")
+    # [2026-09-22] **어제 5·7 과 같은 결함을 3·6 에도 냈다.** 실제 보고서는 `checks` 아래에 있고
+    #   키 이름도 다르다(`order_no_returned`·`ccld_row_matched`·`broker_holding_back_to_start`).
+    #   09-22 실발주가 status=OK·사고 0 으로 끝났는데 판정기가 **FAIL 로 찍었다.**
+    #   판정기를 실제 산출물로 돌려보지 않으면 이런 자리가 남는다 — 두 번째다.
     s = _load(rep)
-    ok = s.get("order_no") and s.get("filled") and s.get("balance_returned")
-    return r.set(PASS if ok else FAIL, f"{run.name}: 주문번호·체결·잔고 = {bool(ok)}", rep)
+    c = s.get("checks") or {}
+    need = ("order_no_returned", "ccld_row_matched", "broker_holding_back_to_start")
+    if s.get("status") is None or not c:
+        return r.set(UNKNOWN, f"{run.name}: 보고서에 status/checks 가 없다. 키: {list(s)[:6]}", rep)
+    missing = [k for k in need if k not in c]
+    if missing:
+        return r.set(UNKNOWN, f"{run.name}: 확인 키가 없다 {missing}", rep)
+    bad = [k for k in need if not c[k]]
+    if s.get("status") != "OK" or s.get("incidents"):
+        return r.set(FAIL, f"{run.name}: status={s.get('status')} 사고={s.get('incidents')}", rep)
+    return r.set(PASS if not bad else FAIL,
+                 (f"{run.name}: 접수·체결·잔고 복귀 전부 확인" if not bad else f"{run.name}: 실패 {bad}"), rep)
 
 
 def c6_cancel_confirmed(now, r):
@@ -134,10 +148,13 @@ def c6_cancel_confirmed(now, r):
     if not rep:
         return r.set(UNKNOWN, "취소 시험 산출물 없음 (09-22 --cancel-test 예정)")
     s = _load(rep)
-    v = s.get("cancel_confirmed_by_query")
+    c = s.get("checks") or {}
+    v = c.get("cancel_confirmed_by_query", s.get("cancel_confirmed_by_query"))
     if v is None:
-        return r.set(UNKNOWN, f"{run.name}: cancel_confirmed_by_query 키가 없다", rep)
-    return r.set(PASS if v else FAIL, f"취소 조회 확인 = {v}", rep)
+        return r.set(UNKNOWN, f"{run.name}: cancel_confirmed_by_query 가 없다(--cancel-test 를 안 했나). "
+                              f"checks 키: {list(c)[:6]}", rep)
+    st = c.get("cancel_final_state", s.get("cancel_final_state"))
+    return r.set(PASS if v else FAIL, f"취소 조회 확인 = {v}, 최종 상태 = {st}", rep)
 
 
 # ---------------------------------------------------------------- 기준 4·8(일부) 시험

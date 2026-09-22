@@ -293,3 +293,65 @@ def test_unknown_shape_is_unknown_not_pass(tmp_path, monkeypatch):
         r = G.Result(n, "t")
         dict((c[0], c[2]) for c in G.CRITERIA)[n](NOW, r)
         assert r.status == G.UNKNOWN and "못 찾았다" in r.detail
+
+
+# ---------------------------------------------------------------- 실발주 보고서 실제 모양 (2026-09-22)
+# 어제 5·7 과 **같은 결함을 3·6 에도** 냈다: 키가 `checks` 아래 중첩인데 최상위에서 찾았다.
+# 09-22 실발주가 status=OK·사고 0 으로 끝났는데 판정기가 FAIL 로 찍었다.
+REAL_TEST_ONE = {
+    "mode": "test-one", "status": "OK", "reasons": [], "no_submit": False, "incidents": [],
+    "checks": {
+        "order_no_returned": True, "ccld_row_matched": True, "balance_prpr_present": True,
+        "broker_holding_back_to_start": True, "same_day_reuse_rise": 55210,
+        "buy_fee_pct_inferred": 0.00010704727921498661,
+        "sell_fee_tax_pct_inferred": 0.002105263157894737,
+        "cancel_confirmed_by_query": True, "cancel_final_state": "CANCELLED_UNFILLED",
+    },
+}
+
+
+def _testrun(tmp_path, monkeypatch, doc, name="test_one_20260922_100634.json"):
+    monkeypatch.setattr(G, "TEST_RUNS", tmp_path / "test_runs")
+    _write(tmp_path / "test_runs" / "20260922" / name, doc, age_days=0.1)
+    out = {}
+    for n in (3, 6):
+        r = G.Result(n, "t")
+        dict((c[0], c[2]) for c in G.CRITERIA)[n](NOW, r)
+        out[n] = r
+    return out
+
+
+def test_real_test_one_shape_passes(tmp_path, monkeypatch):
+    r = _testrun(tmp_path, monkeypatch, REAL_TEST_ONE)
+    assert r[3].status == G.PASS and r[6].status == G.PASS
+    assert "CANCELLED_UNFILLED" in r[6].detail
+
+
+def test_stop_status_is_fail_even_if_checks_true(tmp_path, monkeypatch):
+    """**고쳐서 통과시킨 게 아닌지** 확인하는 자리 — status 가 STOP 이면 체크가 true 여도 FAIL."""
+    doc = {**REAL_TEST_ONE, "status": "STOP", "reasons": ["WINDOW_CLOSED"]}
+    assert _testrun(tmp_path, monkeypatch, doc)[3].status == G.FAIL
+
+
+def test_incident_is_fail(tmp_path, monkeypatch):
+    doc = {**REAL_TEST_ONE, "incidents": [{"code": "OVERFILL"}]}
+    assert _testrun(tmp_path, monkeypatch, doc)[3].status == G.FAIL
+
+
+def test_failed_check_is_fail(tmp_path, monkeypatch):
+    doc = {**REAL_TEST_ONE, "checks": {**REAL_TEST_ONE["checks"], "broker_holding_back_to_start": False}}
+    r = _testrun(tmp_path, monkeypatch, doc)
+    assert r[3].status == G.FAIL and "broker_holding_back_to_start" in r[3].detail
+
+
+def test_cancel_not_confirmed_is_fail(tmp_path, monkeypatch):
+    doc = {**REAL_TEST_ONE, "checks": {**REAL_TEST_ONE["checks"], "cancel_confirmed_by_query": False}}
+    assert _testrun(tmp_path, monkeypatch, doc)[6].status == G.FAIL
+
+
+def test_missing_keys_are_unknown_not_pass(tmp_path, monkeypatch):
+    """--cancel-test 를 안 돌린 보고서를 통과로 읽으면 안 된다."""
+    doc = {**REAL_TEST_ONE, "checks": {"order_no_returned": True, "ccld_row_matched": True,
+                                       "broker_holding_back_to_start": True}}
+    r = _testrun(tmp_path, monkeypatch, doc)
+    assert r[3].status == G.PASS and r[6].status == G.UNKNOWN
