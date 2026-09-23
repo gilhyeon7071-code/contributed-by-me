@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import datetime as dt
 import os
 import shutil
 import sys
@@ -24,6 +25,13 @@ sys.path.insert(0, str(V2 / "src"))
 sys.path.insert(0, str(ROOT / "tools"))
 
 from paper.strategies.kospi_mcap_quarterly_v2.src import daily_ops as D  # noqa: E402
+
+# [2026-09-23] 날짜를 **오늘로** 준다. 예행은 `next_action.for_date` 를 그 날짜로 심는데
+#   `daily_ops` 는 그것을 **오늘과 견준다** — 과거 날짜면 `NO_ACTION_FOR_TODAY` /
+#   `STALE_ACTION_NOT_EXECUTED` 로 막는 것이 **설계대로**다(묵은 지시는 집행하지 않는다).
+#   "20260922" 로 박아두니 09-23 에 3건이 빨갛게 됐다 — 분기는 멀쩡했고 시험이 그날만 통과하는 물건이었다.
+TODAY = dt.datetime.now().strftime("%Y%m%d")
+
 
 
 @pytest.fixture
@@ -63,7 +71,7 @@ def test_other_values_do_not_suppress(transport, monkeypatch, val):
 def test_rehearsal_sends_nothing_and_says_so(transport, tmp_path):
     import morning_branch_rehearsal as R
     shutil.rmtree(tmp_path / "r", ignore_errors=True)
-    rec = R.run(tmp_path / "r", "20260922")
+    rec = R.run(tmp_path / "r", TODAY)
     assert transport == [], "예행이 사용자에게 경보를 보냈다"
     assert rec.get("alerts_suppressed") is True          # 증거에 사실을 남긴다
     assert rec["verdict"] == "PASS"
@@ -73,7 +81,7 @@ def test_rehearsal_restores_the_switch(transport, tmp_path, monkeypatch):
     """예행이 끝난 뒤에도 꺼져 있으면 **그날의 실경보가 전부 사라진다.**"""
     monkeypatch.delenv("V2_SUPPRESS_ALERT", raising=False)
     import morning_branch_rehearsal as R
-    R.run(tmp_path / "r2", "20260922")
+    R.run(tmp_path / "r2", TODAY)
     assert "V2_SUPPRESS_ALERT" not in os.environ
     D._send_alert("예행 뒤의 진짜 사고", level="error")
     assert transport == ["error"]
@@ -82,7 +90,7 @@ def test_rehearsal_restores_the_switch(transport, tmp_path, monkeypatch):
 def test_preexisting_switch_value_is_restored(transport, tmp_path, monkeypatch):
     monkeypatch.setenv("V2_SUPPRESS_ALERT", "1")
     import morning_branch_rehearsal as R
-    R.run(tmp_path / "r3", "20260922")
+    R.run(tmp_path / "r3", TODAY)
     assert os.environ.get("V2_SUPPRESS_ALERT") == "1"
 
 
@@ -116,6 +124,6 @@ def test_alert_failure_does_not_break_the_rehearsal(tmp_path, monkeypatch):
     monkeypatch.delenv("V2_SUPPRESS_ALERT", raising=False)
     monkeypatch.setattr(N, "send_alert", lambda *a, **k: {"ok": False, "why": "일부러 실패"})
     import morning_branch_rehearsal as R
-    rec = R.run(tmp_path / "boom", "20260922")
+    rec = R.run(tmp_path / "boom", TODAY)
     assert rec["verdict"] == "PASS"
     assert not [s for s in rec["scenarios"] if s.get("report_note")], "보고서 통로가 오염됐다"

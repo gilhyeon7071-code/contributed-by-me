@@ -8,6 +8,7 @@ stdout 에 한 줄만 섞이면 네 분기가 전부 JSONDecodeError 로 실패�
 """
 from __future__ import annotations
 
+import datetime as dt
 import json
 import sys
 from pathlib import Path
@@ -19,6 +20,13 @@ import morning_branch_rehearsal as R  # noqa: E402
 REP = {"job": "morning", "status": "OK", "action": "NONE", "reasons": []}
 PRETTY = json.dumps(REP, ensure_ascii=False, indent=2)
 
+
+
+# [2026-09-23] 날짜를 **오늘로** 준다. 예행은 `next_action.for_date` 를 그 날짜로 심는데
+#   `daily_ops` 는 그것을 **오늘과 견준다** — 과거 날짜면 `NO_ACTION_FOR_TODAY` /
+#   `STALE_ACTION_NOT_EXECUTED` 로 막는 것이 **설계대로**다(묵은 지시는 집행하지 않는다).
+#   "20260922" 로 박아두니 09-23 에 3건이 빨갛게 됐다 — 분기는 멀쩡했고 시험이 그날만 통과하는 물건이었다.
+TODAY = dt.datetime.now().strftime("%Y%m%d")
 
 def test_clean_stdout_uses_the_primary_path(tmp_path):
     rep, note = R._parse_report(PRETTY, tmp_path)
@@ -49,7 +57,7 @@ def test_junk_is_recorded_so_the_cause_can_be_found(tmp_path, monkeypatch):
     import daily_ops as D
     real = D.main
     monkeypatch.setattr(D, "main", lambda: (print("[표식] 이 줄이 범인이다"), real())[1])
-    rec = R.run(tmp_path, "20260922")
+    rec = R.run(tmp_path, TODAY)
     noisy = [s for s in rec["scenarios"] if s.get("report_note")]
     assert noisy, "잡소리를 넣었는데 알아채지 못했다"
     assert any("[표식] 이 줄이 범인이다" in j for s in noisy for j in s.get("stdout_junk", []))
